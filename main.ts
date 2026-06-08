@@ -246,7 +246,7 @@ export default class JournalPartnerPlugin extends Plugin {
       },
     );
 
-    return [viewPlugin, readonlyFilter, this.createEnterKeymap()];
+    return [viewPlugin, readonlyFilter, this.createEnterKeymap(), this.createTabKeymap()];
   }
 
   /**
@@ -315,6 +315,90 @@ export default class JournalPartnerPlugin extends Plugin {
               state.update({
                 changes: { from: cursor.from, to: cursor.to, insert: insertion },
                 selection: { anchor: cursor.from + insertion.length },
+                scrollIntoView: true,
+              }),
+            );
+
+            return true;
+          },
+        },
+      ]),
+    );
+  }
+
+  /**
+   * Returns a high-priority keymap extension that intercepts Tab inside the
+   * target section.
+   *
+   * When Tab is pressed on a top-level item (no indentation):
+   * - Remove the timestamp from the current line
+   * - Insert Tab indentation (let Obsidian handle it)
+   */
+  private createTabKeymap(): Extension {
+    const plugin = this;
+
+    return Prec.high(
+      keymap.of([
+        {
+          key: 'Tab',
+          run(view: EditorView): boolean {
+            const state = view.state;
+            const doc = state.doc.toString();
+            const section = findSection(
+              doc,
+              plugin.settings.targetHeading,
+              plugin.settings.headingLevel,
+            );
+            if (!section) return false;
+
+            const cursor = state.selection.main;
+            // Only act when the cursor is inside the journal section
+            if (cursor.head < section.from || cursor.head > section.to) {
+              return false;
+            }
+
+            const line = state.doc.lineAt(cursor.head);
+
+            // Check if this is a top-level item (no indentation)
+            const indentMatch = line.text.match(/^(\s*)/);
+            const currentIndent = indentMatch?.[1] ?? '';
+            const isTopLevel = currentIndent.length === 0;
+
+            if (!isTopLevel) {
+              // Only process top-level items; let Obsidian handle indentation for nested items
+              return false;
+            }
+
+            // Find timestamp on this line
+            const timestampMatch = line.text.match(
+              new RegExp(`^([-*+]\\s+)(${plugin.settings.timestampPattern})\\s+`),
+            );
+
+            if (!timestampMatch) {
+              // No timestamp found, let Obsidian handle Tab normally
+              return false;
+            }
+
+            // Calculate positions of the timestamp to remove
+            const markerAndSpace = timestampMatch[1]; // e.g., "- "
+            const timestampText = timestampMatch[2]; // e.g., "06:42"
+
+            // The timestamp to delete starts after the marker+space and extends through the timestamp + space
+            const deleteStart = line.from + markerAndSpace.length;
+            const deleteEnd = deleteStart + timestampText.length + 1; // +1 for the space after timestamp
+
+            // Create a new transaction that:
+            // 1. Deletes the timestamp and space
+            // 2. Inserts a Tab for indentation
+            const changes = [
+              { from: deleteStart, to: deleteEnd, insert: '' }, // Remove timestamp
+              { from: cursor.from, to: cursor.to, insert: '\t' }, // Insert Tab
+            ];
+
+            view.dispatch(
+              state.update({
+                changes,
+                selection: { anchor: cursor.from + 1 }, // Move cursor after Tab
                 scrollIntoView: true,
               }),
             );
