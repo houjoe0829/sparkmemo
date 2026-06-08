@@ -251,7 +251,10 @@ export default class JournalPartnerPlugin extends Plugin {
 
   /**
    * Returns a high-priority keymap extension that intercepts Enter inside the
-   * target section and prepends a fresh timestamp to the newly created line.
+   * target section.
+   *
+   * For top-level items (no indentation): inserts a fresh timestamp on the new line.
+   * For nested items (indented): only preserves indentation and marker, no timestamp.
    */
   private createEnterKeymap(): Extension {
     const plugin = this;
@@ -282,13 +285,31 @@ export default class JournalPartnerPlugin extends Plugin {
               return false;
             }
 
-            // Detect the list marker used on the current line (-, *, +)
             const line = state.doc.lineAt(cursor.head);
-            const markerMatch = line.text.match(/^([-*+]\s+)/);
+
+            // Detect indentation (nesting level)
+            const indentMatch = line.text.match(/^(\s*)/);
+            const currentIndent = indentMatch?.[1] ?? '';
+            const isNested = currentIndent.length > 0;
+
+            // Detect the list marker used on the current line (-, *, +)
+            // Support both indented and non-indented lines
+            const markerMatch = line.text.match(/^\s*([-*+]\s+)/);
             const listMarker = markerMatch ? markerMatch[1] : '';
 
-            const ts = generateTimestamp();
-            const insertion = '\n' + listMarker + ts + ' ';
+            // If no marker is found, don't handle this line
+            if (!listMarker) return false;
+
+            let insertion: string;
+
+            if (isNested) {
+              // Nested item: preserve indentation and marker, but no timestamp
+              insertion = '\n' + currentIndent + listMarker;
+            } else {
+              // Top-level item: insert timestamp
+              const ts = generateTimestamp();
+              insertion = '\n' + listMarker + ts + ' ';
+            }
 
             view.dispatch(
               state.update({
