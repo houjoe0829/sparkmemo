@@ -382,23 +382,27 @@ export default class JournalPartnerPlugin extends Plugin {
             // Calculate positions of the timestamp to remove
             const markerAndSpace = timestampMatch[1]; // e.g., "- "
             const timestampText = timestampMatch[2]; // e.g., "06:42"
+            const spaceAfterTimestamp = 1; // One space after timestamp
 
-            // The timestamp to delete starts after the marker+space and extends through the timestamp + space
+            // The timestamp block to delete: starts after marker+space, includes timestamp and trailing space
             const deleteStart = line.from + markerAndSpace.length;
-            const deleteEnd = deleteStart + timestampText.length + 1; // +1 for the space after timestamp
+            const deleteEnd = deleteStart + timestampText.length + spaceAfterTimestamp;
+
+            // After deleting the timestamp block, insert Tab at the same position
+            // to move the remaining text to the next indentation level
+            const tabInsertPos = deleteStart;
 
             // Create a new transaction that:
             // 1. Deletes the timestamp and space
-            // 2. Inserts a Tab for indentation
+            // 2. Inserts a Tab for indentation at that position
             const changes = [
-              { from: deleteStart, to: deleteEnd, insert: '' }, // Remove timestamp
-              { from: cursor.from, to: cursor.to, insert: '\t' }, // Insert Tab
+              { from: deleteStart, to: deleteEnd, insert: '\t' }, // Replace timestamp with Tab
             ];
 
             view.dispatch(
               state.update({
                 changes,
-                selection: { anchor: cursor.from + 1 }, // Move cursor after Tab
+                selection: { anchor: tabInsertPos + 1 }, // Move cursor after the Tab
                 scrollIntoView: true,
               }),
             );
