@@ -379,30 +379,33 @@ export default class JournalPartnerPlugin extends Plugin {
               return false;
             }
 
-            // Calculate positions of the timestamp to remove
+            // Calculate positions:
+            // We need to indent the entire line AND delete the timestamp
+            // The cleanest way is to replace the entire line prefix (Tab + marker + space)
+            // while keeping the rest of the content
             const markerAndSpace = timestampMatch[1]; // e.g., "- "
             const timestampText = timestampMatch[2]; // e.g., "06:42"
-            const spaceAfterTimestamp = 1; // One space after timestamp
 
-            // The timestamp block to delete: starts after marker+space, includes timestamp and trailing space
-            const deleteStart = line.from + markerAndSpace.length;
-            const deleteEnd = deleteStart + timestampText.length + spaceAfterTimestamp;
+            // Find what comes after the timestamp and space
+            const afterTimestampMatch = line.text.match(
+              new RegExp(`^([-*+]\\s+)(${plugin.settings.timestampPattern})\\s+(.*)`),
+            );
+            const contentAfterTimestamp = afterTimestampMatch?.[3] ?? ''; // e.g., "任务"
 
-            // After deleting the timestamp block, insert Tab at the same position
-            // to move the remaining text to the next indentation level
-            const tabInsertPos = deleteStart;
+            // Build the new line: Tab + marker + space + content
+            const newLinePrefix = '\t' + markerAndSpace + contentAfterTimestamp;
 
-            // Create a new transaction that:
-            // 1. Deletes the timestamp and space
-            // 2. Inserts a Tab for indentation at that position
+            // Replace from line start to end of the content after timestamp
+            const replaceEnd = line.from + markerAndSpace.length + timestampText.length + 1 + contentAfterTimestamp.length;
+
             const changes = [
-              { from: deleteStart, to: deleteEnd, insert: '\t' }, // Replace timestamp with Tab
+              { from: line.from, to: replaceEnd, insert: newLinePrefix },
             ];
 
             view.dispatch(
               state.update({
                 changes,
-                selection: { anchor: tabInsertPos + 1 }, // Move cursor after the Tab
+                selection: { anchor: line.from + 1 + markerAndSpace.length }, // Cursor after "- "
                 scrollIntoView: true,
               }),
             );
