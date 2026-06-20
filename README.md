@@ -51,6 +51,18 @@
   
 <img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/ad0b758f-d304-4b16-ae81-c2b3afd7aa5e" />
 
+### 🔗 URL 协议（Action Button / Shortcuts 集成）
+
+插件注册了 `obsidian://journal-partner` URL 协议，可以从任何能打开 URL 的地方（iOS Shortcuts、macOS Shortcuts、命令行 `open`）一键写入今天的日记，**无需打开 Obsidian 主界面**：
+
+```
+obsidian://journal-partner?action=quickcapture&text=<URL编码内容>
+```
+
+可选参数 `time=HH:MM` 指定时间戳，默认使用当前时间。
+
+**搭配 iPhone Action Button**：在 iOS Shortcuts 里创建一个捷径，第一步「听写文本」，第二步「打开 URL」（URL 填上面的协议、`text` 用上一步输出变量）；把这个捷径设为 Action Button，按一下手机侧键就能听写并自动落到今天的日记，全程不打断当前操作。
+
 ---
 
 ## 安装

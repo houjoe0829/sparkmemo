@@ -3,11 +3,14 @@ import {
   MarkdownPostProcessorContext,
   MarkdownView,
   Notice,
+  ObsidianProtocolData,
   Platform,
   Plugin,
   PluginSettingTab,
   Setting,
+  TFile,
   WorkspaceLeaf,
+  moment,
 } from 'obsidian';
 import {
   EditorState,
@@ -23,11 +26,19 @@ import {
   ViewUpdate,
   keymap,
 } from '@codemirror/view';
+import {
+  appHasDailyNotesPluginLoaded,
+  createDailyNote,
+  getAllDailyNotes,
+  getDailyNote,
+} from 'obsidian-daily-notes-interface';
 
 import {
   DEFAULT_SETTINGS,
   JournalPartnerSettings,
+  appendToJournalSection,
   buildDecorations,
+  buildEntryLine,
   findSection,
   generateTimestamp,
   getTimestampRanges,
@@ -63,6 +74,18 @@ export default class JournalPartnerPlugin extends Plugin {
       callback: () => void this.activateCaptureView(),
     });
     this.addRibbonIcon('feather', '快速记录', () => void this.activateCaptureView());
+
+    // ── URL protocol handler (Path B: Action Button + Shortcuts) ──
+    // Registers obsidian://journal-partner so that an iOS Shortcut (or any
+    // tool that can open URLs) can write to today's `## Journal` section
+    // without opening the capture view or any other UI.
+    //
+    // Usage (from a Shortcut):
+    //   obsidian://journal-partner?action=quickcapture&text=<urlencoded>
+    //   obsidian://journal-partner?action=quickcapture&text=<...>&time=15:30
+    this.registerObsidianProtocolHandler('journal-partner', params => {
+      void this.handleProtocol(params);
+    });
   }
 
   onunload() {
@@ -90,6 +113,81 @@ export default class JournalPartnerPlugin extends Plugin {
     if (!leaf) return;
     await leaf.setViewState({ type: CAPTURE_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  // ── Quick-capture write path (shared) ─────────────────────────────────────
+
+  /**
+   * Append a single entry to today's `## Journal` section.
+   *
+   * Used by both the in-app capture textarea and the URL protocol handler.
+   * Creates today's daily note and the journal heading if they don't exist
+   * yet.
+   *
+   * @param text     Raw user content (may contain newlines).
+   * @param ts       Timestamp string in `HH:MM` form. Defaults to now.
+   * @returns        true on success, false if Daily Notes plugin is missing
+   *                 or the write fails.
+   */
+  async writeToTodayJournal(text: string, ts?: string): Promise<boolean> {
+    if (!appHasDailyNotesPluginLoaded()) {
+      new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      return false;
+    }
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return false;
+
+    const stamp = ts ?? generateTimestamp();
+    const line = buildEntryLine(trimmed.replace(/\r\n/g, '\n'), stamp);
+
+    try {
+      let file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+      if (!file) {
+        file = (await createDailyNote(moment())) as TFile;
+      }
+      await this.app.vault.process(file, content =>
+        appendToJournalSection(content, this.settings, line),
+      );
+      return true;
+    } catch (err) {
+      console.error('[Journal Partner] writeToTodayJournal failed', err);
+      new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Handle `obsidian://journal-partner?...` URLs.
+   *
+   * Recognised actions:
+   *   - `quickcapture`: append `text` to today's journal. Optional `time`
+   *     overrides the timestamp (must match HH:MM); otherwise the current
+   *     local time is used. Shows a Notice on success/failure but does NOT
+   *     open or focus any view — designed for Action Button workflows that
+   *     should feel ambient.
+   */
+  private async handleProtocol(params: ObsidianProtocolData): Promise<void> {
+    const action = params.action;
+    if (action !== 'quickcapture') {
+      new Notice(`未知动作：${action}`);
+      return;
+    }
+
+    const text = params.text ?? '';
+    if (text.trim().length === 0) {
+      new Notice('Quick capture 缺少 text 参数');
+      return;
+    }
+
+    const time = params.time;
+    const tsValid = typeof time === 'string' && /^\d{2}:\d{2}$/.test(time);
+    const ts = tsValid ? time : undefined;
+
+    const ok = await this.writeToTodayJournal(text, ts);
+    if (ok) {
+      const preview = text.trim().replace(/\s+/g, ' ').slice(0, 20);
+      new Notice(`📝 已记录：${preview}${text.length > 20 ? '…' : ''}`);
+    }
   }
 
   // ── Editor extension (source + live-preview) ───────────────────────────────
