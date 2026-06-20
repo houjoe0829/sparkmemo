@@ -3,6 +3,7 @@ import {
   MarkdownPostProcessorContext,
   MarkdownView,
   Notice,
+  Platform,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -68,14 +69,24 @@ export default class JournalPartnerPlugin extends Plugin {
     this.app.workspace.detachLeavesOfType(CAPTURE_VIEW_TYPE);
   }
 
-  /** Reveal an existing capture view leaf, or create one in the right sidebar. */
+  /**
+   * Reveal an existing capture view leaf, or create one.
+   *
+   * - **Mobile** — Obsidian's right sidebar pins views in a drawer the user
+   *   can't pop out, which makes the timeline feel cramped. Open in the
+   *   main work area instead so it gets full-screen treatment.
+   * - **Desktop** — keep the right sidebar so the capture view stays a
+   *   persistent companion next to whatever the user is editing.
+   */
   async activateCaptureView() {
     const existing = this.app.workspace.getLeavesOfType(CAPTURE_VIEW_TYPE);
     if (existing.length > 0) {
       this.app.workspace.revealLeaf(existing[0]);
       return;
     }
-    const leaf: WorkspaceLeaf | null = this.app.workspace.getRightLeaf(false);
+    const leaf: WorkspaceLeaf | null = Platform.isMobile
+      ? this.app.workspace.getLeaf(true)
+      : this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
     await leaf.setViewState({ type: CAPTURE_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
