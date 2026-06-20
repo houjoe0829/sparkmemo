@@ -278,7 +278,26 @@
   transform: translateY(-50%);
 }
 .jp-timeline-entry-head .jp-timestamp {
+  position: relative;
   margin-right: 0;
+}
+/* Smooth curved tail dropping from the bottom-center of the timestamp
+   pill and landing on the bubble's top edge. The box is anchored at the
+   pill's horizontal center (right edge of the box sits there), then the
+   border-right goes straight down and curves leftward into a short
+   horizontal segment that meets the bubble. */
+.jp-timeline-entry-head .jp-timestamp::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 14px;
+  height: 10px;
+  margin-left: -14px;
+  border-right: 2px solid var(--jp-tl-line);
+  border-bottom: 2px solid var(--jp-tl-line);
+  border-bottom-right-radius: 12px;
+  pointer-events: none;
 }
 
 /* Content bubble — chat-style rounded card */
@@ -293,21 +312,6 @@
   color: var(--text-normal);
   word-break: break-word;
   white-space: pre-wrap;
-}
-/* Smooth curved tail linking the timestamp pill (above) to the bubble.
-   A quarter-circle drawn with border-radius: line drops from under the
-   pill, then curves rightward into the top edge of the bubble. */
-.jp-timeline-bubble::before {
-  content: '';
-  position: absolute;
-  left: 14px;
-  top: -10px;
-  width: 16px;
-  height: 14px;
-  border-left: 2px solid var(--jp-tl-line);
-  border-bottom: 2px solid var(--jp-tl-line);
-  border-bottom-left-radius: 14px;
-  pointer-events: none;
 }
 
 /* Dark theme adjustments */
