@@ -81,8 +81,11 @@ export default class JournalPartnerPlugin extends Plugin {
     // without opening the capture view or any other UI.
     //
     // Usage (from a Shortcut):
-    //   obsidian://journal-partner?action=quickcapture&text=<urlencoded>
-    //   obsidian://journal-partner?action=quickcapture&text=<...>&time=15:30
+    //   obsidian://journal-partner?text=<urlencoded>
+    //   obsidian://journal-partner?text=<...>&time=15:30
+    //
+    // (`action` is reserved by Obsidian for the protocol name itself —
+    // don't use it as a custom routing key.)
     this.registerObsidianProtocolHandler('journal-partner', params => {
       void this.handleProtocol(params);
     });
@@ -159,20 +162,15 @@ export default class JournalPartnerPlugin extends Plugin {
   /**
    * Handle `obsidian://journal-partner?...` URLs.
    *
-   * Recognised actions:
-   *   - `quickcapture`: append `text` to today's journal. Optional `time`
-   *     overrides the timestamp (must match HH:MM); otherwise the current
-   *     local time is used. Shows a Notice on success/failure but does NOT
-   *     open or focus any view — designed for Action Button workflows that
-   *     should feel ambient.
+   * The protocol handler is registered specifically for `journal-partner`,
+   * so every invocation is implicitly the quick-capture action. We accept
+   * `text` (required) and an optional `time=HH:MM` override.
+   *
+   * Note: `params.action` is reserved by Obsidian and will always equal
+   * the protocol handler name (`journal-partner`) here — do NOT use it
+   * as a routing key.
    */
   private async handleProtocol(params: ObsidianProtocolData): Promise<void> {
-    const action = params.action;
-    if (action !== 'quickcapture') {
-      new Notice(`未知动作：${action}`);
-      return;
-    }
-
     const text = params.text ?? '';
     if (text.trim().length === 0) {
       new Notice('Quick capture 缺少 text 参数');
@@ -789,7 +787,7 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       'display: block; margin: 8px 0; padding: 6px 8px;' +
       'background: var(--background-primary); border-radius: 4px;' +
       'font-size: 11.5px; word-break: break-all;';
-    codeEl.setText('obsidian://journal-partner?action=quickcapture&text=<URL编码内容>');
+    codeEl.setText('obsidian://journal-partner?text=<URL编码内容>');
     protocolDesc.createSpan({
       text: '搭配 iPhone Action Button：创建一个 Shortcut，「听写文本」→「打开 URL」（URL 用上面格式，text 字段用上一步输出），把 Shortcut 选为 Action Button 触发项即可。',
     });

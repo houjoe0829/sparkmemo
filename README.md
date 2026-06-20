@@ -56,7 +56,7 @@
 插件注册了 `obsidian://journal-partner` URL 协议，可以从任何能打开 URL 的地方（iOS Shortcuts、macOS Shortcuts、命令行 `open`）一键写入今天的日记，**无需打开 Obsidian 主界面**：
 
 ```
-obsidian://journal-partner?action=quickcapture&text=<URL编码内容>
+obsidian://journal-partner?text=<URL编码内容>
 ```
 
 可选参数 `time=HH:MM` 指定时间戳，默认使用当前时间。
