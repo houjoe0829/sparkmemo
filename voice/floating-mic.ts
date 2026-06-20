@@ -58,6 +58,12 @@ export class FloatingMic {
   private maxStopTimer: number | null = null;
   private tickTimer: number | null = null;
   private cancelled = false;
+  /** Last completed recording, kept for retry on transcription failure.
+   *  Cleared on a successful onComplete or when the user starts a fresh
+   *  recording. */
+  private retryBuffer: RecordingResult | null = null;
+  private retryCount = 0;
+  private readonly maxRetries = 3;
 
   // Bound handlers (kept around so we can removeEventListener cleanly)
   private readonly onPointerDown = (e: PointerEvent) => this.handleDown(e);
@@ -105,17 +111,44 @@ export class FloatingMic {
   flashError(message?: string) {
     this.setState('error');
     if (message) new Notice(message);
-    window.setTimeout(() => {
-      if (this.state === 'error') this.setState('idle');
-    }, 1800);
+    // When a retry buffer exists, leave the button in error/retryable
+    // state — the user might tap it. The next successful retry or a
+    // fresh recording will clear it. Without a retry buffer, fall back
+    // to idle after a short flash.
+    if (!this.retryBuffer || this.retryCount >= this.maxRetries) {
+      window.setTimeout(() => {
+        if (this.state === 'error') this.setState('idle');
+      }, 1800);
+    }
   }
 
   // ── Pointer handlers ────────────────────────────────────────────────────
 
   private async handleDown(e: PointerEvent) {
+    // Tapping while in error state retries the cached recording instead
+    // of starting a fresh one — saves the user from re-recording when
+    // the failure was transient (network blip, etc.).
+    if (this.state === 'error' && this.retryBuffer && this.retryCount < this.maxRetries) {
+      e.preventDefault();
+      this.retryCount += 1;
+      const buffered = this.retryBuffer;
+      this.setState('transcribing');
+      try {
+        await this.opts.onComplete(buffered);
+        this.retryBuffer = null;
+        this.retryCount = 0;
+        this.setState('idle');
+      } catch (err) {
+        this.flashError(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     if (this.state !== 'idle') return;
     e.preventDefault();
     this.cancelled = false;
+    this.retryBuffer = null;
+    this.retryCount = 0;
     this.pressStartedAt = performance.now();
     this.pressStartY = e.clientY;
     // Capture so subsequent move/up events still fire even if the finger
@@ -187,8 +220,13 @@ export class FloatingMic {
     this.setState('transcribing');
     try {
       await this.opts.onComplete(result);
+      this.retryBuffer = null;
+      this.retryCount = 0;
       this.setState('idle');
     } catch (err) {
+      // Keep the recording in memory so a tap on the error-state button
+      // retries the same blob instead of forcing the user to re-record.
+      this.retryBuffer = result;
       this.flashError(err instanceof Error ? err.message : String(err));
     }
   }
@@ -208,10 +246,20 @@ export class FloatingMic {
       'jp-floating-mic--recording',
       'jp-floating-mic--transcribing',
       'jp-floating-mic--error',
+      'jp-floating-mic--retryable',
     );
     if (next === 'recording') this.btn.addClass('jp-floating-mic--recording');
     else if (next === 'transcribing') this.btn.addClass('jp-floating-mic--transcribing');
-    else if (next === 'error') this.btn.addClass('jp-floating-mic--error');
+    else if (next === 'error') {
+      this.btn.addClass('jp-floating-mic--error');
+      if (this.retryBuffer && this.retryCount < this.maxRetries) {
+        this.btn.addClass('jp-floating-mic--retryable');
+        this.btn.setAttr('aria-label', '点击重试转写');
+      }
+    }
+    if (next === 'idle') {
+      this.btn.setAttr('aria-label', '按住说话');
+    }
 
     // Reset the timer label when leaving recording
     if (next !== 'recording') this.btn.setAttr('data-elapsed', '');

@@ -37,7 +37,7 @@ import {
   parseJournalEntries,
 } from './section';
 import { FloatingMic } from './voice/floating-mic';
-import { STTConfigError, transcribeAudio } from './voice/stt-client';
+import { transcribeAudio } from './voice/stt-client';
 import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
@@ -611,29 +611,17 @@ export class JournalCaptureView extends ItemView {
       container: this.containerEl,
       maxSeconds: this.plugin.settings.voiceMaxSeconds,
       onComplete: async result => {
-        // STT → text. Insert into the textarea (or auto-submit if the
-        // user opted in). Errors are surfaced via the button's error
-        // state, set by the caller via flashError().
-        let text: string;
-        try {
-          text = await transcribeAudio(result.blob, this.plugin.settings, {
-            mimeType: result.mimeType,
-            ext: result.ext,
-          });
-        } catch (err) {
-          if (err instanceof STTConfigError) {
-            this.floatingMic?.flashError(`${err.message} —— 请到设置中填写`);
-          } else {
-            this.floatingMic?.flashError(
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-          return;
-        }
+        // STT → text. Throws on failure so the FloatingMic buffers the
+        // blob for one-tap retry; success path appends to the textarea.
+        const text = await transcribeAudio(result.blob, this.plugin.settings, {
+          mimeType: result.mimeType,
+          ext: result.ext,
+        });
 
         if (text.length === 0) {
-          this.floatingMic?.flashError('未识别到内容');
-          return;
+          // Empty result is a soft failure — provider returned 200 but
+          // nothing useful. No point retrying; surface and bail.
+          throw new Error('未识别到内容');
         }
 
         // Append (don't overwrite) so users can stitch multiple recordings.
