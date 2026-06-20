@@ -37,6 +37,7 @@ import {
   parseJournalEntries,
 } from './section';
 import { FloatingMic } from './voice/floating-mic';
+import { STTConfigError, transcribeAudio } from './voice/stt-client';
 import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
@@ -610,17 +611,43 @@ export class JournalCaptureView extends ItemView {
       container: this.containerEl,
       maxSeconds: this.plugin.settings.voiceMaxSeconds,
       onComplete: async result => {
-        // Slice 2 placeholder — surfaces the recording details so we can
-        // verify in the mobile console that recording actually works.
-        console.log('[Journal Partner] recording complete', {
-          sizeKB: Math.round(result.blob.size / 1024),
-          mime: result.mimeType,
-          durationSec: result.durationSec.toFixed(1),
-        });
-        new Notice(
-          `🎙️ 录音完成：${result.durationSec.toFixed(1)}s · ` +
-            `${Math.round(result.blob.size / 1024)}KB`,
-        );
+        // STT → text. Insert into the textarea (or auto-submit if the
+        // user opted in). Errors are surfaced via the button's error
+        // state, set by the caller via flashError().
+        let text: string;
+        try {
+          text = await transcribeAudio(result.blob, this.plugin.settings, {
+            mimeType: result.mimeType,
+            ext: result.ext,
+          });
+        } catch (err) {
+          if (err instanceof STTConfigError) {
+            this.floatingMic?.flashError(`${err.message} —— 请到设置中填写`);
+          } else {
+            this.floatingMic?.flashError(
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+          return;
+        }
+
+        if (text.length === 0) {
+          this.floatingMic?.flashError('未识别到内容');
+          return;
+        }
+
+        // Append (don't overwrite) so users can stitch multiple recordings.
+        const current = this.textareaEl.value;
+        const joiner = current.length > 0 && !/\s$/.test(current) ? ' ' : '';
+        this.textareaEl.value = current + joiner + text;
+        this.refreshSubmitState();
+        this.autoResizeTextarea();
+        // Focus so the user can keep editing or hit submit immediately
+        this.textareaEl.focus();
+
+        if (this.plugin.settings.voiceAutoSubmit) {
+          await this.handleSubmit();
+        }
       },
     });
   }

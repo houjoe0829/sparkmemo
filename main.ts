@@ -609,6 +609,208 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           }),
       );
 
+    // ── Voice quick capture ────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '🎙️ 语音快速记录' });
+
+    const voiceDesc = containerEl.createEl('p', {
+      cls: 'jp-settings-help',
+      text:
+        '在移动端的快速记录视图右下角显示悬浮麦克风按钮，按住录音，松开后将' +
+        '语音上传到下方配置的 STT 服务转写为文字。当前支持任何 OpenAI 兼容' +
+        '的语音识别接口（推荐：火山引擎方舟豆包语音、阿里云 DashScope、OpenAI Whisper）。',
+    });
+    voiceDesc.style.cssText =
+      'margin: 4px 0 12px; padding: 10px 12px; border-radius: 6px;' +
+      'background: var(--background-secondary); color: var(--text-muted);' +
+      'font-size: 12.5px; line-height: 1.6;';
+
+    new Setting(containerEl)
+      .setName('启用悬浮麦克风按钮')
+      .setDesc('关闭后移动端不再显示悬浮按钮，但下方 STT 配置仍然保留')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.voiceEnabled)
+          .onChange(async value => {
+            this.plugin.settings.voiceEnabled = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('转写后自动写入')
+      .setDesc('开启后，语音转写完成立刻写入当天日记；关闭则填入输入框由你编辑后再 NOTE')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.voiceAutoSubmit)
+          .onChange(async value => {
+            this.plugin.settings.voiceAutoSubmit = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('录音时长上限（秒）')
+      .setDesc('超过该时长自动停止录音并转写，避免误触长按')
+      .addText(text =>
+        text
+          .setPlaceholder('60')
+          .setValue(String(this.plugin.settings.voiceMaxSeconds))
+          .onChange(async value => {
+            const n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n < 5 || n > 600) return;
+            this.plugin.settings.voiceMaxSeconds = n;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    // Provider quick-fill buttons — keeps users from copy-pasting endpoints
+    new Setting(containerEl)
+      .setName('快速填充预设')
+      .setDesc('点击预设按钮自动填入 endpoint 和 model 占位，仍需自行填写 API Key')
+      .addButton(btn =>
+        btn.setButtonText('火山引擎方舟（推荐）').onClick(async () => {
+          this.plugin.settings.sttEndpoint = 'https://ark.cn-beijing.volces.com/api/v3';
+          this.plugin.settings.sttModel = ''; // 用户需填入具体豆包语音模型 ID
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      )
+      .addButton(btn =>
+        btn.setButtonText('阿里云 DashScope').onClick(async () => {
+          this.plugin.settings.sttEndpoint =
+            'https://dashscope.aliyuncs.com/compatible-mode/v1';
+          this.plugin.settings.sttModel = 'qwen-audio-asr';
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      )
+      .addButton(btn =>
+        btn.setButtonText('OpenAI Whisper').onClick(async () => {
+          this.plugin.settings.sttEndpoint = 'https://api.openai.com/v1';
+          this.plugin.settings.sttModel = 'whisper-1';
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('STT Endpoint')
+      .setDesc('OpenAI 兼容接口的基础 URL，不含末尾斜杠')
+      .addText(text =>
+        text
+          .setPlaceholder('https://ark.cn-beijing.volces.com/api/v3')
+          .setValue(this.plugin.settings.sttEndpoint)
+          .onChange(async value => {
+            this.plugin.settings.sttEndpoint = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    // API Key — masked by default, reveal on demand
+    let keyInputEl: HTMLInputElement | null = null;
+    new Setting(containerEl)
+      .setName('API Key')
+      .setDesc('对应服务商的 API Key。注意：以明文保存在 vault 的 data.json 中')
+      .addText(text => {
+        text
+          .setPlaceholder('在此粘贴 API Key')
+          .setValue(this.plugin.settings.sttApiKey)
+          .onChange(async value => {
+            this.plugin.settings.sttApiKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'password';
+        text.inputEl.autocomplete = 'off';
+        keyInputEl = text.inputEl;
+      })
+      .addExtraButton(btn => {
+        let revealed = false;
+        btn
+          .setIcon('eye')
+          .setTooltip('显示 / 隐藏')
+          .onClick(() => {
+            if (!keyInputEl) return;
+            revealed = !revealed;
+            keyInputEl.type = revealed ? 'text' : 'password';
+            btn.setIcon(revealed ? 'eye-off' : 'eye');
+          });
+      });
+
+    // Plaintext warning (red, under the key field)
+    const keyWarning = containerEl.createEl('div', {
+      cls: 'jp-settings-warning',
+      text:
+        '⚠️ API Key 以明文存储于 data.json，请勿将本 vault 公开同步至 GitHub 等平台',
+    });
+    keyWarning.style.cssText =
+      'margin: -8px 0 12px 16px; color: #ef4444; font-size: 12px;';
+
+    new Setting(containerEl)
+      .setName('模型 ID')
+      .setDesc('火山豆包语音 / qwen-audio-asr / whisper-1 等')
+      .addText(text =>
+        text
+          .setPlaceholder('如 whisper-1')
+          .setValue(this.plugin.settings.sttModel)
+          .onChange(async value => {
+            this.plugin.settings.sttModel = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('语言提示')
+      .setDesc('告诉模型预期的语言代码（zh / en / 留空让模型自动判断）')
+      .addText(text =>
+        text
+          .setPlaceholder('zh')
+          .setValue(this.plugin.settings.sttLanguage)
+          .onChange(async value => {
+            this.plugin.settings.sttLanguage = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    // ── URL protocol / Shortcuts integration ──────────────────────────────
+    containerEl.createEl('h3', { text: '🔗 Action Button / Shortcuts 集成' });
+
+    const protocolDesc = containerEl.createEl('p', {
+      cls: 'jp-settings-help',
+    });
+    protocolDesc.style.cssText =
+      'margin: 4px 0 12px; padding: 10px 12px; border-radius: 6px;' +
+      'background: var(--background-secondary); color: var(--text-muted);' +
+      'font-size: 12.5px; line-height: 1.7;';
+    protocolDesc.createSpan({
+      text: '插件注册了 URL 协议，可从 iOS / macOS Shortcuts 调用，无需打开主界面就能把听写文本写入今天的 ## Journal：',
+    });
+    const codeEl = protocolDesc.createEl('code');
+    codeEl.style.cssText =
+      'display: block; margin: 8px 0; padding: 6px 8px;' +
+      'background: var(--background-primary); border-radius: 4px;' +
+      'font-size: 11.5px; word-break: break-all;';
+    codeEl.setText('obsidian://journal-partner?action=quickcapture&text=<URL编码内容>');
+    protocolDesc.createSpan({
+      text: '搭配 iPhone Action Button：创建一个 Shortcut，「听写文本」→「打开 URL」（URL 用上面格式，text 字段用上一步输出），把 Shortcut 选为 Action Button 触发项即可。',
+    });
+
+    new Setting(containerEl)
+      .setName('一键导入 Shortcut')
+      .setDesc('点击在新窗口打开 iCloud Shortcut 模板，导入后即可绑定到 Action Button')
+      .addButton(btn =>
+        btn
+          .setButtonText('获取捷径')
+          .setCta()
+          .onClick(() => {
+            // Placeholder URL — replace with actual iCloud Shortcut link once
+            // uploaded. Until then we surface the manual recipe.
+            new Notice(
+              'iCloud 捷径链接尚未配置。请按上方说明手动创建一个 Shortcut，' +
+                '或在 Issue 中催作者更新。',
+            );
+          }),
+      );
+
     // ── Advanced ───────────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '🔧 高级' });
 
