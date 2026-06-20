@@ -11,7 +11,7 @@
  * `- HH:MM text` to the same section, creating the file or heading if needed.
  */
 
-import { ItemView, Notice, TFile, WorkspaceLeaf, moment, setIcon } from 'obsidian';
+import { Component, ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, moment, setIcon } from 'obsidian';
 import {
   appHasDailyNotesPluginLoaded,
   createDailyNote,
@@ -47,6 +47,8 @@ export class JournalCaptureView extends ItemView {
   // Cached state for rerender filtering
   private todayFile: TFile | null = null;
   private rerenderTimer: number | null = null;
+  /** Per-render lifecycle owner for MarkdownRenderer.render children. */
+  private renderScope: Component | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: JournalPartnerPlugin) {
     super(leaf);
@@ -106,6 +108,10 @@ export class JournalCaptureView extends ItemView {
     if (this.rerenderTimer !== null) {
       window.clearTimeout(this.rerenderTimer);
       this.rerenderTimer = null;
+    }
+    if (this.renderScope) {
+      this.renderScope.unload();
+      this.renderScope = null;
     }
     this.containerEl.children[1].empty();
   }
@@ -203,6 +209,12 @@ export class JournalCaptureView extends ItemView {
   }
 
   private async rerender(): Promise<void> {
+    // Tear down any markdown-rendered children from the previous pass so
+    // their listeners (image loaders, link hover, etc.) are released.
+    if (this.renderScope) {
+      this.renderScope.unload();
+      this.renderScope = null;
+    }
     this.timelineEl.empty();
 
     if (!appHasDailyNotesPluginLoaded()) {
@@ -255,6 +267,21 @@ export class JournalCaptureView extends ItemView {
   }
 
   private renderEmpty(reason: EmptyReason) {
+    // Always render the date-header node so users see today's marker even
+    // when there are no entries yet.
+    if (reason !== 'no-daily-plugin') {
+      const headerLabel = this.formatDateHeader(this.todayFile);
+      const headerRow = this.timelineEl.createDiv({
+        cls: 'jp-timeline-entry jp-timeline-entry--header',
+      });
+      headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+      const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
+      headerCard.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+      if (headerLabel.subtitle) {
+        headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+      }
+    }
+
     const wrap = this.timelineEl.createDiv({ cls: 'jp-capture-empty' });
     let msg = '';
     switch (reason) {
@@ -279,6 +306,24 @@ export class JournalCaptureView extends ItemView {
   }
 
   private renderEntries(entries: JournalEntry[]) {
+    // Each render owns its own Component so MarkdownRenderer.render attaches
+    // child lifecycles (link/image handlers) that we can tear down on the
+    // next refresh.
+    const scope = new Component();
+    scope.load();
+    this.renderScope = scope;
+
+    // Date header — first node on the timeline, gets a distinct dot style.
+    const file = this.todayFile;
+    const headerLabel = this.formatDateHeader(file);
+    const headerRow = this.timelineEl.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
+    headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+    const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
+    headerCard.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+    if (headerLabel.subtitle) {
+      headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+    }
+
     // Sorting: timeline display order. The "latest" dot decoration is keyed
     // by timestamp value (max) so it stays visually correct in either direction.
     const latestTs = entries.reduce<string>((acc, e) => (e.timestamp > acc ? e.timestamp : acc), '');
@@ -296,6 +341,7 @@ export class JournalCaptureView extends ItemView {
         : a.timestamp < b.timestamp ? -1 : 1;
     });
 
+    const sourcePath = file?.path ?? '';
     for (const entry of sorted) {
       const row = this.timelineEl.createDiv({ cls: 'jp-timeline-entry' });
 
@@ -308,8 +354,22 @@ export class JournalCaptureView extends ItemView {
       const header = card.createDiv({ cls: 'jp-timeline-card-header' });
       header.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
 
-      card.createDiv({ cls: 'jp-timeline-card-body', text: entry.text });
+      const body = card.createDiv({ cls: 'jp-timeline-card-body' });
+      // Render the entry body as markdown so wikilinks, embedded images,
+      // bold/italic, etc. render the same as in the editor.
+      void MarkdownRenderer.render(this.app, entry.text, body, sourcePath, scope);
     }
+  }
+
+  /** Build a human-readable date label for the timeline header node. */
+  private formatDateHeader(file: TFile | null): { title: string; subtitle?: string } {
+    const m = moment();
+    // moment.locale defaults to en; we render Chinese labels manually so we
+    // don't depend on the user's locale being zh.
+    const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][m.day()];
+    const title = m.format('YYYY年M月D日') + ` · ${weekdayZh}`;
+    const subtitle = file ? file.basename : '今天还没有日记';
+    return { title, subtitle };
   }
 
   // ── Submit / write path ─────────────────────────────────────────────────

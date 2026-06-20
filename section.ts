@@ -173,6 +173,16 @@ export function buildDecorations(
  *   produced by `buildEntryLine` for multi-line input
  * - Lines without a timestamp at the top level are skipped
  */
+/**
+ * Parse the body of a journal section into ordered timeline entries.
+ *
+ * Rules:
+ * - Top-level list items (`- HH:MM ...`, `* HH:MM ...`, `+ HH:MM ...`) become entries
+ * - Indented continuation lines (any leading whitespace) are appended to the
+ *   previous entry's text, joined with a newline so the markdown renderer
+ *   sees the original structure (soft breaks, lists, etc.)
+ * - Lines without a timestamp at the top level are skipped
+ */
 export function parseJournalEntries(
   sectionText: string,
   pattern: string,
@@ -184,23 +194,22 @@ export function parseJournalEntries(
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
 
-    // Indented line → continuation of previous entry
+    // Indented line → continuation of previous entry. Strip the 2-space
+    // continuation indent that buildEntryLine adds, but preserve the rest
+    // (including a trailing soft-break "  ") so MarkdownRenderer sees the
+    // original line structure.
     if (entries.length > 0 && /^\s+\S/.test(raw)) {
-      const cont = raw.replace(/\s{2,}$/, '').trim();
-      if (cont.length > 0) {
-        entries[entries.length - 1].text += ' ' + cont;
-      }
+      const cont = raw.replace(/^\s{0,2}/, '');
+      entries[entries.length - 1].text += '\n' + cont;
       continue;
     }
 
     const m = tsRe.exec(raw);
     if (!m) continue;
 
-    // Strip trailing markdown soft-break spaces from the first line text
-    const text = m[2].replace(/\s{2,}$/, '').trim();
     entries.push({
       timestamp: m[1],
-      text,
+      text: m[2],
       lineIndex: i,
     });
   }
