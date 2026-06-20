@@ -19,6 +19,7 @@ import {
   ItemView,
   MarkdownRenderer,
   Notice,
+  Platform,
   TFile,
   WorkspaceLeaf,
   moment,
@@ -81,6 +82,16 @@ export class JournalCaptureView extends ItemView {
   private rerenderTimer: number | null = null;
   private intersectionObs: IntersectionObserver | null = null;
 
+  // ── Mobile toolbar auto-hide (scroll-direction triggered) ──
+  /** Last observed scrollTop, for direction detection. */
+  private lastScrollTop = 0;
+  /** Bound scroll handler we install on the view's scroll container. */
+  private onScrollBound: (() => void) | null = null;
+  /** Element we attached the scroll listener to, kept for clean removal. */
+  private scrollEl: HTMLElement | null = null;
+  /** Min pixel delta between events that counts as a real scroll move. */
+  private readonly scrollDeltaThreshold = 6;
+
   constructor(leaf: WorkspaceLeaf, plugin: JournalPartnerPlugin) {
     super(leaf);
     this.plugin = plugin;
@@ -137,6 +148,7 @@ export class JournalCaptureView extends ItemView {
 
     await this.fullRebuild();
     this.setupIntersectionObserver();
+    this.setupMobileToolbarAutoHide();
   }
 
   async onClose(): Promise<void> {
@@ -148,6 +160,7 @@ export class JournalCaptureView extends ItemView {
       this.intersectionObs.disconnect();
       this.intersectionObs = null;
     }
+    this.teardownMobileToolbarAutoHide();
     this.disposeDays();
     this.containerEl.children[1].empty();
   }
@@ -519,6 +532,60 @@ export class JournalCaptureView extends ItemView {
   private disposeDays() {
     for (const d of this.days) d.scope.unload();
     this.days = [];
+  }
+
+  // ── Mobile toolbar auto-hide ────────────────────────────────────────────
+
+  /**
+   * On mobile, hide Obsidian's bottom toolbar (`.mobile-toolbar`) when the
+   * user scrolls down (looking at older entries) and reveal it when they
+   * scroll up. Restores the toolbar on view close so we never leave it in
+   * a hidden state when the user navigates away.
+   */
+  private setupMobileToolbarAutoHide() {
+    if (!Platform.isMobile) return;
+    const scroller = this.containerEl.children[1] as HTMLElement;
+    if (!scroller) return;
+
+    this.scrollEl = scroller;
+    this.lastScrollTop = scroller.scrollTop;
+
+    this.onScrollBound = () => {
+      const top = scroller.scrollTop;
+      const delta = top - this.lastScrollTop;
+
+      if (Math.abs(delta) < this.scrollDeltaThreshold) return;
+
+      // Always show near the top — feels less abrupt when the user lands
+      // back on today's entries.
+      if (top <= 8) {
+        this.setToolbarHidden(false);
+      } else if (delta > 0) {
+        // Scrolling down → hide
+        this.setToolbarHidden(true);
+      } else {
+        // Scrolling up → show
+        this.setToolbarHidden(false);
+      }
+
+      this.lastScrollTop = top;
+    };
+
+    scroller.addEventListener('scroll', this.onScrollBound, { passive: true });
+  }
+
+  private teardownMobileToolbarAutoHide() {
+    if (this.scrollEl && this.onScrollBound) {
+      this.scrollEl.removeEventListener('scroll', this.onScrollBound);
+    }
+    this.scrollEl = null;
+    this.onScrollBound = null;
+    // Always restore on close — never leave the user without their toolbar.
+    this.setToolbarHidden(false);
+  }
+
+  private setToolbarHidden(hidden: boolean) {
+    document.body.toggleClass('jp-hide-mobile-toolbar', hidden);
   }
 
   // ── Submit / write path ─────────────────────────────────────────────────

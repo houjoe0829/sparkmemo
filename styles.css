@@ -445,3 +445,17 @@
   color: var(--text-faint);
   letter-spacing: 0.05em;
 }
+
+/* ── Mobile toolbar auto-hide ─────────────────────────────────────────────
+   Slides Obsidian's bottom toolbar out of view when the user scrolls down
+   inside the capture timeline, restoring it on scroll up. The class is
+   toggled on <body> by capture-view.ts only on mobile + while the view is
+   active, and is always cleared on view close. */
+.is-mobile .mobile-toolbar {
+  transition: transform 0.22s ease, opacity 0.22s ease;
+}
+.is-mobile.jp-hide-mobile-toolbar .mobile-toolbar {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+}
