@@ -197,7 +197,7 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl = this.inputCardEl.createEl('textarea', {
       cls: 'jp-capture-input',
       attr: {
-        placeholder: "What's happening?  (Shift+Enter 提交)",
+        placeholder: "What's happening?",
         rows: '3',
       },
     });
