@@ -263,7 +263,7 @@
   display: flex;
   align-items: center;
   min-height: 22px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 /* Connector line from the timeline dot to the timestamp pill */
 .jp-timeline-entry-head::before {
@@ -283,6 +283,7 @@
 
 /* Content bubble — chat-style rounded card */
 .jp-timeline-bubble {
+  position: relative;
   background: var(--background-primary);
   border-radius: 12px;
   padding: 10px 14px;
@@ -292,9 +293,21 @@
   color: var(--text-normal);
   word-break: break-word;
   white-space: pre-wrap;
-  /* Subtle "tail" hint via asymmetric corner — top-left is squared off
-     so it visually anchors back toward the timeline dot. */
-  border-top-left-radius: 4px;
+}
+/* Smooth curved tail linking the timestamp pill (above) to the bubble.
+   A quarter-circle drawn with border-radius: line drops from under the
+   pill, then curves rightward into the top edge of the bubble. */
+.jp-timeline-bubble::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: -10px;
+  width: 16px;
+  height: 14px;
+  border-left: 2px solid var(--jp-tl-line);
+  border-bottom: 2px solid var(--jp-tl-line);
+  border-bottom-left-radius: 14px;
+  pointer-events: none;
 }
 
 /* Dark theme adjustments */
