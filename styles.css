@@ -107,3 +107,176 @@
 .theme-dark.jp-circular-checkboxes .task-list-item input[type="checkbox"] {
   border-radius: 50% !important;
 }
+
+/* ── Quick-capture sidebar view ─────────────────────────────────────────── */
+
+.jp-capture-root {
+  --jp-tl-line: var(--jp-ts-bg, #ede9fe);
+  --jp-tl-dot: var(--jp-ts-color, #7c3aed);
+  --jp-tl-dot-ring: color-mix(in srgb, var(--jp-tl-dot) 35%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--background-secondary);
+}
+
+/* Toolbar */
+.jp-capture-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+}
+.jp-capture-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-capture-toolbar-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Input card */
+.jp-capture-card {
+  background: var(--background-primary);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.jp-capture-input {
+  width: 100%;
+  min-height: 60px;
+  max-height: 240px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  padding: 0;
+  box-sizing: border-box;
+}
+.jp-capture-input::placeholder {
+  color: var(--text-faint);
+}
+.jp-capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.jp-capture-submit {
+  padding: 6px 18px;
+  background: var(--jp-tl-dot);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.05s ease;
+}
+.jp-capture-submit:hover {
+  opacity: 0.92;
+}
+.jp-capture-submit:active {
+  transform: translateY(1px);
+}
+.jp-capture-submit--disabled,
+.jp-capture-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Empty state */
+.jp-capture-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Timeline */
+.jp-timeline {
+  position: relative;
+  padding-left: 24px;
+}
+.jp-timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--jp-tl-line);
+  border-radius: 2px;
+}
+.jp-timeline-entry {
+  position: relative;
+  margin-bottom: 12px;
+}
+.jp-timeline-entry:last-child {
+  margin-bottom: 0;
+}
+.jp-timeline-dot {
+  position: absolute;
+  left: -22px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  border: 2px solid var(--jp-tl-dot);
+  box-sizing: border-box;
+}
+.jp-timeline-dot--latest {
+  width: 12px;
+  height: 12px;
+  left: -23px;
+  top: 13px;
+  background: var(--jp-tl-dot);
+  border: 3px solid var(--background-primary);
+  box-shadow: 0 0 0 1px var(--jp-tl-dot-ring);
+}
+
+/* Timeline card */
+.jp-timeline-card {
+  background: var(--background-primary);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.jp-timeline-card-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.jp-timeline-card-body {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-normal);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Dark theme adjustments */
+.theme-dark .jp-capture-card,
+.theme-dark .jp-timeline-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}

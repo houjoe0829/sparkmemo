@@ -8,7 +8,11 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "deploy": "bash deploy.sh"
   },
-  "keywords": ["obsidian", "journal", "timestamp"],
+  "keywords": [
+    "obsidian",
+    "journal",
+    "timestamp"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -20,5 +24,8 @@
     "obsidian": "latest",
     "tslib": "^2.6.2",
     "typescript": "^5.5.3"
+  },
+  "dependencies": {
+    "obsidian-daily-notes-interface": "^0.9.5"
   }
 }
