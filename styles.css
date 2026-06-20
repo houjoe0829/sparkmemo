@@ -361,3 +361,27 @@
 .jp-capture-toolbar-btn--hidden {
   display: none !important;
 }
+
+/* Continuous-scroll timeline: each day is a sub-section; the vertical line
+   already drawn by .jp-timeline::before spans the whole stream. */
+.jp-timeline-day {
+  position: relative;
+}
+.jp-timeline-day + .jp-timeline-day {
+  margin-top: 18px;
+}
+
+/* Infinite-scroll sentinel — invisible 1px element observed for intersection */
+.jp-timeline-sentinel {
+  height: 1px;
+  margin: 12px 0;
+}
+
+/* End-of-stream marker shown when no more history exists */
+.jp-timeline-end {
+  padding: 14px 12px 24px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}

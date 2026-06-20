@@ -1,17 +1,29 @@
 /**
  * Quick-capture sidebar view.
  *
- * Three-section layout:
+ * Layout:
  *   1. Toolbar — refresh + sort toggle
- *   2. Input card — multi-line textarea + NOTE submit button
- *   3. Timeline — vertical line connecting timestamped entries
+ *   2. Input card — multi-line textarea + NOTE submit button (always
+ *      writes to today)
+ *   3. Timeline — continuous-scroll stream of days. Today is rendered at
+ *      the top; scrolling near the bottom auto-loads earlier non-empty
+ *      days. Each day is a sub-section: date header node + its entries.
  *
- * Reads today's daily note (via obsidian-daily-notes-interface) and renders
- * the entries inside the configured `## Journal` section. Submitting writes
- * `- HH:MM text` to the same section, creating the file or heading if needed.
+ * Reads daily notes (via obsidian-daily-notes-interface) and renders the
+ * `## Journal` section of each day. Submitting writes `- HH:MM text` to
+ * today's file, creating the file or heading if needed.
  */
 
-import { Component, ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, moment, setIcon } from 'obsidian';
+import {
+  Component,
+  ItemView,
+  MarkdownRenderer,
+  Notice,
+  TFile,
+  WorkspaceLeaf,
+  moment,
+  setIcon,
+} from 'obsidian';
 import {
   appHasDailyNotesPluginLoaded,
   createDailyNote,
@@ -31,7 +43,17 @@ import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
 
-type EmptyReason = 'no-daily-plugin' | 'no-file' | 'no-section' | 'no-entries' | null;
+/** Per-day rendered chunk in the infinite-scroll timeline. */
+interface DaySection {
+  /** Local-day moment (00:00) for stable identity. */
+  date: moment.Moment;
+  /** Wrapper element for the day's date-header + entry rows. */
+  el: HTMLElement;
+  /** Lifecycle owner for this day's MarkdownRenderer.render calls. */
+  scope: Component;
+  /** Path of the daily note backing this day (may be null on a missing file). */
+  filePath: string | null;
+}
 
 export class JournalCaptureView extends ItemView {
   private plugin: JournalPartnerPlugin;
@@ -40,22 +62,24 @@ export class JournalCaptureView extends ItemView {
   private toolbarEl!: HTMLElement;
   private inputCardEl!: HTMLElement;
   private timelineEl!: HTMLElement;
+  private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
   private submitBtn!: HTMLButtonElement;
   private sortBtn!: HTMLButtonElement;
-  private prevDayBtn!: HTMLButtonElement;
-  private nextDayBtn!: HTMLButtonElement;
-  private todayBtn!: HTMLButtonElement;
 
-  // Cached state for rerender filtering
-  private todayFile: TFile | null = null;
-  /** Date currently displayed in the timeline (may be any day). */
-  private viewedDate: moment.Moment = moment().startOf('day');
-  /** TFile matching `viewedDate`, used to scope vault.modify rerenders. */
-  private viewedFile: TFile | null = null;
+  // Cached state
+  private days: DaySection[] = [];
+  /** Day immediately older than the oldest loaded day; next `loadMore` starts here. */
+  private nextProbeDate: moment.Moment = moment().startOf('day').subtract(1, 'day');
+  /** True once we've scanned far enough back that nothing earlier exists. */
+  private exhausted = false;
+  private loadingMore = false;
+  /** Max calendar days we'll probe in a single loadMore call. */
+  private readonly probeWindow = 30;
+  /** Hard floor: refuse to scan further back than this many days from today. */
+  private readonly maxLookbackDays = 365;
   private rerenderTimer: number | null = null;
-  /** Per-render lifecycle owner for MarkdownRenderer.render children. */
-  private renderScope: Component | null = null;
+  private intersectionObs: IntersectionObserver | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: JournalPartnerPlugin) {
     super(leaf);
@@ -83,41 +107,36 @@ export class JournalCaptureView extends ItemView {
     this.buildInputCard(root as HTMLElement);
     this.buildTimeline(root as HTMLElement);
 
-    // Watch the vault — only rerender when the currently viewed file changes
+    // ── Vault listeners ──
+    // modify: refresh the affected day's section in place (no full rebuild)
     this.registerEvent(
       this.app.vault.on('modify', file => {
-        if (
-          file instanceof TFile &&
-          this.viewedFile &&
-          file.path === this.viewedFile.path
-        ) {
-          this.scheduleRerender();
+        if (!(file instanceof TFile)) return;
+        const day = this.days.find(d => d.filePath === file.path);
+        if (day) {
+          this.scheduleDayRefresh(day);
         }
       }),
     );
+    // create: a new daily note (today, or an older one) — full rebuild
     this.registerEvent(
       this.app.vault.on('create', file => {
-        // A new daily note may have been created externally; refresh
         if (file instanceof TFile && file.extension === 'md') {
-          this.scheduleRerender();
+          this.scheduleFullRebuild();
         }
       }),
     );
+    // delete: drop the day if it was loaded, then rebuild
     this.registerEvent(
       this.app.vault.on('delete', file => {
-        if (
-          this.viewedFile &&
-          file instanceof TFile &&
-          file.path === this.viewedFile.path
-        ) {
-          this.viewedFile = null;
-          if (this.isViewingToday()) this.todayFile = null;
-          this.scheduleRerender();
+        if (file instanceof TFile && this.days.some(d => d.filePath === file.path)) {
+          this.scheduleFullRebuild();
         }
       }),
     );
 
-    await this.rerender();
+    await this.fullRebuild();
+    this.setupIntersectionObserver();
   }
 
   async onClose(): Promise<void> {
@@ -125,10 +144,11 @@ export class JournalCaptureView extends ItemView {
       window.clearTimeout(this.rerenderTimer);
       this.rerenderTimer = null;
     }
-    if (this.renderScope) {
-      this.renderScope.unload();
-      this.renderScope = null;
+    if (this.intersectionObs) {
+      this.intersectionObs.disconnect();
+      this.intersectionObs = null;
     }
+    this.disposeDays();
     this.containerEl.children[1].empty();
   }
 
@@ -143,7 +163,7 @@ export class JournalCaptureView extends ItemView {
     });
     setIcon(refreshBtn, 'refresh-cw');
     refreshBtn.addEventListener('click', () => {
-      void this.rerender();
+      void this.fullRebuild();
     });
 
     this.sortBtn = this.toolbarEl.createEl('button', {
@@ -155,50 +175,9 @@ export class JournalCaptureView extends ItemView {
       this.plugin.settings.captureSortDesc = !this.plugin.settings.captureSortDesc;
       await this.plugin.saveSettings();
       this.updateSortIcon();
-      await this.rerender();
+      // Sorting only affects within-day ordering; cheap to rebuild
+      await this.fullRebuild();
     });
-
-    // Spacer pushes date-nav cluster to the right
-    this.toolbarEl.createDiv({ cls: 'jp-capture-toolbar-spacer' });
-
-    this.prevDayBtn = this.toolbarEl.createEl('button', {
-      cls: 'jp-capture-toolbar-btn',
-      attr: { 'aria-label': '前一天', title: '前一天' },
-    });
-    setIcon(this.prevDayBtn, 'chevron-left');
-    this.prevDayBtn.addEventListener('click', () => {
-      this.viewedDate = this.viewedDate.clone().subtract(1, 'day');
-      void this.rerender();
-    });
-
-    this.todayBtn = this.toolbarEl.createEl('button', {
-      cls: 'jp-capture-toolbar-btn',
-      attr: { 'aria-label': '回到今天', title: '回到今天' },
-    });
-    setIcon(this.todayBtn, 'calendar-check');
-    this.todayBtn.addEventListener('click', () => {
-      this.viewedDate = moment().startOf('day');
-      void this.rerender();
-    });
-
-    this.nextDayBtn = this.toolbarEl.createEl('button', {
-      cls: 'jp-capture-toolbar-btn',
-      attr: { 'aria-label': '后一天', title: '后一天' },
-    });
-    setIcon(this.nextDayBtn, 'chevron-right');
-    this.nextDayBtn.addEventListener('click', () => {
-      this.viewedDate = this.viewedDate.clone().add(1, 'day');
-      void this.rerender();
-    });
-  }
-
-  /** Show/hide the "back to today" pill based on whether we're already on today. */
-  private updateTodayBtnVisibility() {
-    this.todayBtn.toggleClass('jp-capture-toolbar-btn--hidden', this.isViewingToday());
-  }
-
-  private isViewingToday(): boolean {
-    return this.viewedDate.isSame(moment().startOf('day'), 'day');
   }
 
   private updateSortIcon() {
@@ -242,6 +221,7 @@ export class JournalCaptureView extends ItemView {
 
   private buildTimeline(root: HTMLElement) {
     this.timelineEl = root.createDiv({ cls: 'jp-timeline' });
+    this.sentinelEl = root.createDiv({ cls: 'jp-timeline-sentinel' });
   }
 
   // ── Behaviour ───────────────────────────────────────────────────────────
@@ -258,138 +238,197 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.style.height = `${next}px`;
   }
 
-  private scheduleRerender() {
+  private scheduleFullRebuild() {
     if (this.rerenderTimer !== null) return;
     this.rerenderTimer = window.setTimeout(() => {
       this.rerenderTimer = null;
-      void this.rerender();
+      void this.fullRebuild();
     }, 80);
   }
 
-  private async rerender(): Promise<void> {
-    // Tear down any markdown-rendered children from the previous pass so
-    // their listeners (image loaders, link hover, etc.) are released.
-    if (this.renderScope) {
-      this.renderScope.unload();
-      this.renderScope = null;
-    }
-    this.timelineEl.empty();
-    this.updateTodayBtnVisibility();
+  private scheduleDayRefresh(day: DaySection) {
+    // Light debounce per modify burst — Obsidian fires modify multiple times
+    // for a single edit. 80ms is enough to coalesce.
+    window.setTimeout(() => {
+      void this.refreshDay(day);
+    }, 80);
+  }
 
+  // ── Full rebuild ────────────────────────────────────────────────────────
+
+  private async fullRebuild(): Promise<void> {
+    this.disposeDays();
+    this.timelineEl.empty();
+
+    // No-plugin guard
     if (!appHasDailyNotesPluginLoaded()) {
-      this.renderEmpty('no-daily-plugin');
+      this.renderTopLevelMessage('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      this.exhausted = true;
       return;
     }
 
+    // Reset scroll-window state
+    this.nextProbeDate = moment().startOf('day').subtract(1, 'day');
+    this.exhausted = false;
+    this.loadingMore = false;
+
+    // Always render today first (non-empty or not — gives users a stable
+    // anchor and shows the "no entries yet" hint).
+    const today = moment().startOf('day');
+    const todayDay = await this.buildDaySection(today, /* allowEmpty */ true);
+    if (todayDay) {
+      this.timelineEl.appendChild(todayDay.el);
+      this.days.push(todayDay);
+    }
+
+    // Then load the first batch of historical non-empty days.
+    await this.loadMore();
+  }
+
+  /**
+   * Probe `probeWindow` calendar days backwards looking for non-empty
+   * journal sections, append any matches to the timeline. Updates
+   * `nextProbeDate` and may flip `exhausted`.
+   */
+  private async loadMore(): Promise<void> {
+    if (this.loadingMore || this.exhausted) return;
+    this.loadingMore = true;
+
+    try {
+      let probed = 0;
+      const today = moment().startOf('day');
+
+      while (probed < this.probeWindow) {
+        // Floor on lookback window
+        if (today.diff(this.nextProbeDate, 'days') > this.maxLookbackDays) {
+          this.exhausted = true;
+          break;
+        }
+
+        const date = this.nextProbeDate.clone();
+        this.nextProbeDate = this.nextProbeDate.clone().subtract(1, 'day');
+        probed++;
+
+        const day = await this.buildDaySection(date, /* allowEmpty */ false);
+        if (day) {
+          this.timelineEl.appendChild(day.el);
+          this.days.push(day);
+        }
+      }
+
+      if (this.exhausted) {
+        this.markEndOfTimeline();
+      }
+    } finally {
+      this.loadingMore = false;
+    }
+  }
+
+  /**
+   * Build a day section element + scope for the given date.
+   * Returns null when the day has no content and `allowEmpty` is false.
+   */
+  private async buildDaySection(
+    date: moment.Moment,
+    allowEmpty: boolean,
+  ): Promise<DaySection | null> {
     let file: TFile | null = null;
     try {
-      file = getDailyNote(this.viewedDate, getAllDailyNotes()) as TFile | null;
+      file = getDailyNote(date, getAllDailyNotes()) as TFile | null;
     } catch (err) {
-      console.error('[Journal Partner] failed to resolve daily note', err);
-      this.renderEmpty('no-daily-plugin');
-      return;
-    }
-    this.viewedFile = file ?? null;
-    if (this.isViewingToday()) {
-      this.todayFile = file ?? null;
+      console.error('[Journal Partner] daily note resolve failed', err);
     }
 
-    if (!file) {
-      this.renderEmpty('no-file');
-      return;
-    }
-
-    let content: string;
-    try {
-      content = await this.app.vault.cachedRead(file);
-    } catch (err) {
-      console.error('[Journal Partner] failed to read today daily note', err);
-      this.renderEmpty('no-file');
-      return;
-    }
-
-    const section = findSection(
-      content,
-      this.plugin.settings.targetHeading,
-      this.plugin.settings.headingLevel,
-    );
-    if (!section) {
-      this.renderEmpty('no-section');
-      return;
-    }
-
-    const sectionText = content.slice(section.from, section.to);
-    const entries = parseJournalEntries(sectionText, this.plugin.settings.timestampPattern);
-    if (entries.length === 0) {
-      this.renderEmpty('no-entries');
-      return;
-    }
-
-    this.renderEntries(entries);
-  }
-
-  private renderEmpty(reason: EmptyReason) {
-    // Always render the date-header node so users see today's marker even
-    // when there are no entries yet.
-    if (reason !== 'no-daily-plugin') {
-      const headerLabel = this.formatDateHeader(0);
-      const headerRow = this.timelineEl.createDiv({
-        cls: 'jp-timeline-entry jp-timeline-entry--header',
-      });
-      headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
-      const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
-      headerCard.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-      headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
-    }
-
-    const wrap = this.timelineEl.createDiv({ cls: 'jp-capture-empty' });
-    let msg = '';
-    switch (reason) {
-      case 'no-daily-plugin':
-        msg = '请先启用 Obsidian 自带的「Daily Notes」核心插件';
-        break;
-      case 'no-file':
-        msg = '今天还没有日记，写点什么吧 →';
-        break;
-      case 'no-section':
-        msg = `今天的日记里还没有 ${'#'.repeat(
+    let entries: JournalEntry[] = [];
+    if (file) {
+      try {
+        const content = await this.app.vault.cachedRead(file);
+        const section = findSection(
+          content,
+          this.plugin.settings.targetHeading,
           this.plugin.settings.headingLevel,
-        )} ${this.plugin.settings.targetHeading} 区块，提交后将自动创建`;
-        break;
-      case 'no-entries':
-        msg = '区块为空，写点什么吧 →';
-        break;
-      default:
-        msg = '暂无内容';
+        );
+        if (section) {
+          const text = content.slice(section.from, section.to);
+          entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+        }
+      } catch (err) {
+        console.error('[Journal Partner] read failed', err);
+      }
     }
-    wrap.createEl('p', { text: msg });
+
+    if (entries.length === 0 && !allowEmpty) {
+      return null;
+    }
+
+    const day: DaySection = {
+      date: date.clone(),
+      el: createDiv({ cls: 'jp-timeline-day' }),
+      scope: new Component(),
+      filePath: file?.path ?? null,
+    };
+    day.scope.load();
+
+    this.renderDayContent(day, entries);
+    return day;
   }
 
-  private renderEntries(entries: JournalEntry[]) {
-    // Each render owns its own Component so MarkdownRenderer.render attaches
-    // child lifecycles (link/image handlers) that we can tear down on the
-    // next refresh.
-    const scope = new Component();
-    scope.load();
-    this.renderScope = scope;
+  /** Refresh just one day's section in place (used on vault.modify). */
+  private async refreshDay(day: DaySection): Promise<void> {
+    let entries: JournalEntry[] = [];
+    let file: TFile | null = null;
+    try {
+      file = getDailyNote(day.date, getAllDailyNotes()) as TFile | null;
+      if (file) {
+        const content = await this.app.vault.cachedRead(file);
+        const section = findSection(
+          content,
+          this.plugin.settings.targetHeading,
+          this.plugin.settings.headingLevel,
+        );
+        if (section) {
+          const text = content.slice(section.from, section.to);
+          entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+        }
+      }
+    } catch (err) {
+      console.error('[Journal Partner] day refresh failed', err);
+    }
 
-    // Date header — first node on the timeline, gets a distinct dot style.
-    const headerLabel = this.formatDateHeader(entries.length);
-    const headerRow = this.timelineEl.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
+    // Reset the day's lifecycle scope and DOM
+    day.scope.unload();
+    day.scope = new Component();
+    day.scope.load();
+    day.filePath = file?.path ?? day.filePath;
+    day.el.empty();
+
+    this.renderDayContent(day, entries);
+  }
+
+  /** Render the date header + entry rows for one day into `day.el`. */
+  private renderDayContent(day: DaySection, entries: JournalEntry[]) {
+    // Date header — first row of the day
+    const headerLabel = this.formatDateHeader(day.date, entries.length);
+    const headerRow = day.el.createDiv({
+      cls: 'jp-timeline-entry jp-timeline-entry--header',
+    });
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     headerCard.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    if (headerLabel.subtitle) {
-      headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+    headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+
+    if (entries.length === 0) {
+      // Today with no entries — soft hint only
+      day.el.createDiv({ cls: 'jp-capture-empty', text: '还没有 memo，写点什么吧 →' });
+      return;
     }
 
-    // Sorting: timeline display order. The "latest" dot decoration is keyed
-    // by timestamp value (max) so it stays visually correct in either direction.
-    const latestTs = entries.reduce<string>((acc, e) => (e.timestamp > acc ? e.timestamp : acc), '');
-
+    // Sort entries within the day
+    const latestTs = entries.reduce<string>(
+      (acc, e) => (e.timestamp > acc ? e.timestamp : acc),
+      '',
+    );
     const sorted = [...entries].sort((a, b) => {
-      // Stable secondary key: source line index preserves authoring order
-      // when timestamps tie.
       if (a.timestamp === b.timestamp) {
         return this.plugin.settings.captureSortDesc
           ? b.lineIndex - a.lineIndex
@@ -400,12 +439,17 @@ export class JournalCaptureView extends ItemView {
         : a.timestamp < b.timestamp ? -1 : 1;
     });
 
-    const sourcePath = this.todayFile?.path ?? '';
+    const sourcePath = day.filePath ?? '';
     for (const entry of sorted) {
-      const row = this.timelineEl.createDiv({ cls: 'jp-timeline-entry' });
+      const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
 
       const dot = row.createDiv({ cls: 'jp-timeline-dot' });
-      if (entry.timestamp === latestTs) {
+      // "Latest" highlight only applies on today's section (otherwise every
+      // historical day would have its own filled dot, which is noisy).
+      if (
+        day.date.isSame(moment().startOf('day'), 'day') &&
+        entry.timestamp === latestTs
+      ) {
         dot.addClass('jp-timeline-dot--latest');
       }
 
@@ -414,20 +458,17 @@ export class JournalCaptureView extends ItemView {
       header.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
 
       const body = card.createDiv({ cls: 'jp-timeline-card-body' });
-      // Render the entry body as markdown so wikilinks, embedded images,
-      // bold/italic, etc. render the same as in the editor.
-      void MarkdownRenderer.render(this.app, entry.text, body, sourcePath, scope);
+      void MarkdownRenderer.render(this.app, entry.text, body, sourcePath, day.scope);
     }
   }
 
-  /** Build a human-readable date label for the timeline header node. */
-  private formatDateHeader(count: number): { title: string; subtitle: string } {
-    const d = this.viewedDate;
+  /** Build a human-readable date label. */
+  private formatDateHeader(d: moment.Moment, count: number): { title: string; subtitle: string } {
     const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.day()];
     const dateLabel = d.format('YYYY年M月D日') + ` · ${weekdayZh}`;
     const today = moment().startOf('day');
-    let relative = '';
     const diff = d.diff(today, 'days');
+    let relative = '';
     if (diff === 0) relative = ' · 今天';
     else if (diff === -1) relative = ' · 昨天';
     else if (diff === 1) relative = ' · 明天';
@@ -436,6 +477,39 @@ export class JournalCaptureView extends ItemView {
     const title = dateLabel + relative;
     const subtitle = count === 0 ? '还没有 memo' : `${count} 个 memo`;
     return { title, subtitle };
+  }
+
+  private renderTopLevelMessage(msg: string) {
+    this.timelineEl.createDiv({ cls: 'jp-capture-empty', text: msg });
+  }
+
+  private markEndOfTimeline() {
+    // Replace sentinel functionality with a static end marker
+    const end = createDiv({ cls: 'jp-timeline-end', text: '— 已加载到最早的日记 —' });
+    this.sentinelEl.replaceWith(end);
+    this.sentinelEl = end;
+  }
+
+  private setupIntersectionObserver() {
+    if (this.intersectionObs) this.intersectionObs.disconnect();
+    const root = this.containerEl.children[1] as HTMLElement;
+    this.intersectionObs = new IntersectionObserver(
+      entries => {
+        for (const e of entries) {
+          if (e.isIntersecting && !this.exhausted && !this.loadingMore) {
+            void this.loadMore();
+          }
+        }
+      },
+      { root, rootMargin: '200px 0px 200px 0px', threshold: 0 },
+    );
+    this.intersectionObs.observe(this.sentinelEl);
+  }
+
+  /** Tear down all loaded day sections (Component scopes + DOM). */
+  private disposeDays() {
+    for (const d of this.days) d.scope.unload();
+    this.days = [];
   }
 
   // ── Submit / write path ─────────────────────────────────────────────────
@@ -455,36 +529,37 @@ export class JournalCaptureView extends ItemView {
     this.submitBtn.setText('写入中…');
 
     try {
-      // Normalize line endings inside textarea before parsing
       const ts = generateTimestamp();
       const line = buildEntryLine(raw.replace(/\r\n/g, '\n'), ts);
 
-      // 1. Resolve or create today's daily note
       let file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
       if (!file) {
         file = (await createDailyNote(moment())) as TFile;
       }
 
-      // 2. Append the entry to the journal section, creating the heading if absent
       await this.app.vault.process(file, content =>
         appendToJournalSection(content, this.plugin.settings, line),
       );
 
-      // 3. Clean up UI — submit always writes to today, so snap the timeline
-      //    back to today (vault.modify will rerender if we were already there;
-      //    otherwise we trigger an explicit rerender).
       this.textareaEl.value = '';
       this.autoResizeTextarea();
-      this.todayFile = file;
-      const wasOnToday = this.isViewingToday();
-      if (!wasOnToday) {
-        this.viewedDate = moment().startOf('day');
-        await this.rerender();
+
+      // vault.modify will catch-up the today section automatically; if
+      // today's section wasn't mounted (e.g. plugin just opened with no
+      // file), trigger a full rebuild so it appears at the top.
+      const todayDay = this.days.find(d =>
+        d.date.isSame(moment().startOf('day'), 'day'),
+      );
+      if (!todayDay) {
+        await this.fullRebuild();
       }
+
+      // Scroll to top so user sees the new entry land
+      const scroller = this.containerEl.children[1] as HTMLElement;
+      scroller.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error('[Journal Partner] submit failed', err);
       new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
-      // Keep textarea content for retry
     } finally {
       this.submitBtn.setText(originalText ?? 'NOTE');
       this.refreshSubmitState();
