@@ -453,12 +453,13 @@ export class JournalCaptureView extends ItemView {
         dot.addClass('jp-timeline-dot--latest');
       }
 
-      const card = row.createDiv({ cls: 'jp-timeline-card' });
-      const header = card.createDiv({ cls: 'jp-timeline-card-header' });
-      header.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+      // Header: timestamp pill anchored to the dot via a short connector line.
+      const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
+      head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
 
-      const body = card.createDiv({ cls: 'jp-timeline-card-body' });
-      void MarkdownRenderer.render(this.app, entry.text, body, sourcePath, day.scope);
+      // Body bubble: chat-style rounded card holding the rendered markdown.
+      const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
+      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope);
     }
   }
 

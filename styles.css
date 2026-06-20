@@ -256,29 +256,50 @@
   box-shadow: 0 0 0 1px var(--jp-tl-dot-ring);
 }
 
-/* Timeline card */
-.jp-timeline-card {
-  background: var(--background-primary);
-  border-radius: 10px;
-  padding: 10px 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-.jp-timeline-card-header {
+/* Timeline entry: dot + connector + timestamp pill on the same baseline,
+   then a content bubble that hangs off below the timestamp. */
+.jp-timeline-entry-head {
+  position: relative;
   display: flex;
   align-items: center;
-  margin-bottom: 4px;
+  min-height: 22px;
+  margin-bottom: 6px;
 }
-.jp-timeline-card-body {
+/* Connector line from the timeline dot to the timestamp pill */
+.jp-timeline-entry-head::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  width: 14px;
+  height: 2px;
+  background: var(--jp-tl-line);
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.jp-timeline-entry-head .jp-timestamp {
+  margin-right: 0;
+}
+
+/* Content bubble — chat-style rounded card */
+.jp-timeline-bubble {
+  background: var(--background-primary);
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--text-normal);
   word-break: break-word;
   white-space: pre-wrap;
+  /* Subtle "tail" hint via asymmetric corner — top-left is squared off
+     so it visually anchors back toward the timeline dot. */
+  border-top-left-radius: 4px;
 }
 
 /* Dark theme adjustments */
 .theme-dark .jp-capture-card,
-.theme-dark .jp-timeline-card {
+.theme-dark .jp-timeline-bubble {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -311,33 +332,33 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Markdown rendered body — flatten paragraph margins so cards stay tight */
-.jp-timeline-card-body > :first-child {
+/* Markdown rendered body — flatten paragraph margins so bubbles stay tight */
+.jp-timeline-bubble > :first-child {
   margin-top: 0;
 }
-.jp-timeline-card-body > :last-child {
+.jp-timeline-bubble > :last-child {
   margin-bottom: 0;
 }
-.jp-timeline-card-body p {
+.jp-timeline-bubble p {
   margin: 0;
 }
-.jp-timeline-card-body p + p {
+.jp-timeline-bubble p + p {
   margin-top: 4px;
 }
-/* Embedded images shouldn't blow the card out */
-.jp-timeline-card-body img,
-.jp-timeline-card-body .internal-embed img {
+/* Embedded images shouldn't blow the bubble out */
+.jp-timeline-bubble img,
+.jp-timeline-bubble .internal-embed img {
   max-width: 100%;
   height: auto;
   border-radius: 6px;
   margin-top: 6px;
 }
-.jp-timeline-card-body .internal-embed {
+.jp-timeline-bubble .internal-embed {
   display: block;
 }
-/* Lists inside cards: tighter padding */
-.jp-timeline-card-body ul,
-.jp-timeline-card-body ol {
+/* Lists inside bubbles: tighter padding */
+.jp-timeline-bubble ul,
+.jp-timeline-bubble ol {
   padding-left: 18px;
   margin: 4px 0;
 }
