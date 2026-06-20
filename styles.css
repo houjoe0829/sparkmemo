@@ -161,8 +161,9 @@
   min-height: 60px;
   max-height: 240px;
   resize: none;
-  border: none;
-  outline: none;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
   background: transparent;
   color: var(--text-normal);
   font-family: inherit;
@@ -339,4 +340,15 @@
 .jp-timeline-card-body ol {
   padding-left: 18px;
   margin: 4px 0;
+}
+
+/* Override Obsidian default textarea focus styles for an immersive input */
+.jp-capture-input:focus,
+.jp-capture-input:focus-visible,
+.jp-capture-input:hover,
+.jp-capture-input:active {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
 }
