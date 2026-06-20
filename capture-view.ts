@@ -270,16 +270,14 @@ export class JournalCaptureView extends ItemView {
     // Always render the date-header node so users see today's marker even
     // when there are no entries yet.
     if (reason !== 'no-daily-plugin') {
-      const headerLabel = this.formatDateHeader(this.todayFile);
+      const headerLabel = this.formatDateHeader(0);
       const headerRow = this.timelineEl.createDiv({
         cls: 'jp-timeline-entry jp-timeline-entry--header',
       });
       headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
       const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
       headerCard.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-      if (headerLabel.subtitle) {
-        headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
-      }
+      headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
     }
 
     const wrap = this.timelineEl.createDiv({ cls: 'jp-capture-empty' });
@@ -314,8 +312,7 @@ export class JournalCaptureView extends ItemView {
     this.renderScope = scope;
 
     // Date header — first node on the timeline, gets a distinct dot style.
-    const file = this.todayFile;
-    const headerLabel = this.formatDateHeader(file);
+    const headerLabel = this.formatDateHeader(entries.length);
     const headerRow = this.timelineEl.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
@@ -341,7 +338,7 @@ export class JournalCaptureView extends ItemView {
         : a.timestamp < b.timestamp ? -1 : 1;
     });
 
-    const sourcePath = file?.path ?? '';
+    const sourcePath = this.todayFile?.path ?? '';
     for (const entry of sorted) {
       const row = this.timelineEl.createDiv({ cls: 'jp-timeline-entry' });
 
@@ -362,13 +359,11 @@ export class JournalCaptureView extends ItemView {
   }
 
   /** Build a human-readable date label for the timeline header node. */
-  private formatDateHeader(file: TFile | null): { title: string; subtitle?: string } {
+  private formatDateHeader(count: number): { title: string; subtitle: string } {
     const m = moment();
-    // moment.locale defaults to en; we render Chinese labels manually so we
-    // don't depend on the user's locale being zh.
     const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][m.day()];
     const title = m.format('YYYY年M月D日') + ` · ${weekdayZh}`;
-    const subtitle = file ? file.basename : '今天还没有日记';
+    const subtitle = count === 0 ? '还没有 memo' : `${count} 个 memo`;
     return { title, subtitle };
   }
 
