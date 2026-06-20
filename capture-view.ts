@@ -36,6 +36,7 @@ import {
   findSection,
   parseJournalEntries,
 } from './section';
+import { FloatingMic } from './voice/floating-mic';
 import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
@@ -87,6 +88,10 @@ export class JournalCaptureView extends ItemView {
   private scrollEl: HTMLElement | null = null;
   /** Min pixel delta between events that counts as a real scroll move. */
   private readonly scrollDeltaThreshold = 6;
+
+  /** Mobile floating microphone button; only constructed on mobile + when
+   *  the voice feature is enabled. */
+  private floatingMic: FloatingMic | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: JournalPartnerPlugin) {
     super(leaf);
@@ -145,6 +150,7 @@ export class JournalCaptureView extends ItemView {
     await this.fullRebuild();
     this.setupIntersectionObserver();
     this.setupMobileToolbarAutoHide();
+    this.setupFloatingMic();
   }
 
   async onClose(): Promise<void> {
@@ -157,6 +163,7 @@ export class JournalCaptureView extends ItemView {
       this.intersectionObs = null;
     }
     this.teardownMobileToolbarAutoHide();
+    this.teardownFloatingMic();
     this.disposeDays();
     this.containerEl.children[1].empty();
   }
@@ -582,6 +589,45 @@ export class JournalCaptureView extends ItemView {
 
   private setToolbarHidden(hidden: boolean) {
     document.body.toggleClass('jp-hide-mobile-toolbar', hidden);
+  }
+
+  // ── Floating mic (Path A — voice quick capture) ─────────────────────────
+
+  /**
+   * Mount the press-and-hold microphone button on mobile only.
+   *
+   * Slice 2 of the voice-capture design: the recorder is wired up and
+   * captures audio, but onComplete just logs the blob. Slice 3 will add
+   * the STT client and turn the blob into text inserted into the
+   * textarea. Splitting it this way lets us verify getUserMedia works in
+   * Obsidian's WKWebView before we touch any API.
+   */
+  private setupFloatingMic() {
+    if (!Platform.isMobile) return;
+    if (!this.plugin.settings.voiceEnabled) return;
+
+    this.floatingMic = new FloatingMic({
+      container: this.containerEl,
+      maxSeconds: this.plugin.settings.voiceMaxSeconds,
+      onComplete: async result => {
+        // Slice 2 placeholder — surfaces the recording details so we can
+        // verify in the mobile console that recording actually works.
+        console.log('[Journal Partner] recording complete', {
+          sizeKB: Math.round(result.blob.size / 1024),
+          mime: result.mimeType,
+          durationSec: result.durationSec.toFixed(1),
+        });
+        new Notice(
+          `🎙️ 录音完成：${result.durationSec.toFixed(1)}s · ` +
+            `${Math.round(result.blob.size / 1024)}KB`,
+        );
+      },
+    });
+  }
+
+  private teardownFloatingMic() {
+    this.floatingMic?.destroy();
+    this.floatingMic = null;
   }
 
   // ── Submit / write path ─────────────────────────────────────────────────

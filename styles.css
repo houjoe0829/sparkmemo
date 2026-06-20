@@ -459,3 +459,114 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* ── Floating microphone button (Path A — voice quick capture) ───────────
+   Mounted into <body> by capture-view.ts on mobile only. Position is
+   fixed; bottom offset follows the toolbar's visible/hidden state so it
+   slides up/down with the toolbar in sync. */
+.jp-floating-mic {
+  position: fixed;
+  right: 16px;
+  bottom: 80px;
+  z-index: 9999;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot, #7c3aed) 28%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--jp-tl-dot, #7c3aed) 14%, var(--background-primary));
+  color: var(--jp-tl-dot, #7c3aed);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+
+  transition:
+    bottom 0.22s ease,
+    transform 0.12s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.jp-floating-mic:active {
+  transform: scale(0.96);
+}
+.jp-floating-mic svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* When the toolbar is hidden, the button drops down to fill its space.
+   capture-view.ts toggles the body class; this rule pairs with the
+   .jp-floating-mic transition above for smooth motion. */
+.is-mobile.jp-hide-mobile-toolbar .jp-floating-mic {
+  bottom: 24px;
+}
+
+/* Recording state — red pulse + show timer pill above the button.
+   `data-elapsed` is updated by floating-mic.ts every 250ms. */
+.jp-floating-mic--recording {
+  background: #ef4444;
+  border-color: #b91c1c;
+  color: #fff;
+  animation: jp-mic-pulse 1.2s ease-in-out infinite;
+}
+.jp-floating-mic--recording::after {
+  content: attr(data-elapsed);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+@keyframes jp-mic-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3), 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50%      { box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4), 0 0 0 10px rgba(239, 68, 68, 0); }
+}
+
+/* Will-cancel — user swiped up far enough that releasing cancels. */
+.jp-floating-mic--will-cancel {
+  background: #6b7280 !important;
+  border-color: #4b5563 !important;
+  animation: none !important;
+}
+.jp-floating-mic--will-cancel::after {
+  content: '松开取消';
+  background: #6b7280;
+}
+
+/* Transcribing — spinning indicator until the caller flips state off. */
+.jp-floating-mic--transcribing {
+  background: color-mix(in srgb, var(--jp-tl-dot, #7c3aed) 20%, var(--background-primary));
+  color: var(--jp-tl-dot, #7c3aed);
+}
+.jp-floating-mic--transcribing svg {
+  animation: jp-mic-spin 0.9s linear infinite;
+}
+@keyframes jp-mic-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error — red border flash, 1.8s then back to idle. */
+.jp-floating-mic--error {
+  background: var(--background-primary);
+  border-color: #ef4444;
+  color: #ef4444;
+}
