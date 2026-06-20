@@ -61,7 +61,7 @@ export default class JournalPartnerPlugin extends Plugin {
       name: '打开快速记录侧边栏',
       callback: () => void this.activateCaptureView(),
     });
-    this.addRibbonIcon('clock', '快速记录', () => void this.activateCaptureView());
+    this.addRibbonIcon('feather', '快速记录', () => void this.activateCaptureView());
   }
 
   onunload() {

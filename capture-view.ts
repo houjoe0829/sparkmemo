@@ -95,7 +95,7 @@ export class JournalCaptureView extends ItemView {
   }
 
   getIcon(): string {
-    return 'clock';
+    return 'feather';
   }
 
   async onOpen(): Promise<void> {
