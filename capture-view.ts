@@ -197,13 +197,21 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl = this.inputCardEl.createEl('textarea', {
       cls: 'jp-capture-input',
       attr: {
-        placeholder: 'What do you think now…',
+        placeholder: 'What do you think now…  (Shift+Enter 提交)',
         rows: '3',
       },
     });
     this.textareaEl.addEventListener('input', () => {
       this.refreshSubmitState();
       this.autoResizeTextarea();
+    });
+    // Shift+Enter submits (Enter alone keeps default newline behaviour for
+    // multi-line composition, matching the user's chosen shortcut).
+    this.textareaEl.addEventListener('keydown', evt => {
+      if (evt.key === 'Enter' && evt.shiftKey && !evt.isComposing) {
+        evt.preventDefault();
+        void this.handleSubmit();
+      }
     });
 
     const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });

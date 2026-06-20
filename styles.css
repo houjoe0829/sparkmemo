@@ -182,18 +182,19 @@
 }
 .jp-capture-submit {
   padding: 6px 18px;
-  background: var(--jp-tl-dot);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--jp-tl-dot) 14%, var(--background-primary));
+  color: var(--jp-tl-dot);
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 28%, transparent);
+  border-radius: 999px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.05em;
   cursor: pointer;
-  transition: opacity 0.15s ease, transform 0.05s ease;
+  transition: background-color 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
 }
 .jp-capture-submit:hover {
-  opacity: 0.92;
+  background: color-mix(in srgb, var(--jp-tl-dot) 22%, var(--background-primary));
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--jp-tl-dot) 25%, transparent);
 }
 .jp-capture-submit:active {
   transform: translateY(1px);
