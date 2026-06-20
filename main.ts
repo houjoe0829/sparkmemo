@@ -3,20 +3,20 @@ import {
   MarkdownPostProcessorContext,
   MarkdownView,
   Notice,
+  Platform,
   Plugin,
   PluginSettingTab,
   Setting,
+  WorkspaceLeaf,
 } from 'obsidian';
 import {
   EditorState,
   Extension,
   Prec,
-  RangeSetBuilder,
   StateEffect,
   Transaction,
 } from '@codemirror/state';
 import {
-  Decoration,
   DecorationSet,
   EditorView,
   ViewPlugin,
@@ -24,148 +24,20 @@ import {
   keymap,
 } from '@codemirror/view';
 
-// ── Types & defaults ────────────────────────────────────────────────────────
-
-interface JournalPartnerSettings {
-  /** The heading text that activates the plugin (without # symbols) */
-  targetHeading: string;
-  /** Heading level: 1 → #, 2 → ##, … */
-  headingLevel: number;
-  /** Regex pattern whose first match (or capture group 1) is the timestamp */
-  timestampPattern: string;
-  /** Foreground color of the timestamp badge */
-  timestampColor: string;
-  /** Background color of the timestamp badge */
-  timestampBgColor: string;
-  /** When true, editing a timestamp in the editor is blocked */
-  readonlyTimestamps: boolean;
-  /** When true, pressing Enter inside the journal section auto-inserts a timestamp on the new line */
-  autoTimestamp: boolean;
-  /** When true, render checkboxes as circles instead of squares */
-  circularCheckboxes: boolean;
-}
-
-const DEFAULT_SETTINGS: JournalPartnerSettings = {
-  targetHeading: 'Journal',
-  headingLevel: 2,
-  timestampPattern: '\\d{2}:\\d{2}',
-  timestampColor: '#7c3aed',
-  timestampBgColor: '#ede9fe',
-  readonlyTimestamps: true,
-  autoTimestamp: true,
-  circularCheckboxes: false,
-};
-
-type Rng = { from: number; to: number };
+import {
+  DEFAULT_SETTINGS,
+  JournalPartnerSettings,
+  buildDecorations,
+  findSection,
+  generateTimestamp,
+  getTimestampRanges,
+} from './section';
+import { CAPTURE_VIEW_TYPE, JournalCaptureView } from './capture-view';
 
 // ── CM6 utilities ───────────────────────────────────────────────────────────
 
 /** Effect that forces decoration recomputation after settings change. */
 const forceUpdateEffect = StateEffect.define<null>();
-
-/**
- * Find the character range occupied by the body of a heading section.
- * Returns null if the heading is not found.
- */
-function findSection(
-  doc: string,
-  headingName: string,
-  headingLevel: number,
-): Rng | null {
-  const prefix = '#'.repeat(headingLevel) + ' ';
-  const lines = doc.split('\n');
-  let charOffset = 0;
-  let startOffset = -1;
-
-  for (const line of lines) {
-    if (startOffset === -1) {
-      if (
-        line.startsWith(prefix) &&
-        line.slice(prefix.length).trim() === headingName
-      ) {
-        // Section body starts on the next line
-        startOffset = charOffset + line.length + 1;
-      }
-    } else {
-      // A heading of the same level or higher ends the section
-      const m = line.match(/^(#+)\s/);
-      if (m && m[1].length <= headingLevel) {
-        return { from: startOffset, to: charOffset };
-      }
-    }
-    charOffset += line.length + 1;
-  }
-
-  return startOffset === -1 ? null : { from: startOffset, to: doc.length };
-}
-
-/**
- * Collect the document character ranges that contain timestamp text inside
- * the target section.
- */
-function getTimestampRanges(
-  doc: string,
-  settings: JournalPartnerSettings,
-): Rng[] {
-  const section = findSection(
-    doc,
-    settings.targetHeading,
-    settings.headingLevel,
-  );
-  if (!section) return [];
-
-  // Match optional list-marker prefix, then capture the timestamp
-  const linePattern = new RegExp(
-    `^(?:[-*+]\\s+)?(${settings.timestampPattern})(?=\\s|$)`,
-  );
-
-  const sectionText = doc.slice(section.from, section.to);
-  const lines = sectionText.split('\n');
-  const result: Rng[] = [];
-  let offset = section.from;
-
-  for (const line of lines) {
-    const m = linePattern.exec(line);
-    if (m?.[1] !== undefined) {
-      // The prefix before the captured group
-      const prefixLen = m[0].length - m[1].length;
-      const from = offset + (m.index ?? 0) + prefixLen;
-      result.push({ from, to: from + m[1].length });
-    }
-    offset += line.length + 1; // +1 for the newline character
-  }
-
-  return result;
-}
-
-/** Generate a timestamp string for the current local time in HH:MM format. */
-function generateTimestamp(): string {
-  const now = new Date();
-  return (
-    String(now.getHours()).padStart(2, '0') +
-    ':' +
-    String(now.getMinutes()).padStart(2, '0')
-  );
-}
-
-/** Build a CM6 DecorationSet that marks every timestamp in the target section. */
-function buildDecorations(
-  doc: string,
-  settings: JournalPartnerSettings,
-): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-  const mark = Decoration.mark({
-    class: 'jp-timestamp',
-    inclusiveStart: false,
-    inclusiveEnd: false,
-  });
-
-  for (const { from, to } of getTimestampRanges(doc, settings)) {
-    builder.add(from, to, mark);
-  }
-
-  return builder.finish();
-}
 
 // ── Plugin ──────────────────────────────────────────────────────────────────
 
@@ -179,6 +51,45 @@ export default class JournalPartnerPlugin extends Plugin {
     this.registerEditorExtension(this.createEditorExtensions());
     this.registerMarkdownPostProcessor(this.postProcessor.bind(this));
     this.addSettingTab(new JournalPartnerSettingTab(this.app, this));
+
+    // Capture sidebar view
+    this.registerView(
+      CAPTURE_VIEW_TYPE,
+      leaf => new JournalCaptureView(leaf, this),
+    );
+    this.addCommand({
+      id: 'open-capture-view',
+      name: '打开快速记录侧边栏',
+      callback: () => void this.activateCaptureView(),
+    });
+    this.addRibbonIcon('feather', '快速记录', () => void this.activateCaptureView());
+  }
+
+  onunload() {
+    this.app.workspace.detachLeavesOfType(CAPTURE_VIEW_TYPE);
+  }
+
+  /**
+   * Reveal an existing capture view leaf, or create one.
+   *
+   * - **Mobile** — Obsidian's right sidebar pins views in a drawer the user
+   *   can't pop out, which makes the timeline feel cramped. Open in the
+   *   main work area instead so it gets full-screen treatment.
+   * - **Desktop** — keep the right sidebar so the capture view stays a
+   *   persistent companion next to whatever the user is editing.
+   */
+  async activateCaptureView() {
+    const existing = this.app.workspace.getLeavesOfType(CAPTURE_VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf: WorkspaceLeaf | null = Platform.isMobile
+      ? this.app.workspace.getLeaf(true)
+      : this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    await leaf.setViewState({ type: CAPTURE_VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
   }
 
   // ── Editor extension (source + live-preview) ───────────────────────────────
@@ -252,9 +163,6 @@ export default class JournalPartnerPlugin extends Plugin {
   /**
    * Returns a high-priority keymap extension that intercepts Enter inside the
    * target section.
-   *
-   * For top-level items (no indentation): inserts a fresh timestamp on the new line.
-   * For nested items (indented): only preserves indentation and marker, no timestamp.
    */
   private createEnterKeymap(): Extension {
     const plugin = this;
@@ -276,37 +184,26 @@ export default class JournalPartnerPlugin extends Plugin {
             if (!section) return false;
 
             const cursor = state.selection.main;
-            // Only act when the cursor head is inside the journal section.
-            // Use > (not >=) because when the journal section is the last
-            // section in the document, section.to === doc.length, and the
-            // cursor is legitimately at doc.length when at the very end of
-            // the file — the most common journaling position.
             if (cursor.head < section.from || cursor.head > section.to) {
               return false;
             }
 
             const line = state.doc.lineAt(cursor.head);
 
-            // Detect indentation (nesting level)
             const indentMatch = line.text.match(/^(\s*)/);
             const currentIndent = indentMatch?.[1] ?? '';
             const isNested = currentIndent.length > 0;
 
-            // Detect the list marker used on the current line (-, *, +)
-            // Support both indented and non-indented lines
             const markerMatch = line.text.match(/^\s*([-*+]\s+)/);
             const listMarker = markerMatch ? markerMatch[1] : '';
 
-            // If no marker is found, don't handle this line
             if (!listMarker) return false;
 
             let insertion: string;
 
             if (isNested) {
-              // Nested item: preserve indentation and marker, but no timestamp
               insertion = '\n' + currentIndent + listMarker;
             } else {
-              // Top-level item: insert timestamp
               const ts = generateTimestamp();
               insertion = '\n' + listMarker + ts + ' ';
             }
@@ -329,10 +226,6 @@ export default class JournalPartnerPlugin extends Plugin {
   /**
    * Returns a high-priority keymap extension that intercepts Tab inside the
    * target section.
-   *
-   * When Tab is pressed on a top-level item (no indentation):
-   * - Remove the timestamp from the current line
-   * - Insert Tab indentation (let Obsidian handle it)
    */
   private createTabKeymap(): Extension {
     const plugin = this;
@@ -352,51 +245,40 @@ export default class JournalPartnerPlugin extends Plugin {
             if (!section) return false;
 
             const cursor = state.selection.main;
-            // Only act when the cursor is inside the journal section
             if (cursor.head < section.from || cursor.head > section.to) {
               return false;
             }
 
             const line = state.doc.lineAt(cursor.head);
 
-            // Check if this is a top-level item (no indentation)
             const indentMatch = line.text.match(/^(\s*)/);
             const currentIndent = indentMatch?.[1] ?? '';
             const isTopLevel = currentIndent.length === 0;
 
-            if (!isTopLevel) {
-              // Only process top-level items; let Obsidian handle indentation for nested items
-              return false;
-            }
+            if (!isTopLevel) return false;
 
-            // Find timestamp on this line
             const timestampMatch = line.text.match(
               new RegExp(`^([-*+]\\s+)(${plugin.settings.timestampPattern})\\s+`),
             );
 
-            if (!timestampMatch) {
-              // No timestamp found, let Obsidian handle Tab normally
-              return false;
-            }
+            if (!timestampMatch) return false;
 
-            // Calculate positions:
-            // We need to indent the entire line AND delete the timestamp
-            // The cleanest way is to replace the entire line prefix (Tab + marker + space)
-            // while keeping the rest of the content
-            const markerAndSpace = timestampMatch[1]; // e.g., "- "
-            const timestampText = timestampMatch[2]; // e.g., "06:42"
+            const markerAndSpace = timestampMatch[1];
+            const timestampText = timestampMatch[2];
 
-            // Find what comes after the timestamp and space
             const afterTimestampMatch = line.text.match(
               new RegExp(`^([-*+]\\s+)(${plugin.settings.timestampPattern})\\s+(.*)`),
             );
-            const contentAfterTimestamp = afterTimestampMatch?.[3] ?? ''; // e.g., "任务"
+            const contentAfterTimestamp = afterTimestampMatch?.[3] ?? '';
 
-            // Build the new line: Tab + marker + space + content
             const newLinePrefix = '\t' + markerAndSpace + contentAfterTimestamp;
 
-            // Replace from line start to end of the content after timestamp
-            const replaceEnd = line.from + markerAndSpace.length + timestampText.length + 1 + contentAfterTimestamp.length;
+            const replaceEnd =
+              line.from +
+              markerAndSpace.length +
+              timestampText.length +
+              1 +
+              contentAfterTimestamp.length;
 
             const changes = [
               { from: line.from, to: replaceEnd, insert: newLinePrefix },
@@ -405,7 +287,7 @@ export default class JournalPartnerPlugin extends Plugin {
             view.dispatch(
               state.update({
                 changes,
-                selection: { anchor: line.from + 1 + markerAndSpace.length }, // Cursor after "- "
+                selection: { anchor: line.from + 1 + markerAndSpace.length },
                 scrollIntoView: true,
               }),
             );
@@ -429,7 +311,6 @@ export default class JournalPartnerPlugin extends Plugin {
     this.highlightTimestampsInElement(el);
   }
 
-  /** Check whether a given source line falls inside the target heading section. */
   private isInTargetSection(docText: string, lineStart: number): boolean {
     const section = findSection(
       docText,
@@ -438,7 +319,6 @@ export default class JournalPartnerPlugin extends Plugin {
     );
     if (!section) return false;
 
-    // Convert character offsets → 0-indexed line numbers
     const sectionStartLine =
       docText.slice(0, section.from).split('\n').length - 1;
     const sectionEndLine =
@@ -447,10 +327,6 @@ export default class JournalPartnerPlugin extends Plugin {
     return lineStart >= sectionStartLine && lineStart < sectionEndLine;
   }
 
-  /**
-   * Walk all text nodes inside `el` and wrap each timestamp occurrence
-   * in a <span class="jp-timestamp">.
-   */
   private highlightTimestampsInElement(el: HTMLElement) {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
@@ -476,14 +352,12 @@ export default class JournalPartnerPlugin extends Plugin {
 
   // ── CSS variables & settings plumbing ─────────────────────────────────────
 
-  /** Push current color settings into CSS custom properties. */
   applyCSSVariables() {
     const root = document.documentElement;
     root.style.setProperty('--jp-ts-color', this.settings.timestampColor);
     root.style.setProperty('--jp-ts-bg', this.settings.timestampBgColor);
   }
 
-  /** Apply or remove circular checkbox styling based on settings. */
   private updateCheckboxStyle() {
     const el = document.documentElement;
     if (this.settings.circularCheckboxes) {
@@ -508,7 +382,6 @@ export default class JournalPartnerPlugin extends Plugin {
     this.refreshEditors();
   }
 
-  /** Dispatch a force-update effect to every open Markdown editor. */
   private refreshEditors() {
     this.app.workspace.iterateAllLeaves(leaf => {
       if (leaf.view instanceof MarkdownView) {

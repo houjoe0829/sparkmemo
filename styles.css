@@ -107,3 +107,341 @@
 .theme-dark.jp-circular-checkboxes .task-list-item input[type="checkbox"] {
   border-radius: 50% !important;
 }
+
+/* ── Quick-capture sidebar view ─────────────────────────────────────────── */
+
+.jp-capture-root {
+  --jp-tl-line: var(--jp-ts-bg, #ede9fe);
+  --jp-tl-dot: var(--jp-ts-color, #7c3aed);
+  --jp-tl-dot-ring: color-mix(in srgb, var(--jp-tl-dot) 35%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--background-secondary);
+}
+
+/* Toolbar */
+.jp-capture-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+}
+.jp-capture-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-capture-toolbar-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Input card */
+.jp-capture-card {
+  background: var(--background-primary);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Mobile: the surrounding workspace gives less visual structure than the
+   desktop sidebar, so wrap the input card with a soft gray border to
+   make it read clearly as an interactive surface. Matches the weight of
+   the NOTE submit button's border. */
+.is-mobile .jp-capture-card {
+  border: 1px solid var(--background-modifier-border);
+}
+.is-mobile .jp-capture-card:focus-within {
+  border-color: var(--background-modifier-border-hover);
+}
+/* iOS WebView clips the first character of a <textarea> placeholder when
+   padding-left is 0. A small horizontal pad keeps "What's happening?"
+   from getting its W cut off, without changing the desktop layout. */
+.is-mobile .jp-capture-input {
+  padding: 2px 4px;
+}
+.jp-capture-input {
+  width: 100%;
+  min-height: 60px;
+  max-height: 240px;
+  resize: none;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  padding: 0;
+  box-sizing: border-box;
+}
+.jp-capture-input::placeholder {
+  color: var(--text-faint);
+}
+.jp-capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.jp-capture-submit {
+  padding: 6px 18px;
+  background: color-mix(in srgb, var(--jp-tl-dot) 14%, var(--background-primary));
+  color: var(--jp-tl-dot);
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 28%, transparent);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
+}
+.jp-capture-submit:hover {
+  background: color-mix(in srgb, var(--jp-tl-dot) 22%, var(--background-primary));
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--jp-tl-dot) 25%, transparent);
+}
+.jp-capture-submit:active {
+  transform: translateY(1px);
+}
+.jp-capture-submit--disabled,
+.jp-capture-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Empty state */
+.jp-capture-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Timeline */
+.jp-timeline {
+  position: relative;
+  padding-left: 24px;
+}
+.jp-timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--jp-tl-line);
+  border-radius: 2px;
+}
+.jp-timeline-entry {
+  position: relative;
+  margin-bottom: 12px;
+}
+.jp-timeline-entry:last-child {
+  margin-bottom: 0;
+}
+.jp-timeline-dot {
+  position: absolute;
+  left: -22px;
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  border: 2px solid var(--jp-tl-dot);
+  box-sizing: border-box;
+}
+.jp-timeline-dot--latest {
+  width: 12px;
+  height: 12px;
+  left: -23px;
+  top: 5px;
+  background: var(--jp-tl-dot);
+  border: 3px solid var(--background-primary);
+  box-shadow: 0 0 0 1px var(--jp-tl-dot-ring);
+}
+
+/* Timeline entry: dot + connector + timestamp pill on the same baseline,
+   then a content bubble that hangs off below the timestamp. */
+.jp-timeline-entry-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  margin-bottom: 10px;
+}
+/* Connector line from the timeline dot to the timestamp pill */
+.jp-timeline-entry-head::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  background: var(--jp-tl-line);
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.jp-timeline-entry-head .jp-timestamp {
+  position: relative;
+  margin-right: 0;
+}
+/* Smooth curved tail dropping from the bottom-center of the timestamp
+   pill and landing on the bubble's top edge. The box's left edge sits
+   at the pill's horizontal center, with border-left going straight
+   down then curving rightward into a short horizontal segment. */
+.jp-timeline-entry-head .jp-timestamp::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 14px;
+  height: 10px;
+  border-left: 2px solid var(--jp-tl-line);
+  border-bottom: 2px solid var(--jp-tl-line);
+  border-bottom-left-radius: 12px;
+  pointer-events: none;
+}
+
+/* Content bubble — chat-style rounded card with a very faint accent tint */
+.jp-timeline-bubble {
+  position: relative;
+  background: color-mix(in srgb, var(--jp-tl-dot) 6%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 14%, transparent);
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-normal);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Dark theme adjustments */
+.theme-dark .jp-capture-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.theme-dark .jp-timeline-bubble {
+  background: color-mix(in srgb, var(--jp-tl-dot) 12%, var(--background-primary));
+  border-color: color-mix(in srgb, var(--jp-tl-dot) 22%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Timeline date-header node (first row) */
+.jp-timeline-entry--header {
+  margin-bottom: 16px;
+}
+.jp-timeline-dot--header {
+  width: 14px;
+  height: 14px;
+  left: -24px;
+  top: 4px;
+  background: var(--jp-tl-dot);
+  border: 3px solid var(--background-secondary);
+  box-shadow: 0 0 0 2px var(--jp-tl-dot);
+}
+.jp-timeline-header-card {
+  padding: 0 0 4px 2px;
+}
+.jp-timeline-header-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-normal);
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+.jp-timeline-header-sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Markdown rendered body — flatten paragraph margins so bubbles stay tight */
+.jp-timeline-bubble > :first-child {
+  margin-top: 0;
+}
+.jp-timeline-bubble > :last-child {
+  margin-bottom: 0;
+}
+.jp-timeline-bubble p {
+  margin: 0;
+}
+.jp-timeline-bubble p + p {
+  margin-top: 4px;
+}
+/* Embedded images shouldn't blow the bubble out */
+.jp-timeline-bubble img,
+.jp-timeline-bubble .internal-embed img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin-top: 6px;
+}
+.jp-timeline-bubble .internal-embed {
+  display: block;
+}
+/* Lists inside bubbles: tighter padding */
+.jp-timeline-bubble ul,
+.jp-timeline-bubble ol {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+
+/* Override Obsidian default textarea focus styles for an immersive input */
+.jp-capture-input:focus,
+.jp-capture-input:focus-visible,
+.jp-capture-input:hover,
+.jp-capture-input:active {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
+}
+
+/* Toolbar layout — spacer pushes date-nav cluster right, hidden state for
+   the "today" button when already on today. */
+.jp-capture-toolbar-spacer {
+  flex: 1;
+}
+.jp-capture-toolbar-btn--hidden {
+  display: none !important;
+}
+
+/* Continuous-scroll timeline: each day is a sub-section; the vertical line
+   already drawn by .jp-timeline::before spans the whole stream. */
+.jp-timeline-day {
+  position: relative;
+}
+.jp-timeline-day + .jp-timeline-day {
+  margin-top: 18px;
+}
+
+/* Infinite-scroll sentinel — invisible 1px element observed for intersection */
+.jp-timeline-sentinel {
+  height: 1px;
+  margin: 12px 0;
+}
+
+/* End-of-stream marker shown when no more history exists */
+.jp-timeline-end {
+  padding: 14px 12px 24px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}
