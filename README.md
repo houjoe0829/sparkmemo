@@ -21,7 +21,8 @@
 
 ↓ 渲染后时间戳高亮显示，颜色可自定义。
 
----
+<img width="647" height="224" alt="image" src="https://github.com/user-attachments/assets/1ad2df5b-b918-46f5-822f-1fcee89bbf3c" />
+
 
 ## 功能
 
@@ -47,6 +48,8 @@
 - **实时同步**：在主编辑器里改动当天日记，侧边栏对应日的时间线会就地刷新
 - **Markdown 渲染**：支持双向链接、嵌入图片、加粗斜体等，所有原生 Obsidian 渲染特性均可用
 - **排序切换**：按当日时间正序 / 倒序展示，自由切换
+  
+<img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/ad0b758f-d304-4b16-ae81-c2b3afd7aa5e" />
 
 ---
 
