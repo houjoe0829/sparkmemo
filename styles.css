@@ -158,19 +158,14 @@
 }
 
 /* Mobile: the surrounding workspace gives less visual structure than the
-   desktop sidebar, so wrap the input card with a faint accent border to
-   make it read clearly as an interactive surface. */
+   desktop sidebar, so wrap the input card with a soft gray border to
+   make it read clearly as an interactive surface. Matches the weight of
+   the NOTE submit button's border. */
 .is-mobile .jp-capture-card {
-  border: 1.5px solid color-mix(in srgb, var(--jp-tl-dot) 35%, transparent);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    0 0 0 4px color-mix(in srgb, var(--jp-tl-dot) 6%, transparent);
+  border: 1px solid var(--background-modifier-border);
 }
 .is-mobile .jp-capture-card:focus-within {
-  border-color: color-mix(in srgb, var(--jp-tl-dot) 60%, transparent);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    0 0 0 4px color-mix(in srgb, var(--jp-tl-dot) 14%, transparent);
+  border-color: var(--background-modifier-border-hover);
 }
 .jp-capture-input {
   width: 100%;
