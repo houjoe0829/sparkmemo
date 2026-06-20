@@ -43,9 +43,16 @@ export class JournalCaptureView extends ItemView {
   private textareaEl!: HTMLTextAreaElement;
   private submitBtn!: HTMLButtonElement;
   private sortBtn!: HTMLButtonElement;
+  private prevDayBtn!: HTMLButtonElement;
+  private nextDayBtn!: HTMLButtonElement;
+  private todayBtn!: HTMLButtonElement;
 
   // Cached state for rerender filtering
   private todayFile: TFile | null = null;
+  /** Date currently displayed in the timeline (may be any day). */
+  private viewedDate: moment.Moment = moment().startOf('day');
+  /** TFile matching `viewedDate`, used to scope vault.modify rerenders. */
+  private viewedFile: TFile | null = null;
   private rerenderTimer: number | null = null;
   /** Per-render lifecycle owner for MarkdownRenderer.render children. */
   private renderScope: Component | null = null;
@@ -76,10 +83,14 @@ export class JournalCaptureView extends ItemView {
     this.buildInputCard(root as HTMLElement);
     this.buildTimeline(root as HTMLElement);
 
-    // Watch the vault — only rerender when today's file changes
+    // Watch the vault — only rerender when the currently viewed file changes
     this.registerEvent(
       this.app.vault.on('modify', file => {
-        if (file instanceof TFile && this.todayFile && file.path === this.todayFile.path) {
+        if (
+          file instanceof TFile &&
+          this.viewedFile &&
+          file.path === this.viewedFile.path
+        ) {
           this.scheduleRerender();
         }
       }),
@@ -94,8 +105,13 @@ export class JournalCaptureView extends ItemView {
     );
     this.registerEvent(
       this.app.vault.on('delete', file => {
-        if (this.todayFile && file instanceof TFile && file.path === this.todayFile.path) {
-          this.todayFile = null;
+        if (
+          this.viewedFile &&
+          file instanceof TFile &&
+          file.path === this.viewedFile.path
+        ) {
+          this.viewedFile = null;
+          if (this.isViewingToday()) this.todayFile = null;
           this.scheduleRerender();
         }
       }),
@@ -141,6 +157,48 @@ export class JournalCaptureView extends ItemView {
       this.updateSortIcon();
       await this.rerender();
     });
+
+    // Spacer pushes date-nav cluster to the right
+    this.toolbarEl.createDiv({ cls: 'jp-capture-toolbar-spacer' });
+
+    this.prevDayBtn = this.toolbarEl.createEl('button', {
+      cls: 'jp-capture-toolbar-btn',
+      attr: { 'aria-label': '前一天', title: '前一天' },
+    });
+    setIcon(this.prevDayBtn, 'chevron-left');
+    this.prevDayBtn.addEventListener('click', () => {
+      this.viewedDate = this.viewedDate.clone().subtract(1, 'day');
+      void this.rerender();
+    });
+
+    this.todayBtn = this.toolbarEl.createEl('button', {
+      cls: 'jp-capture-toolbar-btn',
+      attr: { 'aria-label': '回到今天', title: '回到今天' },
+    });
+    setIcon(this.todayBtn, 'calendar-check');
+    this.todayBtn.addEventListener('click', () => {
+      this.viewedDate = moment().startOf('day');
+      void this.rerender();
+    });
+
+    this.nextDayBtn = this.toolbarEl.createEl('button', {
+      cls: 'jp-capture-toolbar-btn',
+      attr: { 'aria-label': '后一天', title: '后一天' },
+    });
+    setIcon(this.nextDayBtn, 'chevron-right');
+    this.nextDayBtn.addEventListener('click', () => {
+      this.viewedDate = this.viewedDate.clone().add(1, 'day');
+      void this.rerender();
+    });
+  }
+
+  /** Show/hide the "back to today" pill based on whether we're already on today. */
+  private updateTodayBtnVisibility() {
+    this.todayBtn.toggleClass('jp-capture-toolbar-btn--hidden', this.isViewingToday());
+  }
+
+  private isViewingToday(): boolean {
+    return this.viewedDate.isSame(moment().startOf('day'), 'day');
   }
 
   private updateSortIcon() {
@@ -216,6 +274,7 @@ export class JournalCaptureView extends ItemView {
       this.renderScope = null;
     }
     this.timelineEl.empty();
+    this.updateTodayBtnVisibility();
 
     if (!appHasDailyNotesPluginLoaded()) {
       this.renderEmpty('no-daily-plugin');
@@ -224,13 +283,16 @@ export class JournalCaptureView extends ItemView {
 
     let file: TFile | null = null;
     try {
-      file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+      file = getDailyNote(this.viewedDate, getAllDailyNotes()) as TFile | null;
     } catch (err) {
-      console.error('[Journal Partner] failed to resolve today daily note', err);
+      console.error('[Journal Partner] failed to resolve daily note', err);
       this.renderEmpty('no-daily-plugin');
       return;
     }
-    this.todayFile = file ?? null;
+    this.viewedFile = file ?? null;
+    if (this.isViewingToday()) {
+      this.todayFile = file ?? null;
+    }
 
     if (!file) {
       this.renderEmpty('no-file');
@@ -360,9 +422,18 @@ export class JournalCaptureView extends ItemView {
 
   /** Build a human-readable date label for the timeline header node. */
   private formatDateHeader(count: number): { title: string; subtitle: string } {
-    const m = moment();
-    const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][m.day()];
-    const title = m.format('YYYY年M月D日') + ` · ${weekdayZh}`;
+    const d = this.viewedDate;
+    const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.day()];
+    const dateLabel = d.format('YYYY年M月D日') + ` · ${weekdayZh}`;
+    const today = moment().startOf('day');
+    let relative = '';
+    const diff = d.diff(today, 'days');
+    if (diff === 0) relative = ' · 今天';
+    else if (diff === -1) relative = ' · 昨天';
+    else if (diff === 1) relative = ' · 明天';
+    else if (diff < 0) relative = ` · ${-diff} 天前`;
+    else relative = ` · ${diff} 天后`;
+    const title = dateLabel + relative;
     const subtitle = count === 0 ? '还没有 memo' : `${count} 个 memo`;
     return { title, subtitle };
   }
@@ -399,10 +470,17 @@ export class JournalCaptureView extends ItemView {
         appendToJournalSection(content, this.plugin.settings, line),
       );
 
-      // 3. Clean up UI — vault.modify event will trigger rerender
+      // 3. Clean up UI — submit always writes to today, so snap the timeline
+      //    back to today (vault.modify will rerender if we were already there;
+      //    otherwise we trigger an explicit rerender).
       this.textareaEl.value = '';
       this.autoResizeTextarea();
       this.todayFile = file;
+      const wasOnToday = this.isViewingToday();
+      if (!wasOnToday) {
+        this.viewedDate = moment().startOf('day');
+        await this.rerender();
+      }
     } catch (err) {
       console.error('[Journal Partner] submit failed', err);
       new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);

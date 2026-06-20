@@ -352,3 +352,12 @@
   box-shadow: none !important;
   -webkit-box-shadow: none !important;
 }
+
+/* Toolbar layout — spacer pushes date-nav cluster right, hidden state for
+   the "today" button when already on today. */
+.jp-capture-toolbar-spacer {
+  flex: 1;
+}
+.jp-capture-toolbar-btn--hidden {
+  display: none !important;
+}
