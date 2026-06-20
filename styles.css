@@ -298,13 +298,14 @@
   pointer-events: none;
 }
 
-/* Content bubble — chat-style rounded card */
+/* Content bubble — chat-style rounded card with a very faint accent tint */
 .jp-timeline-bubble {
   position: relative;
-  background: var(--background-primary);
+  background: color-mix(in srgb, var(--jp-tl-dot) 6%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 14%, transparent);
   border-radius: 12px;
   padding: 10px 14px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--text-normal);
@@ -313,8 +314,12 @@
 }
 
 /* Dark theme adjustments */
-.theme-dark .jp-capture-card,
+.theme-dark .jp-capture-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
 .theme-dark .jp-timeline-bubble {
+  background: color-mix(in srgb, var(--jp-tl-dot) 12%, var(--background-primary));
+  border-color: color-mix(in srgb, var(--jp-tl-dot) 22%, transparent);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
