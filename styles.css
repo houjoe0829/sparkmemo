@@ -356,6 +356,41 @@
 }
 .jp-timeline-header-card {
   padding: 0 0 4px 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.jp-timeline-header-text {
+  flex: 1;
+  min-width: 0;
+}
+.jp-timeline-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.jp-timeline-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-timeline-header-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.jp-timeline-header-btn svg {
+  width: 14px;
+  height: 14px;
 }
 .jp-timeline-header-title {
   font-size: 16px;
@@ -529,4 +564,386 @@
   border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* ── Tab bar (capture / stats) ──────────────────────────────────────────── */
+
+/* Tabs sit at the very top of the view, above the input card / stats
+   toolbar. Pill-shaped buttons with icon + short label; the active one
+   wears a soft accent background to make the current pane obvious. */
+.jp-tab-bar {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 2px;
+  margin-bottom: 10px;
+}
+.jp-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.jp-tab-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+.jp-tab-btn-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-tab-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.jp-tab-btn.is-active {
+  background: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 14%, transparent);
+  color: var(--jp-ts-color, #7c3aed);
+  border-color: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 22%, transparent);
+}
+.theme-dark .jp-tab-btn.is-active {
+  background: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 22%, transparent);
+  border-color: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 32%, transparent);
+}
+
+/* Pane containers — capture pane keeps its existing layout; stats pane
+   stacks toolbar + body vertically. */
+.jp-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Yearly stats view ────────────────────────────────────────────────────
+   Lives inside the JournalCaptureView as the second tab. Hosted in
+   `.jp-pane-stats`; uses the same purple accent token as the timestamp
+   badge for visual continuity. */
+
+.jp-pane-stats {
+  --jp-stats-accent: var(--jp-ts-color, #7c3aed);
+  --jp-stats-accent-soft: var(--jp-ts-bg, #ede9fe);
+  --jp-stats-cell-size: 11px;
+  --jp-stats-cell-gap: 3px;
+}
+
+/* Stats toolbar — year nav only (page title sits in the tab bar above) */
+.jp-stats-toolbar {
+  display: flex;
+  align-items: center;
+}
+.jp-stats-toolbar-spacer {
+  flex: 1;
+}
+.jp-stats-year-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  background: var(--background-secondary);
+  border-radius: 999px;
+}
+.jp-stats-year-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-stats-year-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.jp-stats-year-label {
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Body container */
+.jp-stats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Loading + empty states */
+.jp-stats-loading,
+.jp-stats-empty {
+  padding: 40px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.jp-stats-spinner {
+  width: 22px;
+  height: 22px;
+  margin: 0 auto 10px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--jp-stats-accent);
+  border-radius: 50%;
+  animation: jp-stats-spin 0.8s linear infinite;
+}
+@keyframes jp-stats-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Hero — combined total-words headline + inline KPI strip in one card.
+   Top half: the big "X 万 字" number with subtitle.
+   Bottom half: 4 compact KPIs in a grid, separated from the top by a hairline. */
+.jp-stats-hero {
+  padding: 12px 14px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+}
+.jp-stats-hero-top {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 10px;
+}
+.jp-stats-hero-number {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-normal);
+  font-feature-settings: 'tnum';
+}
+.jp-stats-hero-num {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.jp-stats-hero-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.jp-stats-hero-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Inline KPI strip living inside the hero card. With 4 KPIs we default to a
+   2×2 grid for sidebar widths; on a wider capture pane they spread to a
+   single row. */
+.jp-stats-hero-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 8px;
+}
+@media (min-width: 520px) {
+  .jp-stats-hero-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.jp-stats-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.jp-stats-kpi-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-stats-accent);
+}
+.jp-stats-kpi-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.jp-stats-kpi-row {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.jp-stats-kpi-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-normal);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.jp-stats-kpi-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.jp-stats-kpi-label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* Heatmap section */
+.jp-stats-heatmap-section {
+  padding: 14px 16px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+}
+.jp-stats-heatmap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.jp-stats-heatmap-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+/* The heatmap is naturally wider than a sidebar; allow horizontal scroll
+   so we don't squish the cells beyond readability. */
+.jp-stats-heatmap-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.jp-stats-heatmap-inner {
+  display: flex;
+  gap: 6px;
+  min-width: max-content;
+}
+.jp-stats-daylabels {
+  display: grid;
+  grid-template-rows: repeat(7, var(--jp-stats-cell-size));
+  row-gap: var(--jp-stats-cell-gap);
+  padding-top: 16px;
+}
+.jp-stats-daylabel {
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: var(--jp-stats-cell-size);
+  height: var(--jp-stats-cell-size);
+  width: 12px;
+  text-align: right;
+}
+.jp-stats-heatmap-right {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.jp-stats-monthrow {
+  display: grid;
+  grid-auto-columns: var(--jp-stats-cell-size);
+  grid-auto-flow: column;
+  column-gap: var(--jp-stats-cell-gap);
+  height: 13px;
+}
+.jp-stats-monthlabel {
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: 13px;
+  white-space: nowrap;
+  width: 0;
+  overflow: visible;
+}
+.jp-stats-grid {
+  display: grid;
+  grid-auto-columns: var(--jp-stats-cell-size);
+  grid-auto-flow: column;
+  column-gap: var(--jp-stats-cell-gap);
+}
+.jp-stats-col {
+  display: grid;
+  grid-template-rows: repeat(7, var(--jp-stats-cell-size));
+  row-gap: var(--jp-stats-cell-gap);
+}
+.jp-stats-cell {
+  width: var(--jp-stats-cell-size);
+  height: var(--jp-stats-cell-size);
+  border-radius: 2px;
+  background: var(--background-modifier-border);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.jp-stats-cell.is-empty {
+  background: transparent;
+  cursor: default;
+}
+.jp-stats-cell:hover:not(.is-empty):not(.is-future) {
+  transform: scale(1.3);
+}
+.jp-stats-cell.is-future {
+  background: transparent;
+  cursor: default;
+  outline: 1px dashed var(--background-modifier-border);
+  outline-offset: -1px;
+}
+.jp-stats-cell.is-today {
+  outline: 2px solid var(--jp-stats-accent);
+  outline-offset: 1px;
+}
+
+/* 5-level purple ramp via color-mix so it reacts to the accent setting. */
+.jp-stats-cell.level-0 {
+  background: color-mix(in srgb, var(--text-faint) 14%, transparent);
+}
+.jp-stats-cell.level-1 {
+  background: color-mix(in srgb, var(--jp-stats-accent) 22%, var(--background-primary));
+}
+.jp-stats-cell.level-2 {
+  background: color-mix(in srgb, var(--jp-stats-accent) 45%, var(--background-primary));
+}
+.jp-stats-cell.level-3 {
+  background: color-mix(in srgb, var(--jp-stats-accent) 70%, var(--background-primary));
+}
+.jp-stats-cell.level-4 {
+  background: var(--jp-stats-accent);
+}
+
+/* Legend */
+.jp-stats-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 10px;
+}
+.jp-stats-legend .jp-stats-cell {
+  cursor: default;
+}
+.jp-stats-legend .jp-stats-cell:hover {
+  transform: none;
+}
+.jp-stats-legend-label {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  padding: 0 3px;
+}
+
+/* Footer summary */
+.jp-stats-footer {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Dark theme: bump level-0 contrast so empty days don't disappear. */
+.theme-dark .jp-stats-cell.level-0 {
+  background: color-mix(in srgb, var(--text-faint) 18%, transparent);
 }
