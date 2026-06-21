@@ -36,8 +36,6 @@ import {
   findSection,
   parseJournalEntries,
 } from './section';
-import { FloatingMic } from './voice/floating-mic';
-import { transcribeAudio } from './voice/stt-client';
 import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
@@ -89,10 +87,6 @@ export class JournalCaptureView extends ItemView {
   private scrollEl: HTMLElement | null = null;
   /** Min pixel delta between events that counts as a real scroll move. */
   private readonly scrollDeltaThreshold = 6;
-
-  /** Mobile floating microphone button; only constructed on mobile + when
-   *  the voice feature is enabled. */
-  private floatingMic: FloatingMic | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: JournalPartnerPlugin) {
     super(leaf);
@@ -151,7 +145,6 @@ export class JournalCaptureView extends ItemView {
     await this.fullRebuild();
     this.setupIntersectionObserver();
     this.setupMobileToolbarAutoHide();
-    this.setupFloatingMic();
   }
 
   async onClose(): Promise<void> {
@@ -164,7 +157,6 @@ export class JournalCaptureView extends ItemView {
       this.intersectionObs = null;
     }
     this.teardownMobileToolbarAutoHide();
-    this.teardownFloatingMic();
     this.disposeDays();
     this.containerEl.children[1].empty();
   }
@@ -590,59 +582,6 @@ export class JournalCaptureView extends ItemView {
 
   private setToolbarHidden(hidden: boolean) {
     document.body.toggleClass('jp-hide-mobile-toolbar', hidden);
-  }
-
-  // ── Floating mic (Path A — voice quick capture) ─────────────────────────
-
-  /**
-   * Mount the press-and-hold microphone button on mobile only.
-   *
-   * Slice 2 of the voice-capture design: the recorder is wired up and
-   * captures audio, but onComplete just logs the blob. Slice 3 will add
-   * the STT client and turn the blob into text inserted into the
-   * textarea. Splitting it this way lets us verify getUserMedia works in
-   * Obsidian's WKWebView before we touch any API.
-   */
-  private setupFloatingMic() {
-    if (!Platform.isMobile) return;
-    if (!this.plugin.settings.voiceEnabled) return;
-
-    this.floatingMic = new FloatingMic({
-      container: this.containerEl,
-      maxSeconds: this.plugin.settings.voiceMaxSeconds,
-      onComplete: async result => {
-        // STT → text. Throws on failure so the FloatingMic buffers the
-        // blob for one-tap retry; success path appends to the textarea.
-        const text = await transcribeAudio(result.blob, this.plugin.settings, {
-          mimeType: result.mimeType,
-          ext: result.ext,
-        });
-
-        if (text.length === 0) {
-          // Empty result is a soft failure — provider returned 200 but
-          // nothing useful. No point retrying; surface and bail.
-          throw new Error('未识别到内容');
-        }
-
-        // Append (don't overwrite) so users can stitch multiple recordings.
-        const current = this.textareaEl.value;
-        const joiner = current.length > 0 && !/\s$/.test(current) ? ' ' : '';
-        this.textareaEl.value = current + joiner + text;
-        this.refreshSubmitState();
-        this.autoResizeTextarea();
-        // Focus so the user can keep editing or hit submit immediately
-        this.textareaEl.focus();
-
-        if (this.plugin.settings.voiceAutoSubmit) {
-          await this.handleSubmit();
-        }
-      },
-    });
-  }
-
-  private teardownFloatingMic() {
-    this.floatingMic?.destroy();
-    this.floatingMic = null;
   }
 
   // ── Submit / write path ─────────────────────────────────────────────────

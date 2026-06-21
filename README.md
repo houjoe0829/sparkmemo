@@ -57,11 +57,22 @@
 
 ```
 obsidian://journal-partner?text=<URL编码内容>
+obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>
 ```
 
-可选参数 `time=HH:MM` 指定时间戳，默认使用当前时间。
+**参数：**
 
-**搭配 iPhone Action Button**：在 iOS Shortcuts 里创建一个捷径，第一步「听写文本」，第二步「打开 URL」（URL 填上面的协议、`text` 用上一步输出变量）；把这个捷径设为 Action Button，按一下手机侧键就能听写并自动落到今天的日记，全程不打断当前操作。
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `text` | text/audio 至少一项 | 条目文字内容（URL 编码） |
+| `audio` | text/audio 至少一项 | vault 内的音频附件相对路径，例如 `Assets/audio/2026-06-21_153012.m4a`，会以 `![[...]]` 嵌入，渲染成可播放的音频条 |
+| `time` | 否 | `HH:MM` 格式，默认使用当前时间 |
+
+**搭配 iPhone Action Button**：在 iOS Shortcuts 里创建一个捷径——
+- 「听写文本」→「打开 URL」（仅文字）
+- 「录音 → 听写文本 → 保存录音到 `Assets/audio/` → 打开 URL（text + audio 两个参数）」（文字 + 录音双轨）
+
+把捷径设为 Action Button，按一下手机侧键就能听写并自动落到今天的日记，全程不打断当前操作。
 
 ---
 

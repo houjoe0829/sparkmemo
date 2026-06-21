@@ -129,19 +129,31 @@ export default class JournalPartnerPlugin extends Plugin {
    *
    * @param text     Raw user content (may contain newlines).
    * @param ts       Timestamp string in `HH:MM` form. Defaults to now.
+   * @param audio    Optional vault-relative path to an audio attachment;
+   *                 when provided, ` ![[path]]` is appended to the entry.
    * @returns        true on success, false if Daily Notes plugin is missing
    *                 or the write fails.
    */
-  async writeToTodayJournal(text: string, ts?: string): Promise<boolean> {
+  async writeToTodayJournal(text: string, ts?: string, audio?: string): Promise<boolean> {
     if (!appHasDailyNotesPluginLoaded()) {
       new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
       return false;
     }
     const trimmed = text.trim();
-    if (trimmed.length === 0) return false;
+    const audioPath = audio?.trim() ?? '';
+    console.log("音频路径:", audioPath)
+    // Require at least one of text / audio — an entry with neither is junk.
+    if (trimmed.length === 0 && audioPath.length === 0) return false;
 
     const stamp = ts ?? generateTimestamp();
-    const line = buildEntryLine(trimmed.replace(/\r\n/g, '\n'), stamp);
+    // Embed the audio as a wiki-link so Obsidian renders the inline player.
+    // Single-line entries get a trailing ` ![[path]]`; multi-line text uses
+    // buildEntryLine to keep markdown soft-breaks, then we append on the
+    // first line (which is the only one with the timestamp anchor).
+    const body = audioPath.length > 0
+      ? `${trimmed}${trimmed.length > 0 ? ' ' : ''}![[${audioPath}]]`
+      : trimmed;
+    const line = buildEntryLine(body.replace(/\r\n/g, '\n'), stamp);
 
     try {
       let file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
@@ -163,8 +175,11 @@ export default class JournalPartnerPlugin extends Plugin {
    * Handle `obsidian://journal-partner?...` URLs.
    *
    * The protocol handler is registered specifically for `journal-partner`,
-   * so every invocation is implicitly the quick-capture action. We accept
-   * `text` (required) and an optional `time=HH:MM` override.
+   * so every invocation is implicitly the quick-capture action. We accept:
+   *   - `text`  (optional if `audio` is given) — entry body
+   *   - `time`  optional `HH:MM` override
+   *   - `audio` optional vault-relative attachment path; rendered as
+   *             `![[path]]` so Obsidian shows the inline audio player
    *
    * Note: `params.action` is reserved by Obsidian and will always equal
    * the protocol handler name (`journal-partner`) here — do NOT use it
@@ -172,8 +187,10 @@ export default class JournalPartnerPlugin extends Plugin {
    */
   private async handleProtocol(params: ObsidianProtocolData): Promise<void> {
     const text = params.text ?? '';
-    if (text.trim().length === 0) {
-      new Notice('Quick capture 缺少 text 参数');
+    const audio = params.audio ?? '';
+
+    if (text.trim().length === 0 && audio.trim().length === 0) {
+      new Notice('Quick capture 至少需要 text 或 audio 参数之一');
       return;
     }
 
@@ -181,10 +198,13 @@ export default class JournalPartnerPlugin extends Plugin {
     const tsValid = typeof time === 'string' && /^\d{2}:\d{2}$/.test(time);
     const ts = tsValid ? time : undefined;
 
-    const ok = await this.writeToTodayJournal(text, ts);
+    const ok = await this.writeToTodayJournal(text, ts, audio);
     if (ok) {
-      const preview = text.trim().replace(/\s+/g, ' ').slice(0, 20);
-      new Notice(`📝 已记录：${preview}${text.length > 20 ? '…' : ''}`);
+      const previewSrc = text.trim().length > 0 ? text : (audio || '语音');
+      const preview = previewSrc.trim().replace(/\s+/g, ' ').slice(0, 20);
+      const ellip = previewSrc.length > 20 ? '…' : '';
+      const tag = audio.trim().length > 0 ? '🎙️' : '📝';
+      new Notice(`${tag} 已记录：${preview}${ellip}`);
     }
   }
 
@@ -607,168 +627,6 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           }),
       );
 
-    // ── Voice quick capture ────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '🎙️ 语音快速记录' });
-
-    const voiceDesc = containerEl.createEl('p', {
-      cls: 'jp-settings-help',
-      text:
-        '在移动端的快速记录视图右下角显示悬浮麦克风按钮，按住录音，松开后将' +
-        '语音上传到下方配置的 STT 服务转写为文字。当前支持任何 OpenAI 兼容' +
-        '的语音识别接口（推荐：火山引擎方舟豆包语音、阿里云 DashScope、OpenAI Whisper）。',
-    });
-    voiceDesc.style.cssText =
-      'margin: 4px 0 12px; padding: 10px 12px; border-radius: 6px;' +
-      'background: var(--background-secondary); color: var(--text-muted);' +
-      'font-size: 12.5px; line-height: 1.6;';
-
-    new Setting(containerEl)
-      .setName('启用悬浮麦克风按钮')
-      .setDesc('关闭后移动端不再显示悬浮按钮，但下方 STT 配置仍然保留')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.voiceEnabled)
-          .onChange(async value => {
-            this.plugin.settings.voiceEnabled = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName('转写后自动写入')
-      .setDesc('开启后，语音转写完成立刻写入当天日记；关闭则填入输入框由你编辑后再 NOTE')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.voiceAutoSubmit)
-          .onChange(async value => {
-            this.plugin.settings.voiceAutoSubmit = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName('录音时长上限（秒）')
-      .setDesc('超过该时长自动停止录音并转写，避免误触长按')
-      .addText(text =>
-        text
-          .setPlaceholder('60')
-          .setValue(String(this.plugin.settings.voiceMaxSeconds))
-          .onChange(async value => {
-            const n = parseInt(value, 10);
-            if (!Number.isFinite(n) || n < 5 || n > 600) return;
-            this.plugin.settings.voiceMaxSeconds = n;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    // Provider quick-fill buttons — keeps users from copy-pasting endpoints
-    new Setting(containerEl)
-      .setName('快速填充预设')
-      .setDesc('点击预设按钮自动填入 endpoint 和 model 占位，仍需自行填写 API Key')
-      .addButton(btn =>
-        btn.setButtonText('火山引擎方舟（推荐）').onClick(async () => {
-          this.plugin.settings.sttEndpoint = 'https://ark.cn-beijing.volces.com/api/v3';
-          this.plugin.settings.sttModel = ''; // 用户需填入具体豆包语音模型 ID
-          await this.plugin.saveSettings();
-          this.display();
-        }),
-      )
-      .addButton(btn =>
-        btn.setButtonText('阿里云 DashScope').onClick(async () => {
-          this.plugin.settings.sttEndpoint =
-            'https://dashscope.aliyuncs.com/compatible-mode/v1';
-          this.plugin.settings.sttModel = 'qwen-audio-asr';
-          await this.plugin.saveSettings();
-          this.display();
-        }),
-      )
-      .addButton(btn =>
-        btn.setButtonText('OpenAI Whisper').onClick(async () => {
-          this.plugin.settings.sttEndpoint = 'https://api.openai.com/v1';
-          this.plugin.settings.sttModel = 'whisper-1';
-          await this.plugin.saveSettings();
-          this.display();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName('STT Endpoint')
-      .setDesc('OpenAI 兼容接口的基础 URL，不含末尾斜杠')
-      .addText(text =>
-        text
-          .setPlaceholder('https://ark.cn-beijing.volces.com/api/v3')
-          .setValue(this.plugin.settings.sttEndpoint)
-          .onChange(async value => {
-            this.plugin.settings.sttEndpoint = value.trim();
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    // API Key — masked by default, reveal on demand
-    let keyInputEl: HTMLInputElement | null = null;
-    new Setting(containerEl)
-      .setName('API Key')
-      .setDesc('对应服务商的 API Key。注意：以明文保存在 vault 的 data.json 中')
-      .addText(text => {
-        text
-          .setPlaceholder('在此粘贴 API Key')
-          .setValue(this.plugin.settings.sttApiKey)
-          .onChange(async value => {
-            this.plugin.settings.sttApiKey = value.trim();
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.type = 'password';
-        text.inputEl.autocomplete = 'off';
-        keyInputEl = text.inputEl;
-      })
-      .addExtraButton(btn => {
-        let revealed = false;
-        btn
-          .setIcon('eye')
-          .setTooltip('显示 / 隐藏')
-          .onClick(() => {
-            if (!keyInputEl) return;
-            revealed = !revealed;
-            keyInputEl.type = revealed ? 'text' : 'password';
-            btn.setIcon(revealed ? 'eye-off' : 'eye');
-          });
-      });
-
-    // Plaintext warning (red, under the key field)
-    const keyWarning = containerEl.createEl('div', {
-      cls: 'jp-settings-warning',
-      text:
-        '⚠️ API Key 以明文存储于 data.json，请勿将本 vault 公开同步至 GitHub 等平台',
-    });
-    keyWarning.style.cssText =
-      'margin: -8px 0 12px 16px; color: #ef4444; font-size: 12px;';
-
-    new Setting(containerEl)
-      .setName('模型 ID')
-      .setDesc('火山豆包语音 / qwen-audio-asr / whisper-1 等')
-      .addText(text =>
-        text
-          .setPlaceholder('如 whisper-1')
-          .setValue(this.plugin.settings.sttModel)
-          .onChange(async value => {
-            this.plugin.settings.sttModel = value.trim();
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName('语言提示')
-      .setDesc('告诉模型预期的语言代码（zh / en / 留空让模型自动判断）')
-      .addText(text =>
-        text
-          .setPlaceholder('zh')
-          .setValue(this.plugin.settings.sttLanguage)
-          .onChange(async value => {
-            this.plugin.settings.sttLanguage = value.trim();
-            await this.plugin.saveSettings();
-          }),
-      );
-
     // ── URL protocol / Shortcuts integration ──────────────────────────────
     containerEl.createEl('h3', { text: '🔗 Action Button / Shortcuts 集成' });
 
@@ -780,16 +638,19 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       'background: var(--background-secondary); color: var(--text-muted);' +
       'font-size: 12.5px; line-height: 1.7;';
     protocolDesc.createSpan({
-      text: '插件注册了 URL 协议，可从 iOS / macOS Shortcuts 调用，无需打开主界面就能把听写文本写入今天的 ## Journal：',
+      text: '插件注册了 URL 协议，可从 iOS / macOS Shortcuts 调用，无需打开主界面就能把听写文本（以及可选的录音）写入今天的 ## Journal：',
     });
     const codeEl = protocolDesc.createEl('code');
     codeEl.style.cssText =
       'display: block; margin: 8px 0; padding: 6px 8px;' +
       'background: var(--background-primary); border-radius: 4px;' +
       'font-size: 11.5px; word-break: break-all;';
-    codeEl.setText('obsidian://journal-partner?text=<URL编码内容>');
+    codeEl.setText('obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>');
     protocolDesc.createSpan({
-      text: '搭配 iPhone Action Button：创建一个 Shortcut，「听写文本」→「打开 URL」（URL 用上面格式，text 字段用上一步输出），把 Shortcut 选为 Action Button 触发项即可。',
+      text:
+        '参数：text 和 audio 至少给一个；time=HH:MM 可选；audio 是 vault 内相对路径，' +
+        '例如 Assets/audio/2026-06-21_153012.m4a，会被渲染为内嵌音频播放器。' +
+        '搭配 iPhone Action Button：创建一个 Shortcut「录音 → 听写文本 → 保存到 Assets/audio/ → 打开 URL」，绑定到 Action Button 即可。',
     });
 
     new Setting(containerEl)

@@ -30,20 +30,6 @@ export interface JournalPartnerSettings {
   circularCheckboxes: boolean;
   /** Capture view: timeline sort direction (true = newest first) */
   captureSortDesc: boolean;
-  /** Voice quick-capture: enable the floating mic button on mobile */
-  voiceEnabled: boolean;
-  /** Voice quick-capture: auto-submit after a successful transcription */
-  voiceAutoSubmit: boolean;
-  /** Voice quick-capture: hard cap on recording duration in seconds */
-  voiceMaxSeconds: number;
-  /** STT endpoint base URL (OpenAI-compatible, no trailing slash) */
-  sttEndpoint: string;
-  /** STT API key (stored plaintext in data.json) */
-  sttApiKey: string;
-  /** STT model identifier (provider-specific) */
-  sttModel: string;
-  /** STT language hint, e.g. "zh", "en", or "" for auto-detect */
-  sttLanguage: string;
 }
 
 export const DEFAULT_SETTINGS: JournalPartnerSettings = {
@@ -56,13 +42,6 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   autoTimestamp: true,
   circularCheckboxes: false,
   captureSortDesc: true,
-  voiceEnabled: true,
-  voiceAutoSubmit: false,
-  voiceMaxSeconds: 60,
-  sttEndpoint: '',
-  sttApiKey: '',
-  sttModel: '',
-  sttLanguage: 'zh',
 };
 
 export type Rng = { from: number; to: number };
