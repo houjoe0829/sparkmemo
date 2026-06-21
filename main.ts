@@ -519,23 +519,30 @@ class JournalPartnerSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('日记标题')
-      .setDesc('插件生效的标题，如 ## Journal 或 ## Goals')
+      .setDesc('插件生效的标题，如 Journal')
       .addText(text =>
         text
-          .setPlaceholder('## Journal')
-          .setValue('#'.repeat(this.plugin.settings.headingLevel) + ' ' + this.plugin.settings.targetHeading)
+          .setPlaceholder('Journal')
+          .setValue(this.plugin.settings.targetHeading)
           .onChange(async value => {
-            const trimmed = value.trim();
-            const match = trimmed.match(/^(#{1,6})\s+(.+)$/);
-            if (match) {
-              this.plugin.settings.headingLevel = match[1].length;
-              this.plugin.settings.targetHeading = match[2].trim();
-            } else {
-              this.plugin.settings.targetHeading = trimmed || 'Journal';
-            }
+            this.plugin.settings.targetHeading = value.trim() || 'Journal';
             await this.plugin.saveSettings();
           }),
       );
+
+    new Setting(containerEl)
+      .setName('标题层级')
+      .setDesc('目标标题的层级，H2 对应 ## Journal')
+      .addDropdown(dd => {
+        for (let i = 1; i <= 6; i++) {
+          dd.addOption(String(i), `H${i}  ${'#'.repeat(i)}`);
+        }
+        dd.setValue(String(this.plugin.settings.headingLevel));
+        dd.onChange(async value => {
+          this.plugin.settings.headingLevel = parseInt(value);
+          await this.plugin.saveSettings();
+        });
+      });
 
     // ── Timestamp ─────────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '⏱️ 时间戳' });
