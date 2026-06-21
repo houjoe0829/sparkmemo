@@ -78,6 +78,18 @@ obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>
 
 ## 安装
 
+### 通过 BRAT 安装（推荐）
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat)（Beta Reviewer's Auto-update Tool）能自动跟随本仓库的 release 升级，是目前推荐的安装方式：
+
+1. 在 Obsidian 社区插件中搜索并安装 **BRAT**，启用它
+2. 打开命令面板（⌘P）→ 执行 **BRAT: Add a beta plugin for testing**
+3. 粘贴本仓库地址：`https://github.com/zhaohongxuan/journal-partner`
+4. BRAT 会自动下载最新 release，并在 **设置 → 第三方插件** 中显示 **Journal Partner**，启用即可
+5. （快速记录功能）确保 Obsidian 内置「Daily Notes」核心插件已启用
+
+之后每次本仓库发布新版本，BRAT 都会在 Obsidian 启动时自动更新。
+
 ### 手动安装
 
 1. 前往 [Releases](https://github.com/zhaohongxuan/journal-partner/releases) 下载最新版本的 `main.js`、`manifest.json`、`styles.css`
