@@ -3,6 +3,7 @@
 一款陪你写日记的 Obsidian 插件。自动识别并高亮 Journal 区域的时间戳，让每一条记录的时间一目了然，同时配套一个快速记录侧边栏，让你随时把想法丢进今天的日记。
 
 ![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7c3aed?style=flat-square&logo=obsidian&logoColor=white)
+![Version](https://img.shields.io/github/manifest-json-v/zhaohongxuan/journal-partner?style=flat-square&color=7c3aed&label=version)
 ![License](https://img.shields.io/github/license/zhaohongxuan/journal-partner?style=flat-square)
 
 ---
