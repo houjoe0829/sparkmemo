@@ -44,7 +44,9 @@ import {
 } from './section';
 import {
   YearStats,
+  AllTimeStats,
   computeYearStats,
+  computeAllTimeStats,
   formatChineseWordCount,
   getHeatmapLevel,
 } from './stats';
@@ -96,13 +98,12 @@ export class JournalCaptureView extends ItemView {
   private statsYearLabelEl!: HTMLElement;
 
   // Stats state
-  private statsYear: number = moment().year();
   private statsLoading = false;
   private statsRefreshTimer: number | null = null;
-  /** Last computed snapshot — null while loading or before first render. */
-  private yearStats: YearStats | null = null;
-  /** Files belonging to the currently displayed year (path → date key). */
-  private statsFilesInYear: Map<string, string> = new Map();
+  /** All years' stats for all-time aggregation. */
+  private allYearStats: Map<number, YearStats> = new Map();
+  /** All-time aggregated stats. */
+  private allTimeStats: AllTimeStats | null = null;
 
   // Cached state
   private days: DaySection[] = [];
@@ -171,7 +172,7 @@ export class JournalCaptureView extends ItemView {
         if (day) {
           this.scheduleDayRefresh(day);
         }
-        if (this.statsFilesInYear.has(file.path)) {
+        if (file.extension === 'md') {
           this.scheduleStatsRefresh();
         }
       }),
@@ -191,15 +192,14 @@ export class JournalCaptureView extends ItemView {
         if (file instanceof TFile && this.days.some(d => d.filePath === file.path)) {
           this.scheduleFullRebuild();
         }
-        if (file instanceof TFile && this.statsFilesInYear.has(file.path)) {
+        if (file instanceof TFile && file.extension === 'md') {
           this.scheduleStatsRefresh();
         }
       }),
     );
     this.registerEvent(
-      this.app.vault.on('rename', (file, oldPath) => {
-        if (this.statsFilesInYear.has(oldPath) ||
-            (file instanceof TFile && file.extension === 'md')) {
+      this.app.vault.on('rename', (file) => {
+        if (file instanceof TFile && file.extension === 'md') {
           this.scheduleStatsRefresh();
         }
       }),
@@ -266,27 +266,19 @@ export class JournalCaptureView extends ItemView {
       // cheap when the user just wants to write a memo.
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
-        void this.loadStatsYear(this.statsYear);
       }
+      void this.loadAllStats();
     }
   }
 
 
-  private updateSortButton(btn: HTMLButtonElement) {
-    setIcon(
-      btn,
-      this.plugin.settings.captureSortDesc ? 'arrow-down-narrow-wide' : 'arrow-up-narrow-wide',
-    );
-    btn.setAttr(
-      'title',
-      this.plugin.settings.captureSortDesc ? '当前：最新在上' : '当前：最早在上',
-    );
-  }
-
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
-    this.textareaEl = this.inputCardEl.createEl('textarea', {
+    // Wrapper for textarea
+    const inputWrapper = this.inputCardEl.createDiv({ cls: 'jp-capture-input-wrapper' });
+
+    this.textareaEl = inputWrapper.createEl('textarea', {
       cls: 'jp-capture-input',
       attr: {
         placeholder: "What's happening?",
@@ -305,8 +297,186 @@ export class JournalCaptureView extends ItemView {
         void this.handleSubmit();
       }
     });
+    // Image paste: intercept at document level (capture phase) for reliability
+    this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      // Only intercept if focus is inside our textarea
+      if (!this.inputCardEl.contains(document.activeElement)) return;
+      for (const item of Array.from(items)) {
+        if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        try {
+          const result = await this.saveImageToVault(blob);
+          const textarea = this.textareaEl;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const before = textarea.value.substring(0, start);
+          const after = textarea.value.substring(end);
+          textarea.value = before + result + ' ' + after;
+          const newPos = start + result.length + 1;
+          textarea.setSelectionRange(newPos, newPos);
+          this.refreshSubmitState();
+          this.autoResizeTextarea();
+        } catch (err) {
+          new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+    }, true);
+    // Image drag & drop
+    this.textareaEl.addEventListener('drop', async (e) => {
+      const files = e.dataTransfer?.files;
+      if (!files) return;
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const result = await this.saveImageToVault(file);
+          const start = this.textareaEl.selectionStart;
+          const end = this.textareaEl.selectionEnd;
+          const before = this.textareaEl.value.substring(0, start);
+          const after = this.textareaEl.value.substring(end);
+          this.textareaEl.value = before + result + ' ' + after;
+          const newPos = start + result.length + 1;
+          this.textareaEl.setSelectionRange(newPos, newPos);
+          this.refreshSubmitState();
+          this.autoResizeTextarea();
+        } catch (err) {
+          new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+    });
+    this.textareaEl.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    }, true);
+
+    // Hidden file input for image upload
+    const fileInput = this.inputCardEl.createEl('input', {
+      cls: 'jp-capture-image-input',
+      attr: {
+        type: 'file',
+        accept: 'image/*',
+      },
+    });
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', async () => {
+      const files = fileInput.files;
+      if (!files || files.length === 0) return;
+      const file = files[0];
+      if (!file.type.startsWith('image/')) return;
+      fileInput.value = '';
+      try {
+        const result = await this.saveImageToVault(file);
+        const textarea = this.textareaEl;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const before = textarea.value.substring(0, start);
+        const after = textarea.value.substring(end);
+        textarea.value = before + result + ' ' + after;
+        const newPos = start + result.length + 1;
+        textarea.setSelectionRange(newPos, newPos);
+        this.refreshSubmitState();
+        this.autoResizeTextarea();
+      } catch (err) {
+        new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+    // Image upload button
+    const imageBtn = this.inputCardEl.createEl('button', {
+      cls: 'jp-capture-image-btn',
+      attr: { 'aria-label': '上传图片' },
+    });
+    setIcon(imageBtn, 'image');
+    imageBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    // Microphone button
+    const micBtn = this.inputCardEl.createEl('button', {
+      cls: 'jp-capture-mic-btn',
+      attr: { 'aria-label': '录音' },
+    });
+    setIcon(micBtn, 'mic');
+    let mediaRecorder: MediaRecorder | null = null;
+    let audioChunks: Blob[] = [];
+    let recordingTimeout: number | null = null;
+
+    const stopRecording = async () => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      if (recordingTimeout !== null) {
+        window.clearTimeout(recordingTimeout);
+        recordingTimeout = null;
+      }
+    };
+
+    const startRecording = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          try {
+            const result = await this.saveAudioToVault(audioBlob);
+            const textarea = this.textareaEl;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const before = textarea.value.substring(0, start);
+            const after = textarea.value.substring(end);
+            textarea.value = before + result + ' ' + after;
+            const newPos = start + result.length + 1;
+            textarea.setSelectionRange(newPos, newPos);
+            this.refreshSubmitState();
+            this.autoResizeTextarea();
+          } catch (err) {
+            new Notice(`录音保存失败：${err instanceof Error ? err.message : String(err)}`);
+          }
+        };
+
+        mediaRecorder.start();
+        micBtn.addClass('is-recording');
+        setIcon(micBtn, 'square');
+
+        recordingTimeout = window.setTimeout(() => {
+          void stopRecording();
+          new Notice('录音已自动停止（最長5分钟）');
+        }, 5 * 60 * 1000);
+      } catch (err) {
+        new Notice(`无法访问麦克风：${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+
+    micBtn.addEventListener('click', async () => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        await startRecording();
+      } else {
+        await stopRecording();
+        micBtn.removeClass('is-recording');
+        setIcon(micBtn, 'mic');
+      }
+    });
 
     const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
+
+    // Button row inside actions, left side
+    const buttonRow = actions.createDiv({ cls: 'jp-capture-button-row' });
+    buttonRow.appendChild(imageBtn);
+    buttonRow.appendChild(micBtn);
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
@@ -317,6 +487,38 @@ export class JournalCaptureView extends ItemView {
     });
 
     this.refreshSubmitState();
+  }
+
+  private async saveImageToVault(blob: Blob): Promise<string> {
+    const ext = blob.type === 'image/png' ? 'png'
+      : blob.type === 'image/gif' ? 'gif'
+      : blob.type === 'image/webp' ? 'webp'
+      : blob.type === 'image/jpeg' ? 'jpg' : 'png';
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    // Read Obsidian's configured attachment folder (defaults to 'Attachments' if not set)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attachmentFolder = (this.app.vault as any).getConfig?.('attachmentFolderPath') as string || 'Attachments';
+    const fileName = `${attachmentFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const attachmentsDir = this.app.vault.getFolderByPath(attachmentFolder);
+    if (!attachmentsDir) await this.app.vault.createFolder(attachmentFolder);
+    const buffer = await blob.arrayBuffer();
+    const file = await this.app.vault.createBinary(fileName, buffer);
+    return `![](${file.path})`;
+  }
+
+  private async saveAudioToVault(blob: Blob): Promise<string> {
+    const ext = blob.type === 'audio/mp4' ? 'm4a' : 'webm';
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attachmentFolder = (this.app.vault as any).getConfig?.('attachmentFolderPath') as string || 'Attachments';
+    const fileName = `${attachmentFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const attachmentsDir = this.app.vault.getFolderByPath(attachmentFolder);
+    if (!attachmentsDir) await this.app.vault.createFolder(attachmentFolder);
+    const buffer = await blob.arrayBuffer();
+    const file = await this.app.vault.createBinary(fileName, buffer);
+    return `![[${file.path}]]`;
   }
 
   private buildTimeline(root: HTMLElement) {
@@ -518,21 +720,6 @@ export class JournalCaptureView extends ItemView {
     headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
     headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
 
-    // Right-side actions on the date header: currently just the sort toggle.
-    // We attach it to every day, but it controls a global setting — clicking
-    // re-renders all days at once.
-    const actions = headerCard.createDiv({ cls: 'jp-timeline-header-actions' });
-    const sortBtn = actions.createEl('button', {
-      cls: 'jp-timeline-header-btn',
-      attr: { 'aria-label': '切换排序方向' },
-    });
-    this.updateSortButton(sortBtn);
-    sortBtn.addEventListener('click', async () => {
-      this.plugin.settings.captureSortDesc = !this.plugin.settings.captureSortDesc;
-      await this.plugin.saveSettings();
-      await this.fullRebuild();
-    });
-
     if (entries.length === 0) {
       // Today with no entries — soft hint only
       day.el.createDiv({ cls: 'jp-capture-empty', text: '还没有 memo，写点什么吧 →' });
@@ -546,13 +733,9 @@ export class JournalCaptureView extends ItemView {
     );
     const sorted = [...entries].sort((a, b) => {
       if (a.timestamp === b.timestamp) {
-        return this.plugin.settings.captureSortDesc
-          ? b.lineIndex - a.lineIndex
-          : a.lineIndex - b.lineIndex;
+        return b.lineIndex - a.lineIndex;
       }
-      return this.plugin.settings.captureSortDesc
-        ? a.timestamp < b.timestamp ? 1 : -1
-        : a.timestamp < b.timestamp ? -1 : 1;
+      return a.timestamp < b.timestamp ? 1 : -1;
     });
 
     const sourcePath = day.filePath ?? '';
@@ -643,26 +826,15 @@ export class JournalCaptureView extends ItemView {
 
   /** Build the static scaffold of the stats pane (toolbar + body). */
   private buildStatsPane() {
-    // Toolbar with year nav
+    // Toolbar with title
     this.statsToolbarEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-toolbar' });
 
     this.statsToolbarEl.createDiv({ cls: 'jp-stats-toolbar-spacer' });
 
-    const nav = this.statsToolbarEl.createDiv({ cls: 'jp-stats-year-nav' });
-    const prevBtn = nav.createEl('button', { cls: 'jp-stats-year-btn' });
-    setIcon(prevBtn, 'chevron-left');
-    prevBtn.setAttr('aria-label', '上一年');
-    prevBtn.addEventListener('click', () => void this.loadStatsYear(this.statsYear - 1));
-
-    this.statsYearLabelEl = nav.createDiv({
+    this.statsYearLabelEl = this.statsToolbarEl.createDiv({
       cls: 'jp-stats-year-label',
-      text: `${this.statsYear} 年`,
+      text: '全量数据',
     });
-
-    const nextBtn = nav.createEl('button', { cls: 'jp-stats-year-btn' });
-    setIcon(nextBtn, 'chevron-right');
-    nextBtn.setAttr('aria-label', '下一年');
-    nextBtn.addEventListener('click', () => void this.loadStatsYear(this.statsYear + 1));
 
     // Body container
     this.statsBodyEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-body' });
@@ -678,17 +850,16 @@ export class JournalCaptureView extends ItemView {
     }
     this.statsRefreshTimer = window.setTimeout(() => {
       this.statsRefreshTimer = null;
-      void this.loadStatsYear(this.statsYear);
+      void this.loadAllStats();
     }, 300);
   }
 
-  /** Load + render stats for one year. */
-  private async loadStatsYear(year: number): Promise<void> {
+  /** Load + render stats for all available years. */
+  private async loadAllStats(): Promise<void> {
     if (this.statsLoading) return;
     this.statsLoading = true;
-    this.statsYear = year;
-    this.statsYearLabelEl.setText(`${year} 年`);
 
+    this.statsYearLabelEl.setText('全量数据');
     this.renderStatsLoading();
 
     try {
@@ -696,18 +867,51 @@ export class JournalCaptureView extends ItemView {
         this.renderStatsError('请先启用 Obsidian 自带的「Daily Notes」核心插件');
         return;
       }
-      const dayInputs = await this.collectStatsYear(year);
-      this.yearStats = computeYearStats(
-        year,
-        dayInputs,
-        this.plugin.settings.timestampPattern,
-      );
+
+      const all = getAllDailyNotes() as Record<string, TFile>;
+      const yearMap = new Map<number, Array<{ key: string; sectionText: string }>>();
+
+      // Group all daily notes by year
+      for (const file of Object.values(all)) {
+        if (!(file instanceof TFile)) continue;
+        const d = getDateFromFile(file as TFile, 'day');
+        if (!d) continue;
+        const year = d.year();
+        const key = d.format('YYYY-MM-DD');
+
+        let sectionText = '';
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          const section = findSection(
+            content,
+            this.plugin.settings.targetHeading,
+            this.plugin.settings.headingLevel,
+          );
+          if (section) {
+            sectionText = content.slice(section.from, section.to);
+          }
+        } catch (err) {
+          console.error('[Journal Partner] stats read failed', file.path, err);
+        }
+
+        if (!yearMap.has(year)) yearMap.set(year, []);
+        yearMap.get(year)!.push({ key, sectionText });
+      }
+
+      // Compute stats for each year
+      this.allYearStats.clear();
+      for (const [year, dayInputs] of yearMap) {
+        const ys = computeYearStats(year, dayInputs, this.plugin.settings.timestampPattern);
+        this.allYearStats.set(year, ys);
+      }
+
+      // Compute all-time stats
+      this.allTimeStats = computeAllTimeStats([...this.allYearStats.values()]);
+
       this.renderStatsContent();
     } catch (err) {
       console.error('[Journal Partner] stats load failed', err);
-      this.renderStatsError(
-        `加载失败：${err instanceof Error ? err.message : String(err)}`,
-      );
+      this.renderStatsError(`加载失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.statsLoading = false;
     }
@@ -722,47 +926,12 @@ export class JournalCaptureView extends ItemView {
    * has no `## Journal` heading at all) still appear in the result with an
    * empty string, so the heatmap can render them as level-0.
    */
-  private async collectStatsYear(
-    year: number,
-  ): Promise<Array<{ key: string; sectionText: string }>> {
-    const all = getAllDailyNotes() as Record<string, TFile>;
-    const result: Array<{ key: string; sectionText: string }> = [];
-    const newFilesInYear = new Map<string, string>();
-
-    for (const file of Object.values(all)) {
-      if (!(file instanceof TFile)) continue;
-      const d = getDateFromFile(file as TFile, 'day');
-      if (!d || d.year() !== year) continue;
-      const key = d.format('YYYY-MM-DD');
-      newFilesInYear.set(file.path, key);
-
-      let sectionText = '';
-      try {
-        const content = await this.app.vault.cachedRead(file);
-        const section = findSection(
-          content,
-          this.plugin.settings.targetHeading,
-          this.plugin.settings.headingLevel,
-        );
-        if (section) {
-          sectionText = content.slice(section.from, section.to);
-        }
-      } catch (err) {
-        console.error('[Journal Partner] stats read failed', file.path, err);
-      }
-      result.push({ key, sectionText });
-    }
-
-    this.statsFilesInYear = newFilesInYear;
-    return result;
-  }
-
   private renderStatsLoading() {
     this.statsBodyEl.empty();
     const loading = this.statsBodyEl.createDiv({ cls: 'jp-stats-loading' });
     loading.createDiv({ cls: 'jp-stats-spinner' });
     loading.createDiv({
-      text: `正在统计 ${this.statsYear} 年的日记…`,
+      text: '正在加载日记数据…',
       cls: 'jp-stats-loading-text',
     });
   }
@@ -774,22 +943,15 @@ export class JournalCaptureView extends ItemView {
 
   private renderStatsContent() {
     this.statsBodyEl.empty();
-    const stats = this.yearStats;
-    if (!stats) return;
+    const allTime = this.allTimeStats;
+    if (!allTime) return;
 
-    this.renderStatsHero(stats);
-    this.renderStatsHeatmapSection(stats);
-  }
-
-  private renderStatsHero(stats: YearStats) {
+    // ── All-time hero ────────────────────────────────────────────────────
     const hero = this.statsBodyEl.createDiv({ cls: 'jp-stats-hero' });
-
-    // ── Top block: big total-words hero + descriptive subtitle ──
     const top = hero.createDiv({ cls: 'jp-stats-hero-top' });
 
     const numLine = top.createDiv({ cls: 'jp-stats-hero-number' });
-    const formatted = formatChineseWordCount(stats.totalWords);
-
+    const formatted = formatChineseWordCount(allTime.totalWords);
     if (formatted.includes('万')) {
       const [num, unit] = formatted.split(' ');
       numLine.createSpan({ cls: 'jp-stats-hero-num', text: num });
@@ -800,21 +962,23 @@ export class JournalCaptureView extends ItemView {
     }
 
     const sub = top.createDiv({ cls: 'jp-stats-hero-sub' });
-    const daysCounted = stats.writingDays;
-    const dailyAvg = daysCounted > 0 ? Math.round(stats.totalWords / daysCounted) : 0;
-    sub.createSpan({
-      text:
-        daysCounted === 0
-          ? '今年还没有开始写日记 · 期待第一条 memo'
-          : `写了 ${daysCounted} 天 · 日均 ${dailyAvg} 字`,
-    });
+    const yearsStr = allTime.yearsWithData.length > 0
+      ? `${allTime.yearsWithData[0]}–${allTime.yearsWithData[allTime.yearsWithData.length - 1]} 年`
+      : '暂无数据';
+    sub.createSpan({ text: yearsStr });
 
-    // ── Bottom block: 4 inline KPIs (writing-days lives in the subtitle) ──
     const grid = hero.createDiv({ cls: 'jp-stats-hero-kpis' });
-    this.makeStatsKPI(grid, 'pencil', `${stats.totalEntries}`, '条', '总条数');
-    this.makeStatsKPI(grid, 'mic', `${stats.totalAudios}`, '段', '录音数');
-    this.makeStatsKPI(grid, 'flame', `${stats.longestStreak}`, '天', '最长连续');
-    this.makeStatsKPI(grid, 'clock', stats.mostCommonHour, '', '最常记录时段');
+    this.makeStatsKPI(grid, 'file-text', `${allTime.writingDays}`, '天', '写作天数');
+    this.makeStatsKPI(grid, 'pencil', `${allTime.totalEntries}`, '条', '总条数');
+    this.makeStatsKPI(grid, 'mic', `${allTime.totalAudios}`, '段', '录音数');
+    this.makeStatsKPI(grid, 'flame', `${allTime.longestStreak}`, '天', '最长连续');
+
+    // ── Per-year heatmaps ─────────────────────────────────────────────────
+    const years = [...this.allYearStats.keys()].sort((a, b) => b - a);
+    for (const year of years) {
+      const ys = this.allYearStats.get(year)!;
+      this.renderStatsHeatmapSection(year, ys);
+    }
   }
 
   private makeStatsKPI(
@@ -833,11 +997,11 @@ export class JournalCaptureView extends ItemView {
     card.createDiv({ cls: 'jp-stats-kpi-label', text: label });
   }
 
-  private renderStatsHeatmapSection(stats: YearStats) {
+  private renderStatsHeatmapSection(year: number, stats: YearStats) {
     const section = this.statsBodyEl.createDiv({ cls: 'jp-stats-heatmap-section' });
 
     const header = section.createDiv({ cls: 'jp-stats-heatmap-header' });
-    header.createDiv({ cls: 'jp-stats-heatmap-title', text: '每日活跃度' });
+    header.createDiv({ cls: 'jp-stats-heatmap-title', text: `${year} 年` });
 
     this.renderStatsHeatmap(
       section.createDiv({ cls: 'jp-stats-heatmap-wrap' }),
@@ -855,8 +1019,7 @@ export class JournalCaptureView extends ItemView {
     // Footer summary
     const footer = section.createDiv({ cls: 'jp-stats-footer' });
     footer.setText(
-      `${stats.year} 年共写 ${stats.writingDays} 天 · ` +
-        `${stats.totalWords.toLocaleString('en-US')} 字 · ${stats.totalEntries} 条` +
+      `${stats.writingDays} 天 · ${stats.totalWords.toLocaleString('en-US')} 字 · ${stats.totalEntries} 条` +
         (stats.totalAudios > 0 ? ` · ${stats.totalAudios} 段录音` : ''),
     );
   }
@@ -1122,11 +1285,6 @@ export class JournalCaptureView extends ItemView {
     const run = () => {
       void this.executeDelete(day, entry, mode, audioPaths);
     };
-
-    if (!this.plugin.settings.confirmDelete) {
-      run();
-      return;
-    }
 
     new DeleteConfirmModal(this.app, {
       title:

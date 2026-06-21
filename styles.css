@@ -76,38 +76,6 @@
   cursor: text;
 }
 
-/* ── Circular checkboxes (when enabled in settings) ─────────────────── */
-
-/* Universal checkbox selector - catches all checkbox types */
-.jp-circular-checkboxes input[type="checkbox"],
-.jp-circular-checkboxes .cm-taskCheckbox,
-.jp-circular-checkboxes .task-list-item input[type="checkbox"] {
-  border-radius: 50% !important;
-}
-
-/* Specific CodeMirror 6 task checkbox styling */
-.jp-circular-checkboxes .cm-content .cm-taskCheckbox {
-  border-radius: 50% !important;
-}
-
-/* Editor view task checkboxes */
-.jp-circular-checkboxes .cm-editor .task-list-item input[type="checkbox"] {
-  border-radius: 50% !important;
-}
-
-/* Reading view circular checkboxes */
-.jp-circular-checkboxes .markdown-reading-view .task-list-item input[type="checkbox"],
-.jp-circular-checkboxes .markdown-preview-view .task-list-item input[type="checkbox"] {
-  border-radius: 50% !important;
-}
-
-/* Dark theme adjustments */
-.theme-dark.jp-circular-checkboxes input[type="checkbox"],
-.theme-dark.jp-circular-checkboxes .cm-taskCheckbox,
-.theme-dark.jp-circular-checkboxes .task-list-item input[type="checkbox"] {
-  border-radius: 50% !important;
-}
-
 /* ── Quick-capture sidebar view ─────────────────────────────────────────── */
 
 .jp-capture-root {
@@ -186,15 +154,65 @@
   font-family: inherit;
   font-size: 14px;
   line-height: 1.55;
-  padding: 0;
+  padding: 0 0 0 28px;
   box-sizing: border-box;
 }
 .jp-capture-input::placeholder {
   color: var(--text-faint);
 }
+.jp-capture-input-wrapper {
+  position: relative;
+}
+.jp-capture-button-row {
+  display: inline-flex;
+  gap: 4px;
+}
+.jp-capture-image-btn,
+.jp-capture-mic-btn {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  color: var(--text-muted) !important;
+  cursor: pointer;
+  padding: 4px 6px !important;
+  border-radius: 4px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  flex-shrink: 0;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+.jp-capture-image-btn:hover,
+.jp-capture-mic-btn:hover {
+  color: var(--text-normal) !important;
+  background-color: var(--background-secondary) !important;
+}
+.jp-capture-image-btn svg,
+.jp-capture-mic-btn svg {
+  width: 18px !important;
+  height: 18px !important;
+  display: block;
+  color: inherit;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.jp-capture-mic-btn.is-recording {
+  color: var(--text-error);
+  animation: jp-recording-pulse 1s ease-in-out infinite;
+}
+@keyframes jp-recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .jp-capture-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 10px;
 }
 .jp-capture-submit {

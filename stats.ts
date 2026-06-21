@@ -42,6 +42,16 @@ export interface YearStats {
   dailyMap: Map<string, DayStats>;
 }
 
+/** Aggregated stats across all years. */
+export interface AllTimeStats {
+  totalWords: number;
+  totalEntries: number;
+  totalAudios: number;
+  writingDays: number;
+  longestStreak: number;
+  yearsWithData: number[];
+}
+
 /** Caller-supplied per-day input. */
 export interface DayInput {
   /** ISO `YYYY-MM-DD` key. */
@@ -286,6 +296,43 @@ export function computeYearStats(
     longestStreak: computeLongestStreak(dailyMap),
     mostCommonHour: computeMostCommonHour(histogram),
     dailyMap,
+  };
+}
+
+/**
+ * Aggregate stats across all years from per-year stats.
+ */
+export function computeAllTimeStats(yearStatsList: YearStats[]): AllTimeStats {
+  let totalWords = 0;
+  let totalEntries = 0;
+  let totalAudios = 0;
+  let writingDays = 0;
+  const yearsWithData: number[] = [];
+
+  // Merge all daily maps to compute global longest streak
+  const globalDailyMap = new Map<string, DayStats>();
+
+  for (const ys of yearStatsList) {
+    if (ys.totalWords === 0 && ys.totalEntries === 0) continue;
+    yearsWithData.push(ys.year);
+    totalWords += ys.totalWords;
+    totalEntries += ys.totalEntries;
+    totalAudios += ys.totalAudios;
+    writingDays += ys.writingDays;
+    for (const [key, ds] of ys.dailyMap) {
+      globalDailyMap.set(key, ds);
+    }
+  }
+
+  yearsWithData.sort((a, b) => a - b);
+
+  return {
+    totalWords,
+    totalEntries,
+    totalAudios,
+    writingDays,
+    longestStreak: computeLongestStreak(globalDailyMap),
+    yearsWithData,
   };
 }
 

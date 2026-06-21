@@ -26,12 +26,6 @@ export interface JournalPartnerSettings {
   readonlyTimestamps: boolean;
   /** When true, pressing Enter inside the journal section auto-inserts a timestamp on the new line */
   autoTimestamp: boolean;
-  /** When true, render checkboxes as circles instead of squares */
-  circularCheckboxes: boolean;
-  /** Capture view: timeline sort direction (true = newest first) */
-  captureSortDesc: boolean;
-  /** When true, deleting a memo (or its audio) shows a confirmation dialog first */
-  confirmDelete: boolean;
 }
 
 export const DEFAULT_SETTINGS: JournalPartnerSettings = {
@@ -42,9 +36,6 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   timestampBgColor: '#ede9fe',
   readonlyTimestamps: true,
   autoTimestamp: true,
-  circularCheckboxes: false,
-  captureSortDesc: true,
-  confirmDelete: true,
 };
 
 export type Rng = { from: number; to: number };
