@@ -39,10 +39,19 @@ import {
   extractAudioEmbeds,
   findSection,
   parseJournalEntries,
+  removeAudioEmbedsFromEntry,
 } from './section';
 import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
+
+/**
+ * Which "delete" action the context menu picked. Surfacing this as a type
+ * (instead of two booleans) keeps `executeDelete` and the confirm modal
+ * exhaustive — adding a fourth mode in the future will fail to type-check
+ * any switch that doesn't handle it.
+ */
+type DeleteMode = 'memo' | 'memo+audio' | 'audio-only';
 
 /** Per-day rendered chunk in the infinite-scroll timeline. */
 interface DaySection {
@@ -603,12 +612,13 @@ export class JournalCaptureView extends ItemView {
   /**
    * Build and show the right-click / long-press context menu for one entry.
    * Items shown:
-   *   - 复制         — copies the raw markdown body to clipboard
-   *   - 删除 memo    — deletes only the entry line(s) from the daily note
+   *   - 复制                — copies the raw markdown body to clipboard
+   *   - 删除 memo           — deletes only the entry line(s) from the daily note
    *   - 删除 memo 和录音文件 — same, plus trashes embedded audio attachments
+   *   - 仅删除录音文件       — keeps the memo text, trashes audio + strips ![[..]]
    *
-   * The "with audio" item is only added when the entry actually embeds at
-   * least one audio attachment (`![[*.m4a]]` etc.).
+   * The two audio-related items are only added when the entry actually
+   * embeds at least one audio attachment (`![[*.m4a]]` etc.).
    */
   private openEntryMenu(evt: MouseEvent, day: DaySection, entry: JournalEntry) {
     const menu = new Menu();
@@ -630,7 +640,7 @@ export class JournalCaptureView extends ItemView {
         .setTitle('删除 memo')
         .setIcon('trash-2')
         .onClick(() => {
-          this.confirmAndDelete(day, entry, /* withAudio */ false, audioPaths);
+          this.confirmAndDelete(day, entry, 'memo', audioPaths);
         }),
     );
 
@@ -644,7 +654,20 @@ export class JournalCaptureView extends ItemView {
           )
           .setIcon('trash-2')
           .onClick(() => {
-            this.confirmAndDelete(day, entry, /* withAudio */ true, audioPaths);
+            this.confirmAndDelete(day, entry, 'memo+audio', audioPaths);
+          }),
+      );
+
+      menu.addItem(item =>
+        item
+          .setTitle(
+            audioPaths.length === 1
+              ? '仅删除录音文件'
+              : `仅删除 ${audioPaths.length} 个录音文件`,
+          )
+          .setIcon('mic-off')
+          .onClick(() => {
+            this.confirmAndDelete(day, entry, 'audio-only', audioPaths);
           }),
       );
     }
@@ -664,25 +687,41 @@ export class JournalCaptureView extends ItemView {
   }
 
   /**
-   * Show a confirmation modal listing what will be deleted, then execute the
-   * deletion on confirm. Audio files (when requested) are moved to Obsidian's
-   * configured trash via `fileManager.trashFile` so they remain recoverable.
+   * Show a confirmation modal (when `settings.confirmDelete` is on) listing
+   * what will be deleted, then execute the deletion on confirm. When the
+   * setting is off, the action executes immediately.
+   *
+   * Audio files are moved to Obsidian's configured trash via
+   * `fileManager.trashFile` so they remain recoverable regardless of which
+   * mode is picked.
    */
   private confirmAndDelete(
     day: DaySection,
     entry: JournalEntry,
-    withAudio: boolean,
+    mode: DeleteMode,
     audioPaths: string[],
   ) {
-    const preview = this.buildEntryPreview(entry);
+    const run = () => {
+      void this.executeDelete(day, entry, mode, audioPaths);
+    };
+
+    if (!this.plugin.settings.confirmDelete) {
+      run();
+      return;
+    }
+
     new DeleteConfirmModal(this.app, {
-      title: withAudio ? '删除 memo 和录音文件' : '删除 memo',
-      preview,
+      title:
+        mode === 'memo'
+          ? '删除 memo'
+          : mode === 'memo+audio'
+            ? '删除 memo 和录音文件'
+            : '删除录音文件',
+      preview: this.buildEntryPreview(entry),
       timestamp: entry.timestamp,
-      audioPaths: withAudio ? audioPaths : [],
-      onConfirm: () => {
-        void this.executeDelete(day, entry, withAudio ? audioPaths : []);
-      },
+      audioPaths: mode === 'memo' ? [] : audioPaths,
+      mode,
+      onConfirm: run,
     }).open();
   }
 
@@ -694,13 +733,20 @@ export class JournalCaptureView extends ItemView {
 
   /**
    * Perform the actual deletion. Rewrites the daily note via
-   * `vault.modify`, then trashes any audio files. Audio failures are
-   * logged but don't roll back the text deletion — they're independent
-   * pieces of state and the user explicitly opted into both.
+   * `vault.modify`, then (when relevant) trashes audio files. Audio
+   * failures are logged but don't roll back the text deletion — they're
+   * independent pieces of state and the user explicitly opted into both.
+   *
+   * Modes:
+   *   - 'memo'       : drop entry head + continuation lines
+   *   - 'memo+audio' : same as above, plus trash audio files
+   *   - 'audio-only' : keep memo text but strip ![[...]] audio embeds,
+   *                    plus trash audio files
    */
   private async executeDelete(
     day: DaySection,
     entry: JournalEntry,
+    mode: DeleteMode,
     audioPaths: string[],
   ): Promise<void> {
     if (!day.filePath) {
@@ -715,11 +761,10 @@ export class JournalCaptureView extends ItemView {
 
     try {
       const content = await this.app.vault.read(file);
-      const next = deleteEntryFromSection(
-        content,
-        this.plugin.settings,
-        entry.lineIndex,
-      );
+      const next =
+        mode === 'audio-only'
+          ? removeAudioEmbedsFromEntry(content, this.plugin.settings, entry.lineIndex)
+          : deleteEntryFromSection(content, this.plugin.settings, entry.lineIndex);
       if (next === content) {
         // No-op means our lineIndex no longer matches a head line — the file
         // changed under us. Refresh and bail rather than mangling content.
@@ -734,31 +779,46 @@ export class JournalCaptureView extends ItemView {
       return;
     }
 
-    // Trash embedded audio files (best-effort, independent of text deletion)
+    // Trash embedded audio files when the mode calls for it.
+    const trashAudio = mode === 'memo+audio' || mode === 'audio-only';
     let trashed = 0;
     let missing = 0;
-    for (const path of audioPaths) {
-      const af = this.app.vault.getAbstractFileByPath(path);
-      if (!(af instanceof TFile)) {
-        missing++;
-        continue;
-      }
-      try {
-        await this.app.fileManager.trashFile(af);
-        trashed++;
-      } catch (err) {
-        console.error(`[Journal Partner] trash audio failed: ${path}`, err);
+    if (trashAudio) {
+      for (const path of audioPaths) {
+        const af = this.app.vault.getAbstractFileByPath(path);
+        if (!(af instanceof TFile)) {
+          missing++;
+          continue;
+        }
+        try {
+          await this.app.fileManager.trashFile(af);
+          trashed++;
+        } catch (err) {
+          console.error(`[Journal Partner] trash audio failed: ${path}`, err);
+        }
       }
     }
 
-    if (audioPaths.length === 0) {
+    // User-visible toast — tuned per mode so the message is unambiguous.
+    if (mode === 'memo') {
       new Notice('🗑️ 已删除');
-    } else if (missing === audioPaths.length) {
-      new Notice('🗑️ memo 已删除（录音文件已不存在）');
-    } else if (trashed === audioPaths.length) {
-      new Notice(`🗑️ 已删除 memo 和 ${trashed} 个录音文件`);
+    } else if (mode === 'memo+audio') {
+      if (missing === audioPaths.length) {
+        new Notice('🗑️ memo 已删除（录音文件已不存在）');
+      } else if (trashed === audioPaths.length) {
+        new Notice(`🗑️ 已删除 memo 和 ${trashed} 个录音文件`);
+      } else {
+        new Notice(`🗑️ memo 已删除；${trashed}/${audioPaths.length} 个录音文件移入回收站`);
+      }
     } else {
-      new Notice(`🗑️ memo 已删除；${trashed}/${audioPaths.length} 个录音文件移入回收站`);
+      // audio-only
+      if (missing === audioPaths.length) {
+        new Notice('🎙️ 录音链接已移除（文件已不存在）');
+      } else if (trashed === audioPaths.length) {
+        new Notice(`🎙️ 已删除 ${trashed} 个录音文件（memo 保留）`);
+      } else {
+        new Notice(`🎙️ 链接已移除；${trashed}/${audioPaths.length} 个录音文件移入回收站`);
+      }
     }
   }
 
@@ -818,6 +878,8 @@ interface DeleteConfirmOptions {
   timestamp: string;
   /** Audio file paths that will be trashed (empty = text-only delete). */
   audioPaths: string[];
+  /** Which delete mode the user picked — affects copy in the dialog body. */
+  mode: DeleteMode;
   onConfirm: () => void;
 }
 
@@ -847,7 +909,10 @@ class DeleteConfirmModal extends Modal {
 
     contentEl.createEl('p', {
       cls: 'jp-delete-confirm-question',
-      text: '确定要删除这条 memo 吗？',
+      text:
+        this.opts.mode === 'audio-only'
+          ? '确定要删除这条 memo 的录音文件吗？memo 文字会保留。'
+          : '确定要删除这条 memo 吗？',
     });
 
     // Preview card — timestamp + body preview
@@ -861,12 +926,15 @@ class DeleteConfirmModal extends Modal {
       text: this.opts.preview.length > 0 ? this.opts.preview : '(空 memo)',
     });
 
-    // Audio file list (only when deleting with audio)
+    // Audio file list (only when audio is being trashed)
     if (this.opts.audioPaths.length > 0) {
       const audioBlock = contentEl.createDiv({ cls: 'jp-delete-confirm-audio' });
       audioBlock.createEl('div', {
         cls: 'jp-delete-confirm-audio-label',
-        text: '附带删除的录音文件（移入回收站，可恢复）：',
+        text:
+          this.opts.mode === 'audio-only'
+            ? '将移入回收站的录音文件（可恢复）：'
+            : '附带删除的录音文件（移入回收站，可恢复）：',
       });
       const list = audioBlock.createEl('ul', { cls: 'jp-delete-confirm-audio-list' });
       for (const path of this.opts.audioPaths) {

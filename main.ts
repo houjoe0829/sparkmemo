@@ -627,6 +627,20 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(containerEl)
+      .setName('删除前确认')
+      .setDesc(
+        '在快速记录侧栏右键 / 长按 memo 触发删除时，先弹出确认对话框。关闭后将直接删除（录音文件仍会移入回收站，可恢复）',
+      )
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.confirmDelete)
+          .onChange(async value => {
+            this.plugin.settings.confirmDelete = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
     // ── URL protocol / Shortcuts integration ──────────────────────────────
     containerEl.createEl('h3', { text: '🔗 Action Button / Shortcuts 集成' });
 
