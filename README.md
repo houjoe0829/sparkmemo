@@ -3,6 +3,7 @@
 一款陪你写日记的 Obsidian 插件。自动识别并高亮 Journal 区域的时间戳，让每一条记录的时间一目了然，同时配套一个快速记录侧边栏，让你随时把想法丢进今天的日记。
 
 ![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7c3aed?style=flat-square&logo=obsidian&logoColor=white)
+![Version](https://img.shields.io/github/manifest-json-v/zhaohongxuan/journal-partner?style=flat-square&color=7c3aed&label=version)
 ![License](https://img.shields.io/github/license/zhaohongxuan/journal-partner?style=flat-square)
 
 ---
@@ -48,6 +49,7 @@
 - **实时同步**：在主编辑器里改动当天日记，侧边栏对应日的时间线会就地刷新
 - **Markdown 渲染**：支持双向链接、嵌入图片、加粗斜体等，所有原生 Obsidian 渲染特性均可用
 - **排序切换**：按当日时间正序 / 倒序展示，自由切换
+- **右键管理 memo**：右键（或移动端长按）任意气泡，可复制原文、删除当前 memo；若该条 memo 附带录音，还会出现「删除 memo 和录音文件」与「仅删除录音文件」两个选项，录音走 Obsidian 回收站可恢复。可在设置中关闭「删除前确认」跳过对话框
   
 <img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/ad0b758f-d304-4b16-ae81-c2b3afd7aa5e" />
 
@@ -73,6 +75,8 @@ obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>
 - 「录音 → 听写文本 → 保存录音到 `Assets/audio/` → 打开 URL（text + audio 两个参数）」（文字 + 录音双轨）
 
 把捷径设为 Action Button，按一下手机侧键就能听写并自动落到今天的日记，全程不打断当前操作。
+
+> 💡 **一键导入**：插件设置面板提供了「获取捷径」按钮，或直接点这里 → [iCloud 捷径模板](https://www.icloud.com/shortcuts/2b5bbc7c721a4010807c4ed337245360)，添加到「快捷指令」app 即可使用。
 
 ---
 
@@ -135,6 +139,7 @@ obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>
 | 时间戳只读 | 防止在编辑器中修改已有时间戳 | 开启 |
 | 回车自动插入时间戳 | 在 Journal 区块内按回车时自动插入当前时间 | 开启 |
 | 圆形复选框 | 在日记区域内将 checkbox 渲染为圆形而非方形 | 关闭 |
+| 删除前确认 | 右键删除 memo / 录音前弹出确认对话框 | 开启 |
 
 ### 🔧 高级
 

@@ -30,6 +30,8 @@ export interface JournalPartnerSettings {
   circularCheckboxes: boolean;
   /** Capture view: timeline sort direction (true = newest first) */
   captureSortDesc: boolean;
+  /** When true, deleting a memo (or its audio) shows a confirmation dialog first */
+  confirmDelete: boolean;
 }
 
 export const DEFAULT_SETTINGS: JournalPartnerSettings = {
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   autoTimestamp: true,
   circularCheckboxes: false,
   captureSortDesc: true,
+  confirmDelete: true,
 };
 
 export type Rng = { from: number; to: number };
@@ -295,4 +298,178 @@ export function appendToJournalSection(
   }
   // `after` starts at the next heading line — prepend a blank-line separator
   return beforeTrimmed + insertion + '\n' + after;
+}
+
+// ── Entry mutation helpers (delete / extract embedded audio) ───────────────
+
+/** Recognized audio file extensions for the "delete-with-audio" feature. */
+const AUDIO_EXT_RE = /\.(m4a|mp3|wav|ogg|flac|opus|aac|webm)$/i;
+
+/**
+ * Extract the vault-relative paths of all audio attachments wiki-embedded in
+ * an entry's body text. Picks up `![[Assets/audio/x.m4a]]`, optional
+ * `|alias`/`|size` segments are tolerated; the alias is stripped.
+ *
+ * Non-audio embeds (images, PDFs, other notes) are ignored, so this is safe
+ * to call on any entry text.
+ */
+export function extractAudioEmbeds(text: string): string[] {
+  const out: string[] = [];
+  const re = /!\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const path = m[1].trim();
+    if (path.length > 0 && AUDIO_EXT_RE.test(path)) {
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+/**
+ * Remove one entry (identified by its `lineIndex` within the section body)
+ * from the given full document content.
+ *
+ * Behaviour:
+ * - Locates the journal section via `findSection`
+ * - Deletes the head line at `lineIndex` *plus* any immediately following
+ *   continuation lines (lines that start with whitespace + non-whitespace),
+ *   matching the rule in `parseJournalEntries`
+ * - Returns the new content. If the section is missing or `lineIndex` is
+ *   out of range / not a valid entry head, returns the original content
+ *   unchanged.
+ *
+ * Whitespace handling: we slice on full-line boundaries so the surrounding
+ * document is left clean — no orphan blank lines accumulate.
+ */
+export function deleteEntryFromSection(
+  content: string,
+  settings: JournalPartnerSettings,
+  lineIndex: number,
+): string {
+  const section = findSection(
+    content,
+    settings.targetHeading,
+    settings.headingLevel,
+  );
+  if (!section) return content;
+
+  const sectionText = content.slice(section.from, section.to);
+  const lines = sectionText.split('\n');
+  if (lineIndex < 0 || lineIndex >= lines.length) return content;
+
+  // Validate that the target line is an entry head, not a continuation or
+  // unrelated line — avoids "deleting from the middle of a multi-line memo".
+  const tsRe = new RegExp(`^[-*+]\\s+(${settings.timestampPattern})(?=\\s|$)`);
+  if (!tsRe.test(lines[lineIndex])) return content;
+
+  // Find end (exclusive) of the entry: head + continuation lines.
+  let end = lineIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+    end++;
+  }
+
+  // Compute character offsets within the section body, then translate to
+  // full-document offsets.
+  let charStart = 0;
+  for (let i = 0; i < lineIndex; i++) {
+    charStart += lines[i].length + 1; // +1 for newline
+  }
+  let charEnd = charStart;
+  for (let i = lineIndex; i < end; i++) {
+    charEnd += lines[i].length + 1;
+  }
+  // If the entry ran to the very last line (no trailing newline), pull back
+  // the +1 we over-counted on that last line.
+  if (end === lines.length) {
+    charEnd -= 1;
+    // And also chew up the newline preceding the entry, if any, so we don't
+    // leave a trailing blank line in the section body.
+    if (charStart > 0 && sectionText[charStart - 1] === '\n') {
+      charStart -= 1;
+    }
+  }
+
+  const absStart = section.from + charStart;
+  const absEnd = section.from + charEnd;
+  return content.slice(0, absStart) + content.slice(absEnd);
+}
+
+/**
+ * Strip all audio wiki-embeds from one entry, in place inside the section,
+ * leaving the rest of the entry's text intact.
+ *
+ * Used by the "仅删除录音文件" context-menu action: the user wants to keep
+ * the typed memo but jettison the recording. The function:
+ * 1. Locates the entry head at `lineIndex` (returns content unchanged if
+ *    that line isn't a valid entry head, mirroring `deleteEntryFromSection`)
+ * 2. Walks head + continuation lines, removing `![[*.m4a]]` etc. tokens
+ * 3. Collapses whitespace left behind by removals so the rendered output
+ *    doesn't have double spaces or a dangling separator
+ *
+ * Returns the new document content. Non-audio embeds are preserved.
+ */
+export function removeAudioEmbedsFromEntry(
+  content: string,
+  settings: JournalPartnerSettings,
+  lineIndex: number,
+): string {
+  const section = findSection(
+    content,
+    settings.targetHeading,
+    settings.headingLevel,
+  );
+  if (!section) return content;
+
+  const sectionText = content.slice(section.from, section.to);
+  const lines = sectionText.split('\n');
+  if (lineIndex < 0 || lineIndex >= lines.length) return content;
+
+  const tsRe = new RegExp(`^[-*+]\\s+(${settings.timestampPattern})(?=\\s|$)`);
+  if (!tsRe.test(lines[lineIndex])) return content;
+
+  // Find inclusive range of this entry: head + continuation lines.
+  let end = lineIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+    end++;
+  }
+
+  // Audio-embed regex: must match the same shape as extractAudioEmbeds.
+  const audioEmbedRe = /!\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+
+  let changed = false;
+  for (let i = lineIndex; i < end; i++) {
+    const before = lines[i];
+    const after = before.replace(audioEmbedRe, (full, path: string) => {
+      if (AUDIO_EXT_RE.test(path.trim())) {
+        changed = true;
+        return '';
+      }
+      return full;
+    });
+    if (!changed && after === before) continue;
+    // Tidy up: collapse internal double spaces and trim trailing spaces
+    // left where the embed used to sit. Keep markdown soft-break "  "
+    // intact at line end (parseJournalEntries relies on it).
+    let tidy = after.replace(/[^\S\n]{2,}/g, ' ');
+    // Restore intentional soft-break (two trailing spaces) if the line
+    // was originally a non-final continuation row in a multi-line entry.
+    const wasSoftBreak = /[^\S\n] {2}$/.test(before) || / {2}$/.test(before);
+    if (wasSoftBreak && !/ {2}$/.test(tidy)) {
+      tidy = tidy.replace(/\s+$/, '') + '  ';
+    } else {
+      tidy = tidy.replace(/[^\S\n]+$/, '');
+    }
+    lines[i] = tidy;
+  }
+
+  if (!changed) return content;
+
+  // Edge case: if the head line is now just `- HH:MM` with no body, that's
+  // still a valid (empty) entry — leave it. parseJournalEntries will show
+  // it with an empty bubble, which matches the user's expectation: they
+  // explicitly asked to keep the memo.
+
+  const newSection = lines.join('\n');
+  return content.slice(0, section.from) + newSection + content.slice(section.to);
 }
