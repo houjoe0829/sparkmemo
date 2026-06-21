@@ -3,11 +3,14 @@ import {
   MarkdownPostProcessorContext,
   MarkdownView,
   Notice,
+  ObsidianProtocolData,
   Platform,
   Plugin,
   PluginSettingTab,
   Setting,
+  TFile,
   WorkspaceLeaf,
+  moment,
 } from 'obsidian';
 import {
   EditorState,
@@ -23,11 +26,19 @@ import {
   ViewUpdate,
   keymap,
 } from '@codemirror/view';
+import {
+  appHasDailyNotesPluginLoaded,
+  createDailyNote,
+  getAllDailyNotes,
+  getDailyNote,
+} from 'obsidian-daily-notes-interface';
 
 import {
   DEFAULT_SETTINGS,
   JournalPartnerSettings,
+  appendToJournalSection,
   buildDecorations,
+  buildEntryLine,
   findSection,
   generateTimestamp,
   getTimestampRanges,
@@ -63,6 +74,21 @@ export default class JournalPartnerPlugin extends Plugin {
       callback: () => void this.activateCaptureView(),
     });
     this.addRibbonIcon('feather', '快速记录', () => void this.activateCaptureView());
+
+    // ── URL protocol handler (Path B: Action Button + Shortcuts) ──
+    // Registers obsidian://journal-partner so that an iOS Shortcut (or any
+    // tool that can open URLs) can write to today's `## Journal` section
+    // without opening the capture view or any other UI.
+    //
+    // Usage (from a Shortcut):
+    //   obsidian://journal-partner?text=<urlencoded>
+    //   obsidian://journal-partner?text=<...>&time=15:30
+    //
+    // (`action` is reserved by Obsidian for the protocol name itself —
+    // don't use it as a custom routing key.)
+    this.registerObsidianProtocolHandler('journal-partner', params => {
+      void this.handleProtocol(params);
+    });
   }
 
   onunload() {
@@ -90,6 +116,96 @@ export default class JournalPartnerPlugin extends Plugin {
     if (!leaf) return;
     await leaf.setViewState({ type: CAPTURE_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  // ── Quick-capture write path (shared) ─────────────────────────────────────
+
+  /**
+   * Append a single entry to today's `## Journal` section.
+   *
+   * Used by both the in-app capture textarea and the URL protocol handler.
+   * Creates today's daily note and the journal heading if they don't exist
+   * yet.
+   *
+   * @param text     Raw user content (may contain newlines).
+   * @param ts       Timestamp string in `HH:MM` form. Defaults to now.
+   * @param audio    Optional vault-relative path to an audio attachment;
+   *                 when provided, ` ![[path]]` is appended to the entry.
+   * @returns        true on success, false if Daily Notes plugin is missing
+   *                 or the write fails.
+   */
+  async writeToTodayJournal(text: string, ts?: string, audio?: string): Promise<boolean> {
+    if (!appHasDailyNotesPluginLoaded()) {
+      new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      return false;
+    }
+    const trimmed = text.trim();
+    const audioPath = audio?.trim() ?? '';
+    console.log("音频路径:", audioPath)
+    // Require at least one of text / audio — an entry with neither is junk.
+    if (trimmed.length === 0 && audioPath.length === 0) return false;
+
+    const stamp = ts ?? generateTimestamp();
+    // Embed the audio as a wiki-link so Obsidian renders the inline player.
+    // Single-line entries get a trailing ` ![[path]]`; multi-line text uses
+    // buildEntryLine to keep markdown soft-breaks, then we append on the
+    // first line (which is the only one with the timestamp anchor).
+    const body = audioPath.length > 0
+      ? `${trimmed}${trimmed.length > 0 ? ' ' : ''}![[${audioPath}]]`
+      : trimmed;
+    const line = buildEntryLine(body.replace(/\r\n/g, '\n'), stamp);
+
+    try {
+      let file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+      if (!file) {
+        file = (await createDailyNote(moment())) as TFile;
+      }
+      await this.app.vault.process(file, content =>
+        appendToJournalSection(content, this.settings, line),
+      );
+      return true;
+    } catch (err) {
+      console.error('[Journal Partner] writeToTodayJournal failed', err);
+      new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Handle `obsidian://journal-partner?...` URLs.
+   *
+   * The protocol handler is registered specifically for `journal-partner`,
+   * so every invocation is implicitly the quick-capture action. We accept:
+   *   - `text`  (optional if `audio` is given) — entry body
+   *   - `time`  optional `HH:MM` override
+   *   - `audio` optional vault-relative attachment path; rendered as
+   *             `![[path]]` so Obsidian shows the inline audio player
+   *
+   * Note: `params.action` is reserved by Obsidian and will always equal
+   * the protocol handler name (`journal-partner`) here — do NOT use it
+   * as a routing key.
+   */
+  private async handleProtocol(params: ObsidianProtocolData): Promise<void> {
+    const text = params.text ?? '';
+    const audio = params.audio ?? '';
+
+    if (text.trim().length === 0 && audio.trim().length === 0) {
+      new Notice('Quick capture 至少需要 text 或 audio 参数之一');
+      return;
+    }
+
+    const time = params.time;
+    const tsValid = typeof time === 'string' && /^\d{2}:\d{2}$/.test(time);
+    const ts = tsValid ? time : undefined;
+
+    const ok = await this.writeToTodayJournal(text, ts, audio);
+    if (ok) {
+      const previewSrc = text.trim().length > 0 ? text : (audio || '语音');
+      const preview = previewSrc.trim().replace(/\s+/g, ' ').slice(0, 20);
+      const ellip = previewSrc.length > 20 ? '…' : '';
+      const tag = audio.trim().length > 0 ? '🎙️' : '📝';
+      new Notice(`${tag} 已记录：${preview}${ellip}`);
+    }
   }
 
   // ── Editor extension (source + live-preview) ───────────────────────────────
@@ -508,6 +624,49 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           .onChange(async value => {
             this.plugin.settings.circularCheckboxes = value;
             await this.plugin.saveSettings();
+          }),
+      );
+
+    // ── URL protocol / Shortcuts integration ──────────────────────────────
+    containerEl.createEl('h3', { text: '🔗 Action Button / Shortcuts 集成' });
+
+    const protocolDesc = containerEl.createEl('p', {
+      cls: 'jp-settings-help',
+    });
+    protocolDesc.style.cssText =
+      'margin: 4px 0 12px; padding: 10px 12px; border-radius: 6px;' +
+      'background: var(--background-secondary); color: var(--text-muted);' +
+      'font-size: 12.5px; line-height: 1.7;';
+    protocolDesc.createSpan({
+      text: '插件注册了 URL 协议，可从 iOS / macOS Shortcuts 调用，无需打开主界面就能把听写文本（以及可选的录音）写入今天的 ## Journal：',
+    });
+    const codeEl = protocolDesc.createEl('code');
+    codeEl.style.cssText =
+      'display: block; margin: 8px 0; padding: 6px 8px;' +
+      'background: var(--background-primary); border-radius: 4px;' +
+      'font-size: 11.5px; word-break: break-all;';
+    codeEl.setText('obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>');
+    protocolDesc.createSpan({
+      text:
+        '参数：text 和 audio 至少给一个；time=HH:MM 可选；audio 是 vault 内相对路径，' +
+        '例如 Assets/audio/2026-06-21_153012.m4a，会被渲染为内嵌音频播放器。' +
+        '搭配 iPhone Action Button：创建一个 Shortcut「录音 → 听写文本 → 保存到 Assets/audio/ → 打开 URL」，绑定到 Action Button 即可。',
+    });
+
+    new Setting(containerEl)
+      .setName('一键导入 Shortcut')
+      .setDesc('点击在新窗口打开 iCloud Shortcut 模板，导入后即可绑定到 Action Button')
+      .addButton(btn =>
+        btn
+          .setButtonText('获取捷径')
+          .setCta()
+          .onClick(() => {
+            // Placeholder URL — replace with actual iCloud Shortcut link once
+            // uploaded. Until then we surface the manual recipe.
+            new Notice(
+              'iCloud 捷径链接尚未配置。请按上方说明手动创建一个 Shortcut，' +
+                '或在 Issue 中催作者更新。',
+            );
           }),
       );
 

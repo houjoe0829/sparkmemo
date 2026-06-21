@@ -27,17 +27,13 @@ import {
 } from 'obsidian';
 import {
   appHasDailyNotesPluginLoaded,
-  createDailyNote,
   getAllDailyNotes,
   getDailyNote,
 } from 'obsidian-daily-notes-interface';
 
 import {
   JournalEntry,
-  appendToJournalSection,
-  buildEntryLine,
   findSection,
-  generateTimestamp,
   parseJournalEntries,
 } from './section';
 import type JournalPartnerPlugin from './main';
@@ -605,17 +601,8 @@ export class JournalCaptureView extends ItemView {
     this.submitBtn.setText('写入中…');
 
     try {
-      const ts = generateTimestamp();
-      const line = buildEntryLine(raw.replace(/\r\n/g, '\n'), ts);
-
-      let file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
-      if (!file) {
-        file = (await createDailyNote(moment())) as TFile;
-      }
-
-      await this.app.vault.process(file, content =>
-        appendToJournalSection(content, this.plugin.settings, line),
-      );
+      const ok = await this.plugin.writeToTodayJournal(raw);
+      if (!ok) return;
 
       this.textareaEl.value = '';
       this.autoResizeTextarea();

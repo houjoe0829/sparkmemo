@@ -1,0 +1,58 @@
+name: Release Obsidian Plugin
+
+on:
+  push:
+    tags:
+      # Match plugin version tags: 1.0.0, 2.0.1, etc. (Obsidian community convention)
+      - "[0-9]+.[0-9]+.[0-9]+"
+      # Also support `v`-prefixed tags for convenience
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Resolve release version
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify manifest.json version matches tag
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$MANIFEST_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::manifest.json version ($MANIFEST_VERSION) does not match tag (${{ steps.version.outputs.version }})"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            main.js manifest.json styles.css

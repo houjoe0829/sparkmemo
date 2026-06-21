@@ -51,6 +51,29 @@
   
 <img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/ad0b758f-d304-4b16-ae81-c2b3afd7aa5e" />
 
+### 🔗 URL 协议（Action Button / Shortcuts 集成）
+
+插件注册了 `obsidian://journal-partner` URL 协议，可以从任何能打开 URL 的地方（iOS Shortcuts、macOS Shortcuts、命令行 `open`）一键写入今天的日记，**无需打开 Obsidian 主界面**：
+
+```
+obsidian://journal-partner?text=<URL编码内容>
+obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>
+```
+
+**参数：**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `text` | text/audio 至少一项 | 条目文字内容（URL 编码） |
+| `audio` | text/audio 至少一项 | vault 内的音频附件相对路径，例如 `Assets/audio/2026-06-21_153012.m4a`，会以 `![[...]]` 嵌入，渲染成可播放的音频条 |
+| `time` | 否 | `HH:MM` 格式，默认使用当前时间 |
+
+**搭配 iPhone Action Button**：在 iOS Shortcuts 里创建一个捷径——
+- 「听写文本」→「打开 URL」（仅文字）
+- 「录音 → 听写文本 → 保存录音到 `Assets/audio/` → 打开 URL（text + audio 两个参数）」（文字 + 录音双轨）
+
+把捷径设为 Action Button，按一下手机侧键就能听写并自动落到今天的日记，全程不打断当前操作。
+
 ---
 
 ## 安装
