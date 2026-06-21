@@ -625,5 +625,23 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       text: '07:31',
     });
     previewEl.createEl('span', { text: '这里是日记内容…' });
+
+    // ── Shortcut ──────────────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '🔗 快捷指令' });
+
+    new Setting(containerEl)
+      .setName('一键导入 Shortcut')
+      .setDesc('配合 iPhone Action Button 使用，快速录音并写入日记')
+      .addButton(btn =>
+        btn
+          .setButtonText('获取捷径')
+          .setCta()
+          .onClick(() => {
+            window.open(
+              'https://www.icloud.com/shortcuts/2b5bbc7c721a4010807c4ed337245360',
+              '_blank',
+            );
+          }),
+      );
   }
 }
