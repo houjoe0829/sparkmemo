@@ -5,7 +5,7 @@
 
 set -e  # Exit on error
 
-VAULT_PATH="/Users/xuan/Library/Mobile Documents/iCloud~md~obsidian/Documents/xuan"
+VAULT_PATH="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/xuan"
 PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/journal-partner"
 
 echo "📦 Building Journal Partner..."
