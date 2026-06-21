@@ -44,7 +44,9 @@ import {
 } from './section';
 import {
   YearStats,
+  AllTimeStats,
   computeYearStats,
+  computeAllTimeStats,
   formatChineseWordCount,
   getHeatmapLevel,
 } from './stats';
@@ -96,13 +98,12 @@ export class JournalCaptureView extends ItemView {
   private statsYearLabelEl!: HTMLElement;
 
   // Stats state
-  private statsYear: number = moment().year();
   private statsLoading = false;
   private statsRefreshTimer: number | null = null;
-  /** Last computed snapshot — null while loading or before first render. */
-  private yearStats: YearStats | null = null;
-  /** Files belonging to the currently displayed year (path → date key). */
-  private statsFilesInYear: Map<string, string> = new Map();
+  /** All years' stats for all-time aggregation. */
+  private allYearStats: Map<number, YearStats> = new Map();
+  /** All-time aggregated stats. */
+  private allTimeStats: AllTimeStats | null = null;
 
   // Cached state
   private days: DaySection[] = [];
@@ -171,7 +172,7 @@ export class JournalCaptureView extends ItemView {
         if (day) {
           this.scheduleDayRefresh(day);
         }
-        if (this.statsFilesInYear.has(file.path)) {
+        if (file.extension === 'md') {
           this.scheduleStatsRefresh();
         }
       }),
@@ -191,15 +192,14 @@ export class JournalCaptureView extends ItemView {
         if (file instanceof TFile && this.days.some(d => d.filePath === file.path)) {
           this.scheduleFullRebuild();
         }
-        if (file instanceof TFile && this.statsFilesInYear.has(file.path)) {
+        if (file instanceof TFile && file.extension === 'md') {
           this.scheduleStatsRefresh();
         }
       }),
     );
     this.registerEvent(
-      this.app.vault.on('rename', (file, oldPath) => {
-        if (this.statsFilesInYear.has(oldPath) ||
-            (file instanceof TFile && file.extension === 'md')) {
+      this.app.vault.on('rename', (file) => {
+        if (file instanceof TFile && file.extension === 'md') {
           this.scheduleStatsRefresh();
         }
       }),
@@ -266,8 +266,8 @@ export class JournalCaptureView extends ItemView {
       // cheap when the user just wants to write a memo.
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
-        void this.loadStatsYear(this.statsYear);
       }
+      void this.loadAllStats();
     }
   }
 
@@ -826,26 +826,15 @@ export class JournalCaptureView extends ItemView {
 
   /** Build the static scaffold of the stats pane (toolbar + body). */
   private buildStatsPane() {
-    // Toolbar with year nav
+    // Toolbar with title
     this.statsToolbarEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-toolbar' });
 
     this.statsToolbarEl.createDiv({ cls: 'jp-stats-toolbar-spacer' });
 
-    const nav = this.statsToolbarEl.createDiv({ cls: 'jp-stats-year-nav' });
-    const prevBtn = nav.createEl('button', { cls: 'jp-stats-year-btn' });
-    setIcon(prevBtn, 'chevron-left');
-    prevBtn.setAttr('aria-label', '上一年');
-    prevBtn.addEventListener('click', () => void this.loadStatsYear(this.statsYear - 1));
-
-    this.statsYearLabelEl = nav.createDiv({
+    this.statsYearLabelEl = this.statsToolbarEl.createDiv({
       cls: 'jp-stats-year-label',
-      text: `${this.statsYear} 年`,
+      text: '全量数据',
     });
-
-    const nextBtn = nav.createEl('button', { cls: 'jp-stats-year-btn' });
-    setIcon(nextBtn, 'chevron-right');
-    nextBtn.setAttr('aria-label', '下一年');
-    nextBtn.addEventListener('click', () => void this.loadStatsYear(this.statsYear + 1));
 
     // Body container
     this.statsBodyEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-body' });
@@ -861,17 +850,16 @@ export class JournalCaptureView extends ItemView {
     }
     this.statsRefreshTimer = window.setTimeout(() => {
       this.statsRefreshTimer = null;
-      void this.loadStatsYear(this.statsYear);
+      void this.loadAllStats();
     }, 300);
   }
 
-  /** Load + render stats for one year. */
-  private async loadStatsYear(year: number): Promise<void> {
+  /** Load + render stats for all available years. */
+  private async loadAllStats(): Promise<void> {
     if (this.statsLoading) return;
     this.statsLoading = true;
-    this.statsYear = year;
-    this.statsYearLabelEl.setText(`${year} 年`);
 
+    this.statsYearLabelEl.setText('全量数据');
     this.renderStatsLoading();
 
     try {
@@ -879,18 +867,51 @@ export class JournalCaptureView extends ItemView {
         this.renderStatsError('请先启用 Obsidian 自带的「Daily Notes」核心插件');
         return;
       }
-      const dayInputs = await this.collectStatsYear(year);
-      this.yearStats = computeYearStats(
-        year,
-        dayInputs,
-        this.plugin.settings.timestampPattern,
-      );
+
+      const all = getAllDailyNotes() as Record<string, TFile>;
+      const yearMap = new Map<number, Array<{ key: string; sectionText: string }>>();
+
+      // Group all daily notes by year
+      for (const file of Object.values(all)) {
+        if (!(file instanceof TFile)) continue;
+        const d = getDateFromFile(file as TFile, 'day');
+        if (!d) continue;
+        const year = d.year();
+        const key = d.format('YYYY-MM-DD');
+
+        let sectionText = '';
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          const section = findSection(
+            content,
+            this.plugin.settings.targetHeading,
+            this.plugin.settings.headingLevel,
+          );
+          if (section) {
+            sectionText = content.slice(section.from, section.to);
+          }
+        } catch (err) {
+          console.error('[Journal Partner] stats read failed', file.path, err);
+        }
+
+        if (!yearMap.has(year)) yearMap.set(year, []);
+        yearMap.get(year)!.push({ key, sectionText });
+      }
+
+      // Compute stats for each year
+      this.allYearStats.clear();
+      for (const [year, dayInputs] of yearMap) {
+        const ys = computeYearStats(year, dayInputs, this.plugin.settings.timestampPattern);
+        this.allYearStats.set(year, ys);
+      }
+
+      // Compute all-time stats
+      this.allTimeStats = computeAllTimeStats([...this.allYearStats.values()]);
+
       this.renderStatsContent();
     } catch (err) {
       console.error('[Journal Partner] stats load failed', err);
-      this.renderStatsError(
-        `加载失败：${err instanceof Error ? err.message : String(err)}`,
-      );
+      this.renderStatsError(`加载失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.statsLoading = false;
     }
@@ -905,47 +926,12 @@ export class JournalCaptureView extends ItemView {
    * has no `## Journal` heading at all) still appear in the result with an
    * empty string, so the heatmap can render them as level-0.
    */
-  private async collectStatsYear(
-    year: number,
-  ): Promise<Array<{ key: string; sectionText: string }>> {
-    const all = getAllDailyNotes() as Record<string, TFile>;
-    const result: Array<{ key: string; sectionText: string }> = [];
-    const newFilesInYear = new Map<string, string>();
-
-    for (const file of Object.values(all)) {
-      if (!(file instanceof TFile)) continue;
-      const d = getDateFromFile(file as TFile, 'day');
-      if (!d || d.year() !== year) continue;
-      const key = d.format('YYYY-MM-DD');
-      newFilesInYear.set(file.path, key);
-
-      let sectionText = '';
-      try {
-        const content = await this.app.vault.cachedRead(file);
-        const section = findSection(
-          content,
-          this.plugin.settings.targetHeading,
-          this.plugin.settings.headingLevel,
-        );
-        if (section) {
-          sectionText = content.slice(section.from, section.to);
-        }
-      } catch (err) {
-        console.error('[Journal Partner] stats read failed', file.path, err);
-      }
-      result.push({ key, sectionText });
-    }
-
-    this.statsFilesInYear = newFilesInYear;
-    return result;
-  }
-
   private renderStatsLoading() {
     this.statsBodyEl.empty();
     const loading = this.statsBodyEl.createDiv({ cls: 'jp-stats-loading' });
     loading.createDiv({ cls: 'jp-stats-spinner' });
     loading.createDiv({
-      text: `正在统计 ${this.statsYear} 年的日记…`,
+      text: '正在加载日记数据…',
       cls: 'jp-stats-loading-text',
     });
   }
@@ -957,22 +943,15 @@ export class JournalCaptureView extends ItemView {
 
   private renderStatsContent() {
     this.statsBodyEl.empty();
-    const stats = this.yearStats;
-    if (!stats) return;
+    const allTime = this.allTimeStats;
+    if (!allTime) return;
 
-    this.renderStatsHero(stats);
-    this.renderStatsHeatmapSection(stats);
-  }
-
-  private renderStatsHero(stats: YearStats) {
+    // ── All-time hero ────────────────────────────────────────────────────
     const hero = this.statsBodyEl.createDiv({ cls: 'jp-stats-hero' });
-
-    // ── Top block: big total-words hero + descriptive subtitle ──
     const top = hero.createDiv({ cls: 'jp-stats-hero-top' });
 
     const numLine = top.createDiv({ cls: 'jp-stats-hero-number' });
-    const formatted = formatChineseWordCount(stats.totalWords);
-
+    const formatted = formatChineseWordCount(allTime.totalWords);
     if (formatted.includes('万')) {
       const [num, unit] = formatted.split(' ');
       numLine.createSpan({ cls: 'jp-stats-hero-num', text: num });
@@ -983,21 +962,23 @@ export class JournalCaptureView extends ItemView {
     }
 
     const sub = top.createDiv({ cls: 'jp-stats-hero-sub' });
-    const daysCounted = stats.writingDays;
-    const dailyAvg = daysCounted > 0 ? Math.round(stats.totalWords / daysCounted) : 0;
-    sub.createSpan({
-      text:
-        daysCounted === 0
-          ? '今年还没有开始写日记 · 期待第一条 memo'
-          : `写了 ${daysCounted} 天 · 日均 ${dailyAvg} 字`,
-    });
+    const yearsStr = allTime.yearsWithData.length > 0
+      ? `${allTime.yearsWithData[0]}–${allTime.yearsWithData[allTime.yearsWithData.length - 1]} 年`
+      : '暂无数据';
+    sub.createSpan({ text: yearsStr });
 
-    // ── Bottom block: 4 inline KPIs (writing-days lives in the subtitle) ──
     const grid = hero.createDiv({ cls: 'jp-stats-hero-kpis' });
-    this.makeStatsKPI(grid, 'pencil', `${stats.totalEntries}`, '条', '总条数');
-    this.makeStatsKPI(grid, 'mic', `${stats.totalAudios}`, '段', '录音数');
-    this.makeStatsKPI(grid, 'flame', `${stats.longestStreak}`, '天', '最长连续');
-    this.makeStatsKPI(grid, 'clock', stats.mostCommonHour, '', '最常记录时段');
+    this.makeStatsKPI(grid, 'file-text', `${allTime.writingDays}`, '天', '写作天数');
+    this.makeStatsKPI(grid, 'pencil', `${allTime.totalEntries}`, '条', '总条数');
+    this.makeStatsKPI(grid, 'mic', `${allTime.totalAudios}`, '段', '录音数');
+    this.makeStatsKPI(grid, 'flame', `${allTime.longestStreak}`, '天', '最长连续');
+
+    // ── Per-year heatmaps ─────────────────────────────────────────────────
+    const years = [...this.allYearStats.keys()].sort((a, b) => b - a);
+    for (const year of years) {
+      const ys = this.allYearStats.get(year)!;
+      this.renderStatsHeatmapSection(year, ys);
+    }
   }
 
   private makeStatsKPI(
@@ -1016,11 +997,11 @@ export class JournalCaptureView extends ItemView {
     card.createDiv({ cls: 'jp-stats-kpi-label', text: label });
   }
 
-  private renderStatsHeatmapSection(stats: YearStats) {
+  private renderStatsHeatmapSection(year: number, stats: YearStats) {
     const section = this.statsBodyEl.createDiv({ cls: 'jp-stats-heatmap-section' });
 
     const header = section.createDiv({ cls: 'jp-stats-heatmap-header' });
-    header.createDiv({ cls: 'jp-stats-heatmap-title', text: '每日活跃度' });
+    header.createDiv({ cls: 'jp-stats-heatmap-title', text: `${year} 年` });
 
     this.renderStatsHeatmap(
       section.createDiv({ cls: 'jp-stats-heatmap-wrap' }),
@@ -1038,8 +1019,7 @@ export class JournalCaptureView extends ItemView {
     // Footer summary
     const footer = section.createDiv({ cls: 'jp-stats-footer' });
     footer.setText(
-      `${stats.year} 年共写 ${stats.writingDays} 天 · ` +
-        `${stats.totalWords.toLocaleString('en-US')} 字 · ${stats.totalEntries} 条` +
+      `${stats.writingDays} 天 · ${stats.totalWords.toLocaleString('en-US')} 字 · ${stats.totalEntries} 条` +
         (stats.totalAudios > 0 ? ` · ${stats.totalAudios} 段录音` : ''),
     );
   }
