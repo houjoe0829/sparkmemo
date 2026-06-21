@@ -286,7 +286,10 @@ export class JournalCaptureView extends ItemView {
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
-    this.textareaEl = this.inputCardEl.createEl('textarea', {
+    // Wrapper for textarea
+    const inputWrapper = this.inputCardEl.createDiv({ cls: 'jp-capture-input-wrapper' });
+
+    this.textareaEl = inputWrapper.createEl('textarea', {
       cls: 'jp-capture-input',
       attr: {
         placeholder: "What's happening?",
@@ -305,8 +308,186 @@ export class JournalCaptureView extends ItemView {
         void this.handleSubmit();
       }
     });
+    // Image paste: intercept at document level (capture phase) for reliability
+    this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      // Only intercept if focus is inside our textarea
+      if (!this.inputCardEl.contains(document.activeElement)) return;
+      for (const item of Array.from(items)) {
+        if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        try {
+          const result = await this.saveImageToVault(blob);
+          const textarea = this.textareaEl;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const before = textarea.value.substring(0, start);
+          const after = textarea.value.substring(end);
+          textarea.value = before + result + ' ' + after;
+          const newPos = start + result.length + 1;
+          textarea.setSelectionRange(newPos, newPos);
+          this.refreshSubmitState();
+          this.autoResizeTextarea();
+        } catch (err) {
+          new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+    }, true);
+    // Image drag & drop
+    this.textareaEl.addEventListener('drop', async (e) => {
+      const files = e.dataTransfer?.files;
+      if (!files) return;
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const result = await this.saveImageToVault(file);
+          const start = this.textareaEl.selectionStart;
+          const end = this.textareaEl.selectionEnd;
+          const before = this.textareaEl.value.substring(0, start);
+          const after = this.textareaEl.value.substring(end);
+          this.textareaEl.value = before + result + ' ' + after;
+          const newPos = start + result.length + 1;
+          this.textareaEl.setSelectionRange(newPos, newPos);
+          this.refreshSubmitState();
+          this.autoResizeTextarea();
+        } catch (err) {
+          new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+    });
+    this.textareaEl.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    }, true);
+
+    // Hidden file input for image upload
+    const fileInput = this.inputCardEl.createEl('input', {
+      cls: 'jp-capture-image-input',
+      attr: {
+        type: 'file',
+        accept: 'image/*',
+      },
+    });
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', async () => {
+      const files = fileInput.files;
+      if (!files || files.length === 0) return;
+      const file = files[0];
+      if (!file.type.startsWith('image/')) return;
+      fileInput.value = '';
+      try {
+        const result = await this.saveImageToVault(file);
+        const textarea = this.textareaEl;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const before = textarea.value.substring(0, start);
+        const after = textarea.value.substring(end);
+        textarea.value = before + result + ' ' + after;
+        const newPos = start + result.length + 1;
+        textarea.setSelectionRange(newPos, newPos);
+        this.refreshSubmitState();
+        this.autoResizeTextarea();
+      } catch (err) {
+        new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+    // Image upload button
+    const imageBtn = this.inputCardEl.createEl('button', {
+      cls: 'jp-capture-image-btn',
+      attr: { 'aria-label': '上传图片' },
+    });
+    setIcon(imageBtn, 'image');
+    imageBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    // Microphone button
+    const micBtn = this.inputCardEl.createEl('button', {
+      cls: 'jp-capture-mic-btn',
+      attr: { 'aria-label': '录音' },
+    });
+    setIcon(micBtn, 'mic');
+    let mediaRecorder: MediaRecorder | null = null;
+    let audioChunks: Blob[] = [];
+    let recordingTimeout: number | null = null;
+
+    const stopRecording = async () => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      if (recordingTimeout !== null) {
+        window.clearTimeout(recordingTimeout);
+        recordingTimeout = null;
+      }
+    };
+
+    const startRecording = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          try {
+            const result = await this.saveAudioToVault(audioBlob);
+            const textarea = this.textareaEl;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const before = textarea.value.substring(0, start);
+            const after = textarea.value.substring(end);
+            textarea.value = before + result + ' ' + after;
+            const newPos = start + result.length + 1;
+            textarea.setSelectionRange(newPos, newPos);
+            this.refreshSubmitState();
+            this.autoResizeTextarea();
+          } catch (err) {
+            new Notice(`录音保存失败：${err instanceof Error ? err.message : String(err)}`);
+          }
+        };
+
+        mediaRecorder.start();
+        micBtn.addClass('is-recording');
+        setIcon(micBtn, 'square');
+
+        recordingTimeout = window.setTimeout(() => {
+          void stopRecording();
+          new Notice('录音已自动停止（最長5分钟）');
+        }, 5 * 60 * 1000);
+      } catch (err) {
+        new Notice(`无法访问麦克风：${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+
+    micBtn.addEventListener('click', async () => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        await startRecording();
+      } else {
+        await stopRecording();
+        micBtn.removeClass('is-recording');
+        setIcon(micBtn, 'mic');
+      }
+    });
 
     const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
+
+    // Button row inside actions, left side
+    const buttonRow = actions.createDiv({ cls: 'jp-capture-button-row' });
+    buttonRow.appendChild(imageBtn);
+    buttonRow.appendChild(micBtn);
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
@@ -317,6 +498,38 @@ export class JournalCaptureView extends ItemView {
     });
 
     this.refreshSubmitState();
+  }
+
+  private async saveImageToVault(blob: Blob): Promise<string> {
+    const ext = blob.type === 'image/png' ? 'png'
+      : blob.type === 'image/gif' ? 'gif'
+      : blob.type === 'image/webp' ? 'webp'
+      : blob.type === 'image/jpeg' ? 'jpg' : 'png';
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    // Read Obsidian's configured attachment folder (defaults to 'Attachments' if not set)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attachmentFolder = (this.app.vault as any).getConfig?.('attachmentFolderPath') as string || 'Attachments';
+    const fileName = `${attachmentFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const attachmentsDir = this.app.vault.getFolderByPath(attachmentFolder);
+    if (!attachmentsDir) await this.app.vault.createFolder(attachmentFolder);
+    const buffer = await blob.arrayBuffer();
+    const file = await this.app.vault.createBinary(fileName, buffer);
+    return `![](${file.path})`;
+  }
+
+  private async saveAudioToVault(blob: Blob): Promise<string> {
+    const ext = blob.type === 'audio/mp4' ? 'm4a' : 'webm';
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attachmentFolder = (this.app.vault as any).getConfig?.('attachmentFolderPath') as string || 'Attachments';
+    const fileName = `${attachmentFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const attachmentsDir = this.app.vault.getFolderByPath(attachmentFolder);
+    if (!attachmentsDir) await this.app.vault.createFolder(attachmentFolder);
+    const buffer = await blob.arrayBuffer();
+    const file = await this.app.vault.createBinary(fileName, buffer);
+    return `![[${file.path}]]`;
   }
 
   private buildTimeline(root: HTMLElement) {
