@@ -669,17 +669,17 @@ class JournalPartnerSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('一键导入 Shortcut')
-      .setDesc('点击在新窗口打开 iCloud Shortcut 模板，导入后即可绑定到 Action Button')
+      .setDesc('点击在 iCloud 打开「快速记录」捷径模板，添加到「快捷指令」app 后即可绑定到 Action Button')
       .addButton(btn =>
         btn
           .setButtonText('获取捷径')
           .setCta()
           .onClick(() => {
-            // Placeholder URL — replace with actual iCloud Shortcut link once
-            // uploaded. Until then we surface the manual recipe.
-            new Notice(
-              'iCloud 捷径链接尚未配置。请按上方说明手动创建一个 Shortcut，' +
-                '或在 Issue 中催作者更新。',
+            // Public iCloud share link for the "快速记录" shortcut.
+            // Opens in the system Shortcuts app on macOS/iOS.
+            window.open(
+              'https://www.icloud.com/shortcuts/2b5bbc7c721a4010807c4ed337245360',
+              '_blank',
             );
           }),
       );

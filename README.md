@@ -75,6 +75,8 @@ obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>
 
 把捷径设为 Action Button，按一下手机侧键就能听写并自动落到今天的日记，全程不打断当前操作。
 
+> 💡 **一键导入**：插件设置面板提供了「获取捷径」按钮，或直接点这里 → [iCloud 捷径模板](https://www.icloud.com/shortcuts/2b5bbc7c721a4010807c4ed337245360)，添加到「快捷指令」app 即可使用。
+
 ---
 
 ## 安装
