@@ -31,6 +31,7 @@ import {
   appHasDailyNotesPluginLoaded,
   getAllDailyNotes,
   getDailyNote,
+  getDateFromFile,
 } from 'obsidian-daily-notes-interface';
 
 import {
@@ -41,6 +42,12 @@ import {
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
 } from './section';
+import {
+  YearStats,
+  computeYearStats,
+  formatChineseWordCount,
+  getHeatmapLevel,
+} from './stats';
 import type JournalPartnerPlugin from './main';
 
 export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
@@ -68,14 +75,34 @@ interface DaySection {
 export class JournalCaptureView extends ItemView {
   private plugin: JournalPartnerPlugin;
 
-  // DOM references
-  private toolbarEl!: HTMLElement;
+  // Top-level tab state
+  private currentTab: 'capture' | 'stats' = 'capture';
+  private tabBarEl!: HTMLElement;
+  private capturePaneEl!: HTMLElement;
+  private statsPaneEl!: HTMLElement;
+  private captureTabBtn!: HTMLButtonElement;
+  private statsTabBtn!: HTMLButtonElement;
+
+  // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
   private timelineEl!: HTMLElement;
   private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
   private submitBtn!: HTMLButtonElement;
-  private sortBtn!: HTMLButtonElement;
+
+  // DOM references (stats pane)
+  private statsToolbarEl!: HTMLElement;
+  private statsBodyEl!: HTMLElement;
+  private statsYearLabelEl!: HTMLElement;
+
+  // Stats state
+  private statsYear: number = moment().year();
+  private statsLoading = false;
+  private statsRefreshTimer: number | null = null;
+  /** Last computed snapshot — null while loading or before first render. */
+  private yearStats: YearStats | null = null;
+  /** Files belonging to the currently displayed year (path → date key). */
+  private statsFilesInYear: Map<string, string> = new Map();
 
   // Cached state
   private days: DaySection[] = [];
@@ -123,9 +150,17 @@ export class JournalCaptureView extends ItemView {
     root.empty();
     root.addClass('jp-capture-root');
 
-    this.buildToolbar(root as HTMLElement);
-    this.buildInputCard(root as HTMLElement);
-    this.buildTimeline(root as HTMLElement);
+    // Top-level tab bar — switches between "快速记录" and "年度统计".
+    this.buildTabBar(root as HTMLElement);
+
+    // Capture pane (default visible)
+    this.capturePaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-capture' });
+    this.buildInputCard(this.capturePaneEl);
+    this.buildTimeline(this.capturePaneEl);
+
+    // Stats pane (hidden initially; built lazily on first switch)
+    this.statsPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-stats' });
+    this.statsPaneEl.style.display = 'none';
 
     // ── Vault listeners ──
     // modify: refresh the affected day's section in place (no full rebuild)
@@ -136,6 +171,9 @@ export class JournalCaptureView extends ItemView {
         if (day) {
           this.scheduleDayRefresh(day);
         }
+        if (this.statsFilesInYear.has(file.path)) {
+          this.scheduleStatsRefresh();
+        }
       }),
     );
     // create: a new daily note (today, or an older one) — full rebuild
@@ -143,6 +181,7 @@ export class JournalCaptureView extends ItemView {
       this.app.vault.on('create', file => {
         if (file instanceof TFile && file.extension === 'md') {
           this.scheduleFullRebuild();
+          this.scheduleStatsRefresh();
         }
       }),
     );
@@ -151,6 +190,17 @@ export class JournalCaptureView extends ItemView {
       this.app.vault.on('delete', file => {
         if (file instanceof TFile && this.days.some(d => d.filePath === file.path)) {
           this.scheduleFullRebuild();
+        }
+        if (file instanceof TFile && this.statsFilesInYear.has(file.path)) {
+          this.scheduleStatsRefresh();
+        }
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) => {
+        if (this.statsFilesInYear.has(oldPath) ||
+            (file instanceof TFile && file.extension === 'md')) {
+          this.scheduleStatsRefresh();
         }
       }),
     );
@@ -165,6 +215,10 @@ export class JournalCaptureView extends ItemView {
       window.clearTimeout(this.rerenderTimer);
       this.rerenderTimer = null;
     }
+    if (this.statsRefreshTimer !== null) {
+      window.clearTimeout(this.statsRefreshTimer);
+      this.statsRefreshTimer = null;
+    }
     if (this.intersectionObs) {
       this.intersectionObs.disconnect();
       this.intersectionObs = null;
@@ -176,38 +230,54 @@ export class JournalCaptureView extends ItemView {
 
   // ── DOM construction ────────────────────────────────────────────────────
 
-  private buildToolbar(root: HTMLElement) {
-    this.toolbarEl = root.createDiv({ cls: 'jp-capture-toolbar' });
+  private buildTabBar(root: HTMLElement) {
+    this.tabBarEl = root.createDiv({ cls: 'jp-tab-bar' });
 
-    const refreshBtn = this.toolbarEl.createEl('button', {
-      cls: 'jp-capture-toolbar-btn',
-      attr: { 'aria-label': '刷新', title: '刷新' },
-    });
-    setIcon(refreshBtn, 'refresh-cw');
-    refreshBtn.addEventListener('click', () => {
-      void this.fullRebuild();
-    });
+    this.captureTabBtn = this.makeTabBtn('feather', '记录', true);
+    this.captureTabBtn.addEventListener('click', () => this.switchTab('capture'));
 
-    this.sortBtn = this.toolbarEl.createEl('button', {
-      cls: 'jp-capture-toolbar-btn',
-      attr: { 'aria-label': '切换排序', title: '切换排序方向' },
-    });
-    this.updateSortIcon();
-    this.sortBtn.addEventListener('click', async () => {
-      this.plugin.settings.captureSortDesc = !this.plugin.settings.captureSortDesc;
-      await this.plugin.saveSettings();
-      this.updateSortIcon();
-      // Sorting only affects within-day ordering; cheap to rebuild
-      await this.fullRebuild();
-    });
+    this.statsTabBtn = this.makeTabBtn('bar-chart-2', '统计', false);
+    this.statsTabBtn.addEventListener('click', () => this.switchTab('stats'));
   }
 
-  private updateSortIcon() {
+  /** Build one pill tab button: icon + short label. */
+  private makeTabBtn(icon: string, label: string, active: boolean): HTMLButtonElement {
+    const btn = this.tabBarEl.createEl('button', {
+      cls: 'jp-tab-btn' + (active ? ' is-active' : ''),
+    });
+    const iconEl = btn.createSpan({ cls: 'jp-tab-btn-icon' });
+    setIcon(iconEl, icon);
+    btn.createSpan({ cls: 'jp-tab-btn-text', text: label });
+    return btn;
+  }
+
+  private switchTab(tab: 'capture' | 'stats') {
+    if (this.currentTab === tab) return;
+    this.currentTab = tab;
+
+    this.captureTabBtn.toggleClass('is-active', tab === 'capture');
+    this.statsTabBtn.toggleClass('is-active', tab === 'stats');
+    this.capturePaneEl.style.display = tab === 'capture' ? '' : 'none';
+    this.statsPaneEl.style.display = tab === 'stats' ? '' : 'none';
+
+    if (tab === 'stats') {
+      // Lazy: only build the stats pane scaffold (and trigger first load)
+      // the first time the user actually opens it. Keeps view startup
+      // cheap when the user just wants to write a memo.
+      if (this.statsPaneEl.childElementCount === 0) {
+        this.buildStatsPane();
+        void this.loadStatsYear(this.statsYear);
+      }
+    }
+  }
+
+
+  private updateSortButton(btn: HTMLButtonElement) {
     setIcon(
-      this.sortBtn,
+      btn,
       this.plugin.settings.captureSortDesc ? 'arrow-down-narrow-wide' : 'arrow-up-narrow-wide',
     );
-    this.sortBtn.setAttr(
+    btn.setAttr(
       'title',
       this.plugin.settings.captureSortDesc ? '当前：最新在上' : '当前：最早在上',
     );
@@ -444,8 +514,24 @@ export class JournalCaptureView extends ItemView {
     });
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
-    headerCard.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    headerCard.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+    const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
+    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+
+    // Right-side actions on the date header: currently just the sort toggle.
+    // We attach it to every day, but it controls a global setting — clicking
+    // re-renders all days at once.
+    const actions = headerCard.createDiv({ cls: 'jp-timeline-header-actions' });
+    const sortBtn = actions.createEl('button', {
+      cls: 'jp-timeline-header-btn',
+      attr: { 'aria-label': '切换排序方向' },
+    });
+    this.updateSortButton(sortBtn);
+    sortBtn.addEventListener('click', async () => {
+      this.plugin.settings.captureSortDesc = !this.plugin.settings.captureSortDesc;
+      await this.plugin.saveSettings();
+      await this.fullRebuild();
+    });
 
     if (entries.length === 0) {
       // Today with no entries — soft hint only
@@ -551,6 +637,338 @@ export class JournalCaptureView extends ItemView {
   private disposeDays() {
     for (const d of this.days) d.scope.unload();
     this.days = [];
+  }
+
+  // ── Stats pane ──────────────────────────────────────────────────────────
+
+  /** Build the static scaffold of the stats pane (toolbar + body). */
+  private buildStatsPane() {
+    // Toolbar with year nav
+    this.statsToolbarEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-toolbar' });
+
+    this.statsToolbarEl.createDiv({ cls: 'jp-stats-toolbar-spacer' });
+
+    const nav = this.statsToolbarEl.createDiv({ cls: 'jp-stats-year-nav' });
+    const prevBtn = nav.createEl('button', { cls: 'jp-stats-year-btn' });
+    setIcon(prevBtn, 'chevron-left');
+    prevBtn.setAttr('aria-label', '上一年');
+    prevBtn.addEventListener('click', () => void this.loadStatsYear(this.statsYear - 1));
+
+    this.statsYearLabelEl = nav.createDiv({
+      cls: 'jp-stats-year-label',
+      text: `${this.statsYear} 年`,
+    });
+
+    const nextBtn = nav.createEl('button', { cls: 'jp-stats-year-btn' });
+    setIcon(nextBtn, 'chevron-right');
+    nextBtn.setAttr('aria-label', '下一年');
+    nextBtn.addEventListener('click', () => void this.loadStatsYear(this.statsYear + 1));
+
+    // Body container
+    this.statsBodyEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-body' });
+  }
+
+  /** Debounced reload, used in response to vault mutations. */
+  private scheduleStatsRefresh() {
+    // Only refresh if the user has at least opened the tab once. Otherwise
+    // every memo save would do hidden work the user never sees.
+    if (this.statsPaneEl.childElementCount === 0) return;
+    if (this.statsRefreshTimer !== null) {
+      window.clearTimeout(this.statsRefreshTimer);
+    }
+    this.statsRefreshTimer = window.setTimeout(() => {
+      this.statsRefreshTimer = null;
+      void this.loadStatsYear(this.statsYear);
+    }, 300);
+  }
+
+  /** Load + render stats for one year. */
+  private async loadStatsYear(year: number): Promise<void> {
+    if (this.statsLoading) return;
+    this.statsLoading = true;
+    this.statsYear = year;
+    this.statsYearLabelEl.setText(`${year} 年`);
+
+    this.renderStatsLoading();
+
+    try {
+      if (!appHasDailyNotesPluginLoaded()) {
+        this.renderStatsError('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+        return;
+      }
+      const dayInputs = await this.collectStatsYear(year);
+      this.yearStats = computeYearStats(
+        year,
+        dayInputs,
+        this.plugin.settings.timestampPattern,
+      );
+      this.renderStatsContent();
+    } catch (err) {
+      console.error('[Journal Partner] stats load failed', err);
+      this.renderStatsError(
+        `加载失败：${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      this.statsLoading = false;
+    }
+  }
+
+  /**
+   * Scan every daily note in `year` and return per-day raw journal-section text.
+   *
+   * The stats layer works off raw section text (not parsed entries) so we
+   * can count plain-paragraph memos from older journals that never used the
+   * `- HH:MM ...` convention. Days whose section is empty (or whose file
+   * has no `## Journal` heading at all) still appear in the result with an
+   * empty string, so the heatmap can render them as level-0.
+   */
+  private async collectStatsYear(
+    year: number,
+  ): Promise<Array<{ key: string; sectionText: string }>> {
+    const all = getAllDailyNotes() as Record<string, TFile>;
+    const result: Array<{ key: string; sectionText: string }> = [];
+    const newFilesInYear = new Map<string, string>();
+
+    for (const file of Object.values(all)) {
+      if (!(file instanceof TFile)) continue;
+      const d = getDateFromFile(file as TFile, 'day');
+      if (!d || d.year() !== year) continue;
+      const key = d.format('YYYY-MM-DD');
+      newFilesInYear.set(file.path, key);
+
+      let sectionText = '';
+      try {
+        const content = await this.app.vault.cachedRead(file);
+        const section = findSection(
+          content,
+          this.plugin.settings.targetHeading,
+          this.plugin.settings.headingLevel,
+        );
+        if (section) {
+          sectionText = content.slice(section.from, section.to);
+        }
+      } catch (err) {
+        console.error('[Journal Partner] stats read failed', file.path, err);
+      }
+      result.push({ key, sectionText });
+    }
+
+    this.statsFilesInYear = newFilesInYear;
+    return result;
+  }
+
+  private renderStatsLoading() {
+    this.statsBodyEl.empty();
+    const loading = this.statsBodyEl.createDiv({ cls: 'jp-stats-loading' });
+    loading.createDiv({ cls: 'jp-stats-spinner' });
+    loading.createDiv({
+      text: `正在统计 ${this.statsYear} 年的日记…`,
+      cls: 'jp-stats-loading-text',
+    });
+  }
+
+  private renderStatsError(msg: string) {
+    this.statsBodyEl.empty();
+    this.statsBodyEl.createDiv({ cls: 'jp-stats-empty', text: msg });
+  }
+
+  private renderStatsContent() {
+    this.statsBodyEl.empty();
+    const stats = this.yearStats;
+    if (!stats) return;
+
+    this.renderStatsHero(stats);
+    this.renderStatsHeatmapSection(stats);
+  }
+
+  private renderStatsHero(stats: YearStats) {
+    const hero = this.statsBodyEl.createDiv({ cls: 'jp-stats-hero' });
+
+    // ── Top block: big total-words hero + descriptive subtitle ──
+    const top = hero.createDiv({ cls: 'jp-stats-hero-top' });
+
+    const numLine = top.createDiv({ cls: 'jp-stats-hero-number' });
+    const formatted = formatChineseWordCount(stats.totalWords);
+
+    if (formatted.includes('万')) {
+      const [num, unit] = formatted.split(' ');
+      numLine.createSpan({ cls: 'jp-stats-hero-num', text: num });
+      numLine.createSpan({ cls: 'jp-stats-hero-unit', text: unit });
+    } else {
+      numLine.createSpan({ cls: 'jp-stats-hero-num', text: formatted });
+      numLine.createSpan({ cls: 'jp-stats-hero-unit', text: '字' });
+    }
+
+    const sub = top.createDiv({ cls: 'jp-stats-hero-sub' });
+    const daysCounted = stats.writingDays;
+    const dailyAvg = daysCounted > 0 ? Math.round(stats.totalWords / daysCounted) : 0;
+    sub.createSpan({
+      text:
+        daysCounted === 0
+          ? '今年还没有开始写日记 · 期待第一条 memo'
+          : `写了 ${daysCounted} 天 · 日均 ${dailyAvg} 字`,
+    });
+
+    // ── Bottom block: 4 inline KPIs (writing-days lives in the subtitle) ──
+    const grid = hero.createDiv({ cls: 'jp-stats-hero-kpis' });
+    this.makeStatsKPI(grid, 'pencil', `${stats.totalEntries}`, '条', '总条数');
+    this.makeStatsKPI(grid, 'mic', `${stats.totalAudios}`, '段', '录音数');
+    this.makeStatsKPI(grid, 'flame', `${stats.longestStreak}`, '天', '最长连续');
+    this.makeStatsKPI(grid, 'clock', stats.mostCommonHour, '', '最常记录时段');
+  }
+
+  private makeStatsKPI(
+    parent: HTMLElement,
+    icon: string,
+    value: string,
+    unit: string,
+    label: string,
+  ) {
+    const card = parent.createDiv({ cls: 'jp-stats-kpi-card' });
+    const iconEl = card.createDiv({ cls: 'jp-stats-kpi-icon' });
+    setIcon(iconEl, icon);
+    const row = card.createDiv({ cls: 'jp-stats-kpi-row' });
+    row.createSpan({ cls: 'jp-stats-kpi-value', text: value });
+    if (unit) row.createSpan({ cls: 'jp-stats-kpi-unit', text: unit });
+    card.createDiv({ cls: 'jp-stats-kpi-label', text: label });
+  }
+
+  private renderStatsHeatmapSection(stats: YearStats) {
+    const section = this.statsBodyEl.createDiv({ cls: 'jp-stats-heatmap-section' });
+
+    const header = section.createDiv({ cls: 'jp-stats-heatmap-header' });
+    header.createDiv({ cls: 'jp-stats-heatmap-title', text: '每日活跃度' });
+
+    this.renderStatsHeatmap(
+      section.createDiv({ cls: 'jp-stats-heatmap-wrap' }),
+      stats,
+    );
+
+    // Legend
+    const legend = section.createDiv({ cls: 'jp-stats-legend' });
+    legend.createSpan({ cls: 'jp-stats-legend-label', text: '少' });
+    for (let l = 0; l <= 4; l++) {
+      legend.createDiv({ cls: `jp-stats-cell level-${l}` });
+    }
+    legend.createSpan({ cls: 'jp-stats-legend-label', text: '多' });
+
+    // Footer summary
+    const footer = section.createDiv({ cls: 'jp-stats-footer' });
+    footer.setText(
+      `${stats.year} 年共写 ${stats.writingDays} 天 · ` +
+        `${stats.totalWords.toLocaleString('en-US')} 字 · ${stats.totalEntries} 条` +
+        (stats.totalAudios > 0 ? ` · ${stats.totalAudios} 段录音` : ''),
+    );
+  }
+
+  private renderStatsHeatmap(parent: HTMLElement, stats: YearStats) {
+    const year = stats.year;
+    const today = moment().startOf('day');
+
+    // All days of the year (date + per-day counts).
+    const allDays: { date: moment.Moment; entryCount: number; wordCount: number }[] = [];
+    const start = moment({ year, month: 0, day: 1 }).startOf('day');
+    const end = moment({ year, month: 11, day: 31 }).startOf('day');
+    for (let d = start.clone(); d.isSameOrBefore(end); d.add(1, 'day')) {
+      const ds = stats.dailyMap.get(d.format('YYYY-MM-DD'));
+      allDays.push({
+        date: d.clone(),
+        entryCount: ds?.entryCount ?? 0,
+        wordCount: ds?.wordCount ?? 0,
+      });
+    }
+
+    // Pad to a Monday-start grid. Sunday (0) becomes index 6, Monday (1)
+    // becomes 0, etc. Matches the "一/三/五" weekday labels.
+    const firstDow = allDays[0].date.day();
+    const startPad = firstDow === 0 ? 6 : firstDow - 1;
+    const paddedDays: (typeof allDays[number] | null)[] = [
+      ...Array(startPad).fill(null),
+      ...allDays,
+    ];
+    const totalWeeks = Math.ceil(paddedDays.length / 7);
+
+    // First week each month appears in (for the month-label row).
+    const monthWeek: Record<number, number> = {};
+    for (let w = 0; w < totalWeeks; w++) {
+      for (let dow = 0; dow < 7; dow++) {
+        const item = paddedDays[w * 7 + dow];
+        if (!item) continue;
+        const mo = item.date.month();
+        if (!(mo in monthWeek)) monthWeek[mo] = w;
+      }
+    }
+
+    const inner = parent.createDiv({ cls: 'jp-stats-heatmap-inner' });
+
+    // Weekday labels column
+    const labelsCol = inner.createDiv({ cls: 'jp-stats-daylabels' });
+    const dayLabels: Record<number, string> = { 0: '一', 2: '三', 4: '五' };
+    for (let i = 0; i < 7; i++) {
+      labelsCol.createDiv({ cls: 'jp-stats-daylabel', text: dayLabels[i] ?? '' });
+    }
+
+    const rightCol = inner.createDiv({ cls: 'jp-stats-heatmap-right' });
+
+    // Month-label row
+    const monthRow = rightCol.createDiv({ cls: 'jp-stats-monthrow' });
+    for (let w = 0; w < totalWeeks; w++) {
+      const entry = Object.entries(monthWeek).find(([, wk]) => wk === w);
+      monthRow.createDiv({
+        cls: 'jp-stats-monthlabel',
+        text: entry ? `${Number(entry[0]) + 1}月` : '',
+      });
+    }
+
+    // Cell grid
+    const grid = rightCol.createDiv({ cls: 'jp-stats-grid' });
+
+    for (let w = 0; w < totalWeeks; w++) {
+      const col = grid.createDiv({ cls: 'jp-stats-col' });
+      for (let dow = 0; dow < 7; dow++) {
+        const item = paddedDays[w * 7 + dow];
+        if (!item) {
+          col.createDiv({ cls: 'jp-stats-cell is-empty' });
+          continue;
+        }
+        const { date, entryCount, wordCount } = item;
+        const level = getHeatmapLevel(entryCount);
+        const isToday = date.isSame(today, 'day');
+        const isFuture = date.isAfter(today, 'day');
+        const classes =
+          `jp-stats-cell level-${level}` +
+          (isToday ? ' is-today' : '') +
+          (isFuture ? ' is-future' : '');
+        const cell = col.createDiv({ cls: classes });
+
+        const label = date.format('YYYY年M月D日');
+        if (entryCount > 0) {
+          cell.setAttr('title', `${label} · ${entryCount} 条 · ${wordCount} 字`);
+        } else {
+          cell.setAttr('title', isFuture ? label : `${label} · 未写`);
+        }
+
+        if (!isFuture) {
+          cell.addEventListener('click', () => void this.openDailyNoteByDate(date));
+        }
+      }
+    }
+  }
+
+  /** Open the daily note for `date` in a new center tab. */
+  private async openDailyNoteByDate(date: moment.Moment): Promise<void> {
+    try {
+      const file = getDailyNote(date, getAllDailyNotes()) as TFile | null;
+      if (!file) {
+        new Notice(`${date.format('YYYY年M月D日')} 没有日记文件`);
+        return;
+      }
+      const leaf = this.app.workspace.getLeaf(false);
+      await leaf.openFile(file);
+    } catch (err) {
+      console.error('[Journal Partner] open daily note failed', err);
+      new Notice('打开失败');
+    }
   }
 
   // ── Mobile toolbar auto-hide ────────────────────────────────────────────
