@@ -58,7 +58,6 @@ export default class JournalPartnerPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.applyCSSVariables();
-    this.updateCheckboxStyle();
     this.registerEditorExtension(this.createEditorExtensions());
     this.registerMarkdownPostProcessor(this.postProcessor.bind(this));
     this.addSettingTab(new JournalPartnerSettingTab(this.app, this));
@@ -474,15 +473,6 @@ export default class JournalPartnerPlugin extends Plugin {
     root.style.setProperty('--jp-ts-bg', this.settings.timestampBgColor);
   }
 
-  private updateCheckboxStyle() {
-    const el = document.documentElement;
-    if (this.settings.circularCheckboxes) {
-      el.classList.add('jp-circular-checkboxes');
-    } else {
-      el.classList.remove('jp-circular-checkboxes');
-    }
-  }
-
   async loadSettings() {
     this.settings = Object.assign(
       {},
@@ -494,7 +484,6 @@ export default class JournalPartnerPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     this.applyCSSVariables();
-    this.updateCheckboxStyle();
     this.refreshEditors();
   }
 
@@ -529,10 +518,8 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     containerEl.createEl('h3', { text: '📍 作用范围' });
 
     new Setting(containerEl)
-      .setName('目标标题名称')
-      .setDesc(
-        '插件生效的标题文字（不含 # 符号），例如填写 Journal 则作用于 ## Journal 下的内容',
-      )
+      .setName('日记标题')
+      .setDesc('插件生效的标题，如 Journal（对应 ## Journal）')
       .addText(text =>
         text
           .setPlaceholder('Journal')
@@ -543,22 +530,8 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
-      .setName('标题层级')
-      .setDesc('目标标题的层级，H2 对应 ## Journal')
-      .addDropdown(dd => {
-        for (let i = 1; i <= 6; i++) {
-          dd.addOption(String(i), `H${i}  ${'#'.repeat(i)}`);
-        }
-        dd.setValue(String(this.plugin.settings.headingLevel));
-        dd.onChange(async value => {
-          this.plugin.settings.headingLevel = parseInt(value);
-          await this.plugin.saveSettings();
-        });
-      });
-
-    // ── Style ──────────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '🎨 时间戳样式' });
+    // ── Timestamp ─────────────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '⏱️ 时间戳' });
 
     new Setting(containerEl)
       .setName('文字颜色')
@@ -584,14 +557,9 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           }),
       );
 
-    // ── Behavior ───────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '⚙️ 行为' });
-
     new Setting(containerEl)
-      .setName('时间戳只读')
-      .setDesc(
-        '开启后，在编辑器中无法修改已存在的时间戳，防止意外删除或改动',
-      )
+      .setName('只读保护')
+      .setDesc('开启后，无法在编辑器中修改已存在的时间戳')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.readonlyTimestamps)
@@ -602,10 +570,8 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('回车自动插入时间戳')
-      .setDesc(
-        '在 Journal 区块内按下回车时，自动在新行开头插入当前时间（HH:MM）',
-      )
+      .setName('回车自动插入')
+      .setDesc('在 Journal 区块内按回车时，自动在新行插入当前时间')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.autoTimestamp)
@@ -616,94 +582,19 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('圆形复选框')
-      .setDesc('在日记区域内将 checkbox 渲染为圆形而非方形')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.circularCheckboxes)
-          .onChange(async value => {
-            this.plugin.settings.circularCheckboxes = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName('删除前确认')
-      .setDesc(
-        '在快速记录侧栏右键 / 长按 memo 触发删除时，先弹出确认对话框。关闭后将直接删除（录音文件仍会移入回收站，可恢复）',
-      )
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.confirmDelete)
-          .onChange(async value => {
-            this.plugin.settings.confirmDelete = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    // ── URL protocol / Shortcuts integration ──────────────────────────────
-    containerEl.createEl('h3', { text: '🔗 Action Button / Shortcuts 集成' });
-
-    const protocolDesc = containerEl.createEl('p', {
-      cls: 'jp-settings-help',
-    });
-    protocolDesc.style.cssText =
-      'margin: 4px 0 12px; padding: 10px 12px; border-radius: 6px;' +
-      'background: var(--background-secondary); color: var(--text-muted);' +
-      'font-size: 12.5px; line-height: 1.7;';
-    protocolDesc.createSpan({
-      text: '插件注册了 URL 协议，可从 iOS / macOS Shortcuts 调用，无需打开主界面就能把听写文本（以及可选的录音）写入今天的 ## Journal：',
-    });
-    const codeEl = protocolDesc.createEl('code');
-    codeEl.style.cssText =
-      'display: block; margin: 8px 0; padding: 6px 8px;' +
-      'background: var(--background-primary); border-radius: 4px;' +
-      'font-size: 11.5px; word-break: break-all;';
-    codeEl.setText('obsidian://journal-partner?text=<URL编码内容>&audio=<vault相对路径>');
-    protocolDesc.createSpan({
-      text:
-        '参数：text 和 audio 至少给一个；time=HH:MM 可选；audio 是 vault 内相对路径，' +
-        '例如 Assets/audio/2026-06-21_153012.m4a，会被渲染为内嵌音频播放器。' +
-        '搭配 iPhone Action Button：创建一个 Shortcut「录音 → 听写文本 → 保存到 Assets/audio/ → 打开 URL」，绑定到 Action Button 即可。',
-    });
-
-    new Setting(containerEl)
-      .setName('一键导入 Shortcut')
-      .setDesc('点击在 iCloud 打开「快速记录」捷径模板，添加到「快捷指令」app 后即可绑定到 Action Button')
-      .addButton(btn =>
-        btn
-          .setButtonText('获取捷径')
-          .setCta()
-          .onClick(() => {
-            // Public iCloud share link for the "快速记录" shortcut.
-            // Opens in the system Shortcuts app on macOS/iOS.
-            window.open(
-              'https://www.icloud.com/shortcuts/2b5bbc7c721a4010807c4ed337245360',
-              '_blank',
-            );
-          }),
-      );
-
-    // ── Advanced ───────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '🔧 高级' });
-
-    new Setting(containerEl)
-      .setName('时间戳匹配正则')
-      .setDesc(
-        '用于识别时间戳的正则表达式。默认匹配 HH:MM 格式（如 07:31）。' +
-          '修改后立即生效，无效的正则会被忽略。',
-      )
+      .setName('匹配正则')
+      .setDesc('识别时间戳的正则表达式，默认 \\d{2}:\\d{2}（HH:MM）')
       .addText(text =>
         text
           .setPlaceholder('\\d{2}:\\d{2}')
           .setValue(this.plugin.settings.timestampPattern)
           .onChange(async value => {
             try {
-              new RegExp(value); // validate before saving
+              new RegExp(value);
               this.plugin.settings.timestampPattern = value;
               await this.plugin.saveSettings();
             } catch {
-              new Notice('❌ 无效的正则表达式，请检查后重试');
+              new Notice('❌ 无效的正则表达式');
             }
           }),
       );
