@@ -18,6 +18,8 @@ import {
   Component,
   ItemView,
   MarkdownRenderer,
+  Menu,
+  Modal,
   Notice,
   Platform,
   TFile,
@@ -33,6 +35,8 @@ import {
 
 import {
   JournalEntry,
+  deleteEntryFromSection,
+  extractAudioEmbeds,
   findSection,
   parseJournalEntries,
 } from './section';
@@ -477,6 +481,16 @@ export class JournalCaptureView extends ItemView {
       // Body bubble: chat-style rounded card holding the rendered markdown.
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
       void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope);
+
+      // Context menu: copy / delete (with optional audio cleanup).
+      // Attached to both the timestamp pill and bubble so right-click /
+      // long-press anywhere on the row triggers it.
+      const openMenu = (evt: MouseEvent) => {
+        evt.preventDefault();
+        this.openEntryMenu(evt, day, entry);
+      };
+      head.addEventListener('contextmenu', openMenu);
+      bubble.addEventListener('contextmenu', openMenu);
     }
   }
 
@@ -584,6 +598,170 @@ export class JournalCaptureView extends ItemView {
     document.body.toggleClass('jp-hide-mobile-toolbar', hidden);
   }
 
+  // ── Entry context menu (copy / delete) ──────────────────────────────────
+
+  /**
+   * Build and show the right-click / long-press context menu for one entry.
+   * Items shown:
+   *   - 复制         — copies the raw markdown body to clipboard
+   *   - 删除 memo    — deletes only the entry line(s) from the daily note
+   *   - 删除 memo 和录音文件 — same, plus trashes embedded audio attachments
+   *
+   * The "with audio" item is only added when the entry actually embeds at
+   * least one audio attachment (`![[*.m4a]]` etc.).
+   */
+  private openEntryMenu(evt: MouseEvent, day: DaySection, entry: JournalEntry) {
+    const menu = new Menu();
+    const audioPaths = extractAudioEmbeds(entry.text);
+
+    menu.addItem(item =>
+      item
+        .setTitle('复制')
+        .setIcon('copy')
+        .onClick(() => {
+          void this.copyEntry(entry);
+        }),
+    );
+
+    menu.addSeparator();
+
+    menu.addItem(item =>
+      item
+        .setTitle('删除 memo')
+        .setIcon('trash-2')
+        .onClick(() => {
+          this.confirmAndDelete(day, entry, /* withAudio */ false, audioPaths);
+        }),
+    );
+
+    if (audioPaths.length > 0) {
+      menu.addItem(item =>
+        item
+          .setTitle(
+            audioPaths.length === 1
+              ? '删除 memo 和录音文件'
+              : `删除 memo 和 ${audioPaths.length} 个录音文件`,
+          )
+          .setIcon('trash-2')
+          .onClick(() => {
+            this.confirmAndDelete(day, entry, /* withAudio */ true, audioPaths);
+          }),
+      );
+    }
+
+    menu.showAtMouseEvent(evt);
+  }
+
+  /** Copy the raw markdown body of the entry (without `- HH:MM` prefix). */
+  private async copyEntry(entry: JournalEntry): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(entry.text);
+      new Notice('📋 已复制');
+    } catch (err) {
+      console.error('[Journal Partner] copy failed', err);
+      new Notice(`复制失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Show a confirmation modal listing what will be deleted, then execute the
+   * deletion on confirm. Audio files (when requested) are moved to Obsidian's
+   * configured trash via `fileManager.trashFile` so they remain recoverable.
+   */
+  private confirmAndDelete(
+    day: DaySection,
+    entry: JournalEntry,
+    withAudio: boolean,
+    audioPaths: string[],
+  ) {
+    const preview = this.buildEntryPreview(entry);
+    new DeleteConfirmModal(this.app, {
+      title: withAudio ? '删除 memo 和录音文件' : '删除 memo',
+      preview,
+      timestamp: entry.timestamp,
+      audioPaths: withAudio ? audioPaths : [],
+      onConfirm: () => {
+        void this.executeDelete(day, entry, withAudio ? audioPaths : []);
+      },
+    }).open();
+  }
+
+  /** Compact preview text for the confirm modal (≤ 80 chars, single line). */
+  private buildEntryPreview(entry: JournalEntry): string {
+    const raw = entry.text.replace(/\s+/g, ' ').trim();
+    return raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
+  }
+
+  /**
+   * Perform the actual deletion. Rewrites the daily note via
+   * `vault.modify`, then trashes any audio files. Audio failures are
+   * logged but don't roll back the text deletion — they're independent
+   * pieces of state and the user explicitly opted into both.
+   */
+  private async executeDelete(
+    day: DaySection,
+    entry: JournalEntry,
+    audioPaths: string[],
+  ): Promise<void> {
+    if (!day.filePath) {
+      new Notice('找不到对应的日记文件');
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(day.filePath);
+    if (!(file instanceof TFile)) {
+      new Notice('找不到对应的日记文件');
+      return;
+    }
+
+    try {
+      const content = await this.app.vault.read(file);
+      const next = deleteEntryFromSection(
+        content,
+        this.plugin.settings,
+        entry.lineIndex,
+      );
+      if (next === content) {
+        // No-op means our lineIndex no longer matches a head line — the file
+        // changed under us. Refresh and bail rather than mangling content.
+        new Notice('日记内容已变化，请刷新后重试');
+        await this.refreshDay(day);
+        return;
+      }
+      await this.app.vault.modify(file, next);
+    } catch (err) {
+      console.error('[Journal Partner] delete entry failed', err);
+      new Notice(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    // Trash embedded audio files (best-effort, independent of text deletion)
+    let trashed = 0;
+    let missing = 0;
+    for (const path of audioPaths) {
+      const af = this.app.vault.getAbstractFileByPath(path);
+      if (!(af instanceof TFile)) {
+        missing++;
+        continue;
+      }
+      try {
+        await this.app.fileManager.trashFile(af);
+        trashed++;
+      } catch (err) {
+        console.error(`[Journal Partner] trash audio failed: ${path}`, err);
+      }
+    }
+
+    if (audioPaths.length === 0) {
+      new Notice('🗑️ 已删除');
+    } else if (missing === audioPaths.length) {
+      new Notice('🗑️ memo 已删除（录音文件已不存在）');
+    } else if (trashed === audioPaths.length) {
+      new Notice(`🗑️ 已删除 memo 和 ${trashed} 个录音文件`);
+    } else {
+      new Notice(`🗑️ memo 已删除；${trashed}/${audioPaths.length} 个录音文件移入回收站`);
+    }
+  }
+
   // ── Submit / write path ─────────────────────────────────────────────────
 
   private async handleSubmit(): Promise<void> {
@@ -627,5 +805,96 @@ export class JournalCaptureView extends ItemView {
       this.submitBtn.setText(originalText ?? 'NOTE');
       this.refreshSubmitState();
     }
+  }
+}
+
+// ── Delete confirmation modal ──────────────────────────────────────────────
+
+interface DeleteConfirmOptions {
+  title: string;
+  /** Single-line preview of the entry body. */
+  preview: string;
+  /** HH:MM timestamp of the entry being deleted. */
+  timestamp: string;
+  /** Audio file paths that will be trashed (empty = text-only delete). */
+  audioPaths: string[];
+  onConfirm: () => void;
+}
+
+/**
+ * Small confirm dialog shown before any timeline entry is deleted. Two
+ * affordances:
+ *   - Body preview + audio file list (so the user sees what they're about
+ *     to lose before clicking 删除)
+ *   - Esc / 取消 / clicking outside all dismiss
+ *
+ * Audio files are trashed via `fileManager.trashFile` (Obsidian-respecting
+ * recycle bin), not permanently removed — the modal copy reflects that.
+ */
+class DeleteConfirmModal extends Modal {
+  private opts: DeleteConfirmOptions;
+
+  constructor(app: import('obsidian').App, opts: DeleteConfirmOptions) {
+    super(app);
+    this.opts = opts;
+  }
+
+  onOpen(): void {
+    const { contentEl, titleEl } = this;
+    titleEl.setText(this.opts.title);
+
+    contentEl.addClass('jp-delete-confirm');
+
+    contentEl.createEl('p', {
+      cls: 'jp-delete-confirm-question',
+      text: '确定要删除这条 memo 吗？',
+    });
+
+    // Preview card — timestamp + body preview
+    const preview = contentEl.createDiv({ cls: 'jp-delete-confirm-preview' });
+    preview.createEl('span', {
+      cls: 'jp-timestamp',
+      text: this.opts.timestamp,
+    });
+    preview.createEl('span', {
+      cls: 'jp-delete-confirm-preview-text',
+      text: this.opts.preview.length > 0 ? this.opts.preview : '(空 memo)',
+    });
+
+    // Audio file list (only when deleting with audio)
+    if (this.opts.audioPaths.length > 0) {
+      const audioBlock = contentEl.createDiv({ cls: 'jp-delete-confirm-audio' });
+      audioBlock.createEl('div', {
+        cls: 'jp-delete-confirm-audio-label',
+        text: '附带删除的录音文件（移入回收站，可恢复）：',
+      });
+      const list = audioBlock.createEl('ul', { cls: 'jp-delete-confirm-audio-list' });
+      for (const path of this.opts.audioPaths) {
+        list.createEl('li', { text: path });
+      }
+    }
+
+    // Action buttons
+    const actions = contentEl.createDiv({ cls: 'jp-delete-confirm-actions' });
+    const cancelBtn = actions.createEl('button', {
+      cls: 'jp-delete-confirm-cancel',
+      text: '取消',
+    });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const confirmBtn = actions.createEl('button', {
+      cls: 'mod-warning jp-delete-confirm-confirm',
+      text: '删除',
+    });
+    confirmBtn.addEventListener('click', () => {
+      this.close();
+      this.opts.onConfirm();
+    });
+    // Initial focus on cancel — safer default for a destructive dialog.
+    window.setTimeout(() => cancelBtn.focus(), 0);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }

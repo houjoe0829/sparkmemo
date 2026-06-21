@@ -48,6 +48,7 @@
 - **实时同步**：在主编辑器里改动当天日记，侧边栏对应日的时间线会就地刷新
 - **Markdown 渲染**：支持双向链接、嵌入图片、加粗斜体等，所有原生 Obsidian 渲染特性均可用
 - **排序切换**：按当日时间正序 / 倒序展示，自由切换
+- **右键管理 memo**：右键（或移动端长按）任意气泡，可复制原文、删除当前 memo；若该条 memo 附带录音，会多出「删除 memo 和录音文件」选项，录音走 Obsidian 回收站可恢复
   
 <img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/ad0b758f-d304-4b16-ae81-c2b3afd7aa5e" />
 

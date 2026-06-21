@@ -459,3 +459,74 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* ── Delete confirm modal ─────────────────────────────────────────────────
+   Shown when the user picks "删除 memo" (and "删除 memo 和录音文件") from
+   the entry context menu. Goal: make the destructive action feel weighty
+   without bloating the dialog. */
+.jp-delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.jp-delete-confirm-question {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+.jp-delete-confirm-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+.jp-delete-confirm-preview .jp-timestamp {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+.jp-delete-confirm-preview-text {
+  flex: 1;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-normal);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.jp-delete-confirm-audio {
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--text-error, #e26d6d) 8%, var(--background-secondary));
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--text-error, #e26d6d) 22%, transparent);
+}
+.jp-delete-confirm-audio-label {
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.jp-delete-confirm-audio-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-normal);
+  font-family: var(--font-monospace, monospace);
+  word-break: break-all;
+}
+.jp-delete-confirm-audio-list li + li {
+  margin-top: 2px;
+}
+.jp-delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.jp-delete-confirm-cancel,
+.jp-delete-confirm-confirm {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
