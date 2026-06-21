@@ -519,13 +519,20 @@ class JournalPartnerSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('日记标题')
-      .setDesc('插件生效的标题，如 Journal（对应 ## Journal）')
+      .setDesc('插件生效的标题，如 ## Journal 或 ## Goals')
       .addText(text =>
         text
-          .setPlaceholder('Journal')
-          .setValue(this.plugin.settings.targetHeading)
+          .setPlaceholder('## Journal')
+          .setValue('#'.repeat(this.plugin.settings.headingLevel) + ' ' + this.plugin.settings.targetHeading)
           .onChange(async value => {
-            this.plugin.settings.targetHeading = value.trim() || 'Journal';
+            const trimmed = value.trim();
+            const match = trimmed.match(/^(#{1,6})\s+(.+)$/);
+            if (match) {
+              this.plugin.settings.headingLevel = match[1].length;
+              this.plugin.settings.targetHeading = match[2].trim();
+            } else {
+              this.plugin.settings.targetHeading = trimmed || 'Journal';
+            }
             await this.plugin.saveSettings();
           }),
       );
