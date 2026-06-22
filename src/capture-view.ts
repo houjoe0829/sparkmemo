@@ -1195,10 +1195,9 @@ export class JournalCaptureView extends ItemView {
    * Items shown:
    *   - 复制                — copies the raw markdown body to clipboard
    *   - 删除 memo           — deletes only the entry line(s) from the daily note
-   *   - 删除 memo 和录音文件 — same, plus trashes embedded audio attachments
    *   - 仅删除录音文件       — keeps the memo text, trashes audio + strips ![[..]]
    *
-   * The two audio-related items are only added when the entry actually
+   * The audio-related item is only added when the entry actually
    * embeds at least one audio attachment (`![[*.m4a]]` etc.).
    */
   private openEntryMenu(evt: MouseEvent, day: DaySection, entry: JournalEntry) {
@@ -1226,19 +1225,6 @@ export class JournalCaptureView extends ItemView {
     );
 
     if (audioPaths.length > 0) {
-      menu.addItem(item =>
-        item
-          .setTitle(
-            audioPaths.length === 1
-              ? '删除 memo 和录音文件'
-              : `删除 memo 和 ${audioPaths.length} 个录音文件`,
-          )
-          .setIcon('trash-2')
-          .onClick(() => {
-            this.confirmAndDelete(day, entry, 'memo+audio', audioPaths);
-          }),
-      );
-
       menu.addItem(item =>
         item
           .setTitle(
