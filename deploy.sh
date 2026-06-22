@@ -14,7 +14,7 @@ npm run build
 echo ""
 echo "📤 Syncing to Obsidian..."
 mkdir -p "$PLUGIN_DIR"
-cp main.js "$PLUGIN_DIR/"
+cp dist/main.js "$PLUGIN_DIR/"
 cp styles.css "$PLUGIN_DIR/"
 
 echo ""
