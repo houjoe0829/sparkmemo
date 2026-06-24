@@ -633,15 +633,59 @@
 .jp-tab-bar {
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: 6px;
   padding: 0 2px;
   margin-bottom: 10px;
 }
+/* Search bar — appears below tab bar when search tab is active */
+.jp-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 10px;
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+.jp-search-bar-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.jp-search-bar-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-search-input {
+  flex: 1;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 13px;
+  padding: 0;
+  min-width: 0;
+}
+.jp-search-input::placeholder {
+  color: var(--text-faint);
+}
+/* Keyword highlight in search results */
+.jp-search-highlight {
+  background: color-mix(in srgb, var(--jp-tl-dot) 22%, transparent);
+  color: var(--jp-tl-dot);
+  border-radius: 3px;
+  padding: 0 1px;
+  font-weight: 600;
+}
 .jp-tab-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 5px 14px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
@@ -655,12 +699,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 .jp-tab-btn-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+}
+/* Text label is no longer used, hidden if accidentally present */
+.jp-tab-btn-text {
+  display: none;
 }
 .jp-tab-btn:hover {
   color: var(--text-normal);

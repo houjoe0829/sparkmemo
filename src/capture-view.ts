@@ -79,12 +79,25 @@ export class JournalCaptureView extends ItemView {
   private plugin: JournalPartnerPlugin;
 
   // Top-level tab state
-  private currentTab: 'capture' | 'stats' = 'capture';
+  private currentTab: 'capture' | 'stats' | 'search' = 'capture';
   private tabBarEl!: HTMLElement;
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
   private captureTabBtn!: HTMLButtonElement;
   private statsTabBtn!: HTMLButtonElement;
+  private searchTabBtn!: HTMLButtonElement;
+
+  // Search state
+  private searchBarEl!: HTMLElement;
+  private searchInputEl!: HTMLInputElement;
+  private searchActive = false;
+  private searchDebounceTimer: number | null = null;
+  private searchQuery = '';
+  private searchVersion = 0;
+  /** All daily note files sorted newest→oldest, set at search start. */
+  private searchFileQueue: TFile[] = [];
+  /** Index into searchFileQueue: next file to scan in loadMoreSearchResults. */
+  private searchCursor = 0;
 
   // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
@@ -220,6 +233,10 @@ export class JournalCaptureView extends ItemView {
       window.clearTimeout(this.statsRefreshTimer);
       this.statsRefreshTimer = null;
     }
+    if (this.searchDebounceTimer !== null) {
+      window.clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
     if (this.intersectionObs) {
       this.intersectionObs.disconnect();
       this.intersectionObs = null;
@@ -234,41 +251,304 @@ export class JournalCaptureView extends ItemView {
   private buildTabBar(root: HTMLElement) {
     this.tabBarEl = root.createDiv({ cls: 'jp-tab-bar' });
 
-    this.captureTabBtn = this.makeTabBtn('feather', '记录', true);
+    this.captureTabBtn = this.makeTabBtn('feather', true);
     this.captureTabBtn.addEventListener('click', () => this.switchTab('capture'));
 
-    this.statsTabBtn = this.makeTabBtn('bar-chart-2', '统计', false);
+    this.searchTabBtn = this.makeTabBtn('search', false);
+    this.searchTabBtn.addEventListener('click', () => this.switchTab('search'));
+
+    this.statsTabBtn = this.makeTabBtn('bar-chart-2', false);
     this.statsTabBtn.addEventListener('click', () => this.switchTab('stats'));
+
+    // Search bar — collapsed by default, shown when search tab is active
+    this.searchBarEl = root.createDiv({ cls: 'jp-search-bar' });
+    this.searchBarEl.style.display = 'none';
+
+    const searchIcon = this.searchBarEl.createSpan({ cls: 'jp-search-bar-icon' });
+    setIcon(searchIcon, 'search');
+
+    this.searchInputEl = this.searchBarEl.createEl('input', {
+      cls: 'jp-search-input',
+      attr: { placeholder: '搜索日记…', type: 'text' },
+    });
+    this.searchInputEl.addEventListener('input', () => {
+      const q = this.searchInputEl.value;
+      this.searchQuery = q;
+      if (this.searchDebounceTimer !== null) window.clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = window.setTimeout(() => {
+        this.searchDebounceTimer = null;
+        void this.runSearch(q.trim());
+      }, 300);
+    });
   }
 
-  /** Build one pill tab button: icon + short label. */
-  private makeTabBtn(icon: string, label: string, active: boolean): HTMLButtonElement {
+  /** Build one icon-only tab button. */
+  private makeTabBtn(icon: string, active: boolean): HTMLButtonElement {
     const btn = this.tabBarEl.createEl('button', {
       cls: 'jp-tab-btn' + (active ? ' is-active' : ''),
     });
     const iconEl = btn.createSpan({ cls: 'jp-tab-btn-icon' });
     setIcon(iconEl, icon);
-    btn.createSpan({ cls: 'jp-tab-btn-text', text: label });
     return btn;
   }
 
-  private switchTab(tab: 'capture' | 'stats') {
+  private switchTab(tab: 'capture' | 'stats' | 'search') {
     if (this.currentTab === tab) return;
+    const prevTab = this.currentTab;
     this.currentTab = tab;
 
     this.captureTabBtn.toggleClass('is-active', tab === 'capture');
+    this.searchTabBtn.toggleClass('is-active', tab === 'search');
     this.statsTabBtn.toggleClass('is-active', tab === 'stats');
-    this.capturePaneEl.style.display = tab === 'capture' ? '' : 'none';
-    this.statsPaneEl.style.display = tab === 'stats' ? '' : 'none';
 
-    if (tab === 'stats') {
-      // Lazy: only build the stats pane scaffold (and trigger first load)
-      // the first time the user actually opens it. Keeps view startup
-      // cheap when the user just wants to write a memo.
+    if (tab === 'search') {
+      // Show capture pane (timeline) but hide the input card
+      this.capturePaneEl.style.display = '';
+      this.statsPaneEl.style.display = 'none';
+      this.inputCardEl.style.display = 'none';
+      this.searchBarEl.style.display = '';
+      this.searchActive = true;
+
+      if (prevTab !== 'search') {
+        // First entry into search: only init if there's no existing search result
+        if (this.searchQuery.length === 0) {
+          this.disposeDays();
+          this.timelineEl.empty();
+          this.exhausted = false;
+          this.searchFileQueue = [];
+          this.searchCursor = 0;
+          this.renderTopLevelMessage('输入关键词开始搜索');
+        }
+        // Restore input value in case user typed something before switching tabs
+        this.searchInputEl.value = this.searchQuery;
+        window.setTimeout(() => this.searchInputEl.focus(), 50);
+      }
+    } else if (tab === 'capture') {
+      this.capturePaneEl.style.display = '';
+      this.statsPaneEl.style.display = 'none';
+      this.inputCardEl.style.display = '';
+      this.searchBarEl.style.display = 'none';
+
+      if (prevTab === 'search') {
+        // Coming from search: keep searchActive=true so state is preserved,
+        // but rebuild the normal timeline.
+        this.searchActive = false;
+        if (this.searchDebounceTimer !== null) {
+          window.clearTimeout(this.searchDebounceTimer);
+          this.searchDebounceTimer = null;
+        }
+        void this.fullRebuild();
+      }
+    } else {
+      // stats tab
+      this.capturePaneEl.style.display = 'none';
+      this.statsPaneEl.style.display = '';
+      this.inputCardEl.style.display = '';
+      this.searchBarEl.style.display = 'none';
+
+      // Don't tear down search state — user may return to search tab
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
       }
       void this.loadAllStats();
+    }
+  }
+
+  private toggleSearch() {
+    if (this.currentTab === 'search') {
+      this.switchTab('capture');
+    } else {
+      this.switchTab('search');
+    }
+  }
+
+  private async runSearch(query: string) {
+    if (!this.searchActive) return;
+
+    // Version stamp — any newer call invalidates this one
+    const version = ++this.searchVersion;
+
+    this.disposeDays();
+    this.timelineEl.empty();
+    this.exhausted = false;
+    this.searchFileQueue = [];
+    this.searchCursor = 0;
+
+    if (query.length === 0) {
+      this.renderTopLevelMessage('输入关键词开始搜索');
+      return;
+    }
+
+    if (!appHasDailyNotesPluginLoaded()) {
+      this.renderTopLevelMessage('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      return;
+    }
+
+    this.renderTopLevelMessage('搜索中…');
+
+    // Build the sorted file queue (newest → oldest) once, then scan lazily
+    const allNotes = getAllDailyNotes() as Record<string, TFile>;
+    const queue: Array<{ date: moment.Moment; file: TFile }> = [];
+    for (const file of Object.values(allNotes)) {
+      if (!(file instanceof TFile)) continue;
+      const date = getDateFromFile(file as TFile, 'day');
+      if (date) queue.push({ date: date.clone().startOf('day'), file });
+    }
+    queue.sort((a, b) => (a.date.isBefore(b.date) ? 1 : -1));
+    this.searchFileQueue = queue.map(q => q.file);
+
+    if (this.searchVersion !== version) return;
+
+    // Kick off the first batch — sentinel / intersection observer handles the rest
+    await this.loadMoreSearchResults();
+  }
+
+  /** Scan the next batch of files in searchFileQueue and append matching days. */
+  private async loadMoreSearchResults(): Promise<void> {
+    if (!this.searchActive || this.loadingMore) return;
+    // No queue built yet (user hasn't typed anything) — do nothing
+    if (this.searchFileQueue.length === 0) return;
+    this.loadingMore = true;
+
+    const version = this.searchVersion;
+    const query = this.searchQuery;
+    const lower = query.toLowerCase();
+    const batchSize = 20;
+    let found = 0;
+
+    try {
+      while (this.searchCursor < this.searchFileQueue.length && found < batchSize) {
+        if (this.searchVersion !== version) return;
+
+        const file = this.searchFileQueue[this.searchCursor++];
+        const date = getDateFromFile(file, 'day');
+        if (!date) continue;
+
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          const section = findSection(
+            content,
+            this.plugin.settings.targetHeading,
+            this.plugin.settings.headingLevel,
+          );
+          if (!section) continue;
+          const text = content.slice(section.from, section.to);
+          const entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+          const matched = entries.filter(e => this.entryMatchesQuery(e.text, lower));
+          if (matched.length === 0) continue;
+
+          // Remove "搜索中…" placeholder on first hit
+          if (this.days.length === 0) this.timelineEl.empty();
+
+          const day: DaySection = {
+            date: date.clone().startOf('day'),
+            el: createDiv({ cls: 'jp-timeline-day' }),
+            scope: new Component(),
+            filePath: file.path,
+          };
+          day.scope.load();
+          this.renderSearchDayContent(day, matched, query);
+          this.timelineEl.appendChild(day.el);
+          this.days.push(day);
+          found++;
+        } catch {
+          // skip unreadable files
+        }
+      }
+
+      if (this.searchVersion !== version) return;
+
+      if (this.searchCursor >= this.searchFileQueue.length) {
+        this.exhausted = true;
+        if (this.days.length === 0) {
+          this.timelineEl.empty();
+          this.renderTopLevelMessage(`未找到包含「${query}」的记录`);
+        } else {
+          this.markEndOfTimeline();
+        }
+      }
+    } finally {
+      this.loadingMore = false;
+    }
+  }
+
+  /**
+   * Check whether the searchable text of an entry contains the query.
+   * Strips wiki-embeds and markdown image syntax before matching so that
+   * file paths (e.g. "Recordings/2024-01-01_...m4a") don't cause false hits.
+   */
+  private entryMatchesQuery(text: string, lowerQuery: string): boolean {
+    const stripped = text
+      .replace(/!\[\[[^\]]*\]\]/g, '')  // remove ![[...]] embeds
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')  // remove ![alt](url) images
+      .toLowerCase();
+    return stripped.includes(lowerQuery);
+  }
+
+  /** Render search result entries with keyword highlight. */
+  private renderSearchDayContent(day: DaySection, entries: JournalEntry[], query: string) {
+    const headerLabel = this.formatDateHeader(day.date, entries.length);
+    const headerRow = day.el.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
+    headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+    const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
+    const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
+    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: `${entries.length} 条匹配` });
+
+    const sourcePath = day.filePath ?? '';
+    const sorted = [...entries].sort((a, b) =>
+      a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : b.lineIndex - a.lineIndex,
+    );
+
+    for (const entry of sorted) {
+      const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
+      row.createDiv({ cls: 'jp-timeline-dot' });
+
+      const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
+      head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+
+      const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
+      // Render markdown first, then highlight keywords in the resulting DOM text nodes
+      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope).then(() => {
+        this.highlightKeyword(bubble, query);
+      });
+
+      const openMenu = (evt: MouseEvent) => {
+        evt.preventDefault();
+        this.openEntryMenu(evt, day, entry);
+      };
+      head.addEventListener('contextmenu', openMenu);
+      bubble.addEventListener('contextmenu', openMenu);
+    }
+  }
+
+  /** Walk DOM text nodes and wrap keyword occurrences in highlight spans. */
+  private highlightKeyword(el: HTMLElement, query: string) {
+    const lower = query.toLowerCase();
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    let node: Node | null;
+    while ((node = walker.nextNode())) nodes.push(node as Text);
+
+    for (const textNode of nodes) {
+      const text = textNode.nodeValue ?? '';
+      const idx = text.toLowerCase().indexOf(lower);
+      if (idx === -1) continue;
+
+      const frag = document.createDocumentFragment();
+      let cursor = 0;
+      let pos = text.toLowerCase().indexOf(lower, cursor);
+      while (pos !== -1) {
+        if (pos > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, pos)));
+        const mark = document.createElement('mark');
+        mark.className = 'jp-search-highlight';
+        mark.textContent = text.slice(pos, pos + query.length);
+        frag.appendChild(mark);
+        cursor = pos + query.length;
+        pos = text.toLowerCase().indexOf(lower, cursor);
+      }
+      if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+      textNode.parentNode?.replaceChild(frag, textNode);
     }
   }
 
@@ -998,6 +1278,8 @@ export class JournalCaptureView extends ItemView {
   }
 
   private scheduleFullRebuild() {
+    // Don't rebuild timeline when search results exist (user may return to search tab)
+    if (this.currentTab === 'search' || this.searchQuery.length > 0) return;
     if (this.rerenderTimer !== null) return;
     this.rerenderTimer = window.setTimeout(() => {
       this.rerenderTimer = null;
@@ -1050,6 +1332,10 @@ export class JournalCaptureView extends ItemView {
    * `nextProbeDate` and may flip `exhausted`.
    */
   private async loadMore(): Promise<void> {
+    if (this.searchActive) {
+      await this.loadMoreSearchResults();
+      return;
+    }
     if (this.loadingMore || this.exhausted) return;
     this.loadingMore = true;
 
