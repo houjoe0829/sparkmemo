@@ -494,6 +494,7 @@ export class JournalCaptureView extends ItemView {
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
     headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
     headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: `${entries.length} 条匹配` });
+    this.addOpenNoteBtn(headerCard, day);
 
     const sourcePath = day.filePath ?? '';
     const sorted = [...entries].sort((a, b) =>
@@ -1462,6 +1463,7 @@ export class JournalCaptureView extends ItemView {
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
     headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
     headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+    this.addOpenNoteBtn(headerCard, day);
 
     if (entries.length === 0) {
       // Today with no entries — soft hint only
@@ -1859,6 +1861,17 @@ export class JournalCaptureView extends ItemView {
         }
       }
     }
+  }
+
+  /** Add a locate button to the right side of a day header card. */
+  private addOpenNoteBtn(headerCard: HTMLElement, day: DaySection) {
+    if (!day.filePath) return;
+    const btn = headerCard.createEl('button', {
+      cls: 'jp-timeline-open-btn',
+      attr: { 'aria-label': '打开日记' },
+    });
+    setIcon(btn, 'crosshair');
+    btn.addEventListener('click', () => void this.openDailyNoteByDate(day.date));
   }
 
   /** Open the daily note for `date` in a new center tab. */
