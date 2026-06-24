@@ -756,6 +756,45 @@
   gap: 12px;
 }
 
+/* ── Random review pane ───────────────────────────────────────────────────── */
+
+.jp-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.jp-review-date {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-normal);
+  letter-spacing: 0.02em;
+}
+.jp-review-reroll-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.jp-review-reroll-btn:hover {
+  color: var(--jp-tl-dot);
+  background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
+}
+.jp-review-reroll-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* ── Yearly stats view ────────────────────────────────────────────────────
    Lives inside the JournalCaptureView as the second tab. Hosted in
    `.jp-pane-stats`; uses the same purple accent token as the timestamp

@@ -79,13 +79,15 @@ export class JournalCaptureView extends ItemView {
   private plugin: JournalPartnerPlugin;
 
   // Top-level tab state
-  private currentTab: 'capture' | 'stats' | 'search' = 'capture';
+  private currentTab: 'capture' | 'stats' | 'search' | 'review' = 'capture';
   private tabBarEl!: HTMLElement;
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
+  private reviewPaneEl!: HTMLElement;
   private captureTabBtn!: HTMLButtonElement;
   private statsTabBtn!: HTMLButtonElement;
   private searchTabBtn!: HTMLButtonElement;
+  private reviewTabBtn!: HTMLButtonElement;
 
   // Search state
   private searchBarEl!: HTMLElement;
@@ -177,6 +179,10 @@ export class JournalCaptureView extends ItemView {
     this.statsPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-stats' });
     this.statsPaneEl.style.display = 'none';
 
+    // Review pane (hidden initially)
+    this.reviewPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-review' });
+    this.reviewPaneEl.style.display = 'none';
+
     // ── Vault listeners ──
     // modify: refresh the affected day's section in place (no full rebuild)
     this.registerEvent(
@@ -251,13 +257,16 @@ export class JournalCaptureView extends ItemView {
   private buildTabBar(root: HTMLElement) {
     this.tabBarEl = root.createDiv({ cls: 'jp-tab-bar' });
 
-    this.captureTabBtn = this.makeTabBtn('feather', true);
+    this.captureTabBtn = this.makeTabBtn('feather', true, '快速记录');
     this.captureTabBtn.addEventListener('click', () => this.switchTab('capture'));
 
-    this.searchTabBtn = this.makeTabBtn('search', false);
+    this.reviewTabBtn = this.makeTabBtn('calendar', false, '随机回顾');
+    this.reviewTabBtn.addEventListener('click', () => this.switchTab('review'));
+
+    this.searchTabBtn = this.makeTabBtn('search', false, '搜索日记');
     this.searchTabBtn.addEventListener('click', () => this.switchTab('search'));
 
-    this.statsTabBtn = this.makeTabBtn('bar-chart-2', false);
+    this.statsTabBtn = this.makeTabBtn('bar-chart-2', false, '年度统计');
     this.statsTabBtn.addEventListener('click', () => this.switchTab('stats'));
 
     // Search bar — collapsed by default, shown when search tab is active
@@ -283,34 +292,35 @@ export class JournalCaptureView extends ItemView {
   }
 
   /** Build one icon-only tab button. */
-  private makeTabBtn(icon: string, active: boolean): HTMLButtonElement {
+  private makeTabBtn(icon: string, active: boolean, tooltip?: string): HTMLButtonElement {
     const btn = this.tabBarEl.createEl('button', {
       cls: 'jp-tab-btn' + (active ? ' is-active' : ''),
+      attr: tooltip ? { 'aria-label': tooltip, title: tooltip } : {},
     });
     const iconEl = btn.createSpan({ cls: 'jp-tab-btn-icon' });
     setIcon(iconEl, icon);
     return btn;
   }
 
-  private switchTab(tab: 'capture' | 'stats' | 'search') {
+  private switchTab(tab: 'capture' | 'stats' | 'search' | 'review') {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
 
     this.captureTabBtn.toggleClass('is-active', tab === 'capture');
+    this.reviewTabBtn.toggleClass('is-active', tab === 'review');
     this.searchTabBtn.toggleClass('is-active', tab === 'search');
     this.statsTabBtn.toggleClass('is-active', tab === 'stats');
 
     if (tab === 'search') {
-      // Show capture pane (timeline) but hide the input card
       this.capturePaneEl.style.display = '';
       this.statsPaneEl.style.display = 'none';
+      this.reviewPaneEl.style.display = 'none';
       this.inputCardEl.style.display = 'none';
       this.searchBarEl.style.display = '';
       this.searchActive = true;
 
       if (prevTab !== 'search') {
-        // First entry into search: only init if there's no existing search result
         if (this.searchQuery.length === 0) {
           this.disposeDays();
           this.timelineEl.empty();
@@ -319,34 +329,43 @@ export class JournalCaptureView extends ItemView {
           this.searchCursor = 0;
           this.renderTopLevelMessage('输入关键词开始搜索');
         }
-        // Restore input value in case user typed something before switching tabs
         this.searchInputEl.value = this.searchQuery;
         window.setTimeout(() => this.searchInputEl.focus(), 50);
       }
     } else if (tab === 'capture') {
       this.capturePaneEl.style.display = '';
       this.statsPaneEl.style.display = 'none';
+      this.reviewPaneEl.style.display = 'none';
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
 
-      if (prevTab === 'search') {
-        // Coming from search: keep searchActive=true so state is preserved,
-        // but rebuild the normal timeline.
+      // Always clean up search state when returning to capture
+      if (this.searchActive || prevTab === 'search') {
         this.searchActive = false;
         if (this.searchDebounceTimer !== null) {
           window.clearTimeout(this.searchDebounceTimer);
           this.searchDebounceTimer = null;
         }
+      }
+      // Rebuild if coming from any non-capture tab, or if timeline looks stale
+      // (e.g. capture → search → review → capture leaves search content in timelineEl)
+      if (prevTab !== 'capture') {
         void this.fullRebuild();
       }
+    } else if (tab === 'review') {
+      this.capturePaneEl.style.display = 'none';
+      this.statsPaneEl.style.display = 'none';
+      this.reviewPaneEl.style.display = '';
+      this.searchBarEl.style.display = 'none';
+      void this.loadReview();
     } else {
       // stats tab
       this.capturePaneEl.style.display = 'none';
       this.statsPaneEl.style.display = '';
+      this.reviewPaneEl.style.display = 'none';
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
 
-      // Don't tear down search state — user may return to search tab
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
       }
@@ -1279,8 +1298,8 @@ export class JournalCaptureView extends ItemView {
   }
 
   private scheduleFullRebuild() {
-    // Don't rebuild timeline when search results exist (user may return to search tab)
-    if (this.currentTab === 'search' || this.searchQuery.length > 0) return;
+    // Only skip when actively on the search tab — other tabs don't hold timeline state
+    if (this.currentTab === 'search') return;
     if (this.rerenderTimer !== null) return;
     this.rerenderTimer = window.setTimeout(() => {
       this.rerenderTimer = null;
@@ -1565,6 +1584,123 @@ export class JournalCaptureView extends ItemView {
   private disposeDays() {
     for (const d of this.days) d.scope.unload();
     this.days = [];
+  }
+
+  // ── Review pane ─────────────────────────────────────────────────────────
+
+  /** Load a random past daily note and render its entries as a timeline. */
+  private async loadReview(): Promise<void> {
+    this.reviewPaneEl.empty();
+
+    if (!appHasDailyNotesPluginLoaded()) {
+      this.reviewPaneEl.createDiv({ cls: 'jp-capture-empty', text: '请先启用 Obsidian 自带的「Daily Notes」核心插件' });
+      return;
+    }
+
+    const allNotes = getAllDailyNotes() as Record<string, TFile>;
+    const today = moment().startOf('day');
+    const files = Object.values(allNotes).filter((f): f is TFile => {
+      if (!(f instanceof TFile)) return false;
+      const d = getDateFromFile(f, 'day');
+      return !!d && d.isBefore(today, 'day');
+    });
+
+    if (files.length === 0) {
+      this.reviewPaneEl.createDiv({ cls: 'jp-capture-empty', text: '还没有过去的日记可以回顾' });
+      return;
+    }
+
+    // Pick a random file
+    const file = files[Math.floor(Math.random() * files.length)];
+    const date = getDateFromFile(file, 'day')!.clone().startOf('day');
+
+    // Header with date + re-roll button
+    const header = this.reviewPaneEl.createDiv({ cls: 'jp-review-header' });
+    const dateEl = header.createDiv({ cls: 'jp-review-date' });
+    const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.day()];
+    dateEl.setText(date.format('YYYY年M月D日') + ' · ' + weekdayZh);
+
+    const rerollBtn = header.createEl('button', {
+      cls: 'jp-review-reroll-btn',
+      attr: { 'aria-label': '换一天' },
+    });
+    setIcon(rerollBtn, 'dice');
+    rerollBtn.addEventListener('click', () => void this.loadReview());
+
+    const openBtn = header.createEl('button', {
+      cls: 'jp-review-reroll-btn',
+      attr: { 'aria-label': '打开日记' },
+    });
+    setIcon(openBtn, 'crosshair');
+    openBtn.addEventListener('click', () => void this.openDailyNoteByDate(date));
+
+    // Parse entries
+    let entries: Array<{ timestamp: string; text: string; lineIndex: number }> = [];
+    try {
+      const content = await this.app.vault.cachedRead(file);
+      const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
+      if (section) {
+        const text = content.slice(section.from, section.to);
+        // First try normal timestamped entries
+        const parsed = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+        if (parsed.length > 0) {
+          entries = parsed;
+        } else {
+          // Fallback: treat every non-empty list item as an entry with 00:00
+          entries = this.parseLooseEntries(text);
+        }
+      }
+    } catch (err) {
+      console.error('[Journal Partner] review read failed', err);
+    }
+
+    if (entries.length === 0) {
+      this.reviewPaneEl.createDiv({ cls: 'jp-capture-empty', text: '这天没有日记内容' });
+      return;
+    }
+
+    // Sort descending by timestamp
+    const sorted = [...entries].sort((a, b) =>
+      a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : b.lineIndex - a.lineIndex,
+    );
+
+    const scope = new Component();
+    scope.load();
+    this.register(() => scope.unload());
+
+    const timeline = this.reviewPaneEl.createDiv({ cls: 'jp-timeline' });
+    const sourcePath = file.path;
+
+    for (const entry of sorted) {
+      const row = timeline.createDiv({ cls: 'jp-timeline-entry' });
+      row.createDiv({ cls: 'jp-timeline-dot' });
+      const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
+      head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+      const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
+      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, scope);
+    }
+  }
+
+  /**
+   * Loose parser: treat every top-level list item as an entry timestamped 00:00.
+   * Used when the section has no standard `- HH:MM ...` format.
+   */
+  private parseLooseEntries(sectionText: string): Array<{ timestamp: string; text: string; lineIndex: number }> {
+    const result: Array<{ timestamp: string; text: string; lineIndex: number }> = [];
+    const lines = sectionText.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^[-*+]\s+(.+)$/);
+      if (!m) continue;
+      let text = m[1].trim();
+      // Collect indented continuation lines
+      let j = i + 1;
+      while (j < lines.length && /^\s+\S/.test(lines[j])) {
+        text += '\n' + lines[j].replace(/^\s{0,2}/, '');
+        j++;
+      }
+      result.push({ timestamp: '00:00', text, lineIndex: i });
+    }
+    return result;
   }
 
   // ── Stats pane ──────────────────────────────────────────────────────────
