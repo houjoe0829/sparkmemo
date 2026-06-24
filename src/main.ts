@@ -811,27 +811,26 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       'margin-top: 16px; padding: 12px 16px; border-radius: 8px;' +
       'background: var(--background-secondary); font-size: 0.85em;';
     urlSection.createEl('div', {
-      text: '快捷指令 URL Scheme',
+      text: 'URL Scheme',
       cls: 'jp-settings-url-title',
     }).style.cssText = 'font-weight: 600; margin-bottom: 8px; color: var(--text-normal);';
 
-    const urlRows: { label: string; url: string }[] = [
-      { label: '打开侧边栏并立即开始录音', url: 'obsidian://journal-partner?cmd=record' },
-      { label: '直接写入文字（不打开 UI）', url: 'obsidian://journal-partner?text=内容' },
-    ];
-    for (const { label, url } of urlRows) {
-      const row = urlSection.createDiv();
-      row.style.cssText = 'margin-bottom: 6px; color: var(--text-muted);';
-      row.createEl('span', { text: `${label}：` });
-      const code = row.createEl('code', { text: url });
-      code.style.cssText =
-        'font-size: 0.9em; cursor: pointer; padding: 1px 4px;' +
-        'border-radius: 3px; background: var(--background-primary-alt);';
-      code.setAttr('title', '点击复制');
-      code.addEventListener('click', () => {
-        void navigator.clipboard.writeText(url).then(() => new Notice('已复制 URL'));
-      });
-    }
+    const urlDesc = urlSection.createEl('div', {
+      text: '可在浏览器地址栏、快捷指令、自动化 App 等任意位置调用，自动打开侧边栏并开始录音。',
+    });
+    urlDesc.style.cssText = 'margin-bottom: 10px; color: var(--text-muted);';
+
+    const url = 'obsidian://journal-partner?cmd=record';
+    const row = urlSection.createDiv();
+    row.style.cssText = 'color: var(--text-muted);';
+    const code = row.createEl('code', { text: url });
+    code.style.cssText =
+      'font-size: 0.9em; cursor: pointer; padding: 1px 4px;' +
+      'border-radius: 3px; background: var(--background-primary-alt);';
+    code.setAttr('title', '点击复制');
+    code.addEventListener('click', () => {
+      void navigator.clipboard.writeText(url).then(() => new Notice('已复制 URL'));
+    });
   }
 }
 
