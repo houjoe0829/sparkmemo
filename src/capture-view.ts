@@ -290,10 +290,15 @@ export class JournalCaptureView extends ItemView {
       this.refreshSubmitState();
       this.autoResizeTextarea();
     });
-    // Shift+Enter submits (Enter alone keeps default newline behaviour for
-    // multi-line composition, matching the user's chosen shortcut).
+    // Configurable shortcut to submit (default Shift+Enter).
     this.textareaEl.addEventListener('keydown', evt => {
-      if (evt.key === 'Enter' && evt.shiftKey && !evt.isComposing) {
+      if (evt.key !== 'Enter' || evt.isComposing) return;
+      const shortcut = this.plugin.settings.submitShortcut;
+      const matches =
+        (shortcut.includes('shift') ? evt.shiftKey : !evt.shiftKey) &&
+        (shortcut.includes('ctrl') ? evt.ctrlKey : !evt.ctrlKey) &&
+        (shortcut.includes('alt') ? evt.altKey : !evt.altKey);
+      if (matches) {
         evt.preventDefault();
         void this.handleSubmit();
       }
@@ -900,11 +905,12 @@ export class JournalCaptureView extends ItemView {
     const ext = blob.type === 'audio/mp4' ? 'm4a' : 'webm';
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const attachmentFolder = (this.app.vault as any).getConfig?.('attachmentFolderPath') as string || 'Attachments';
-    const fileName = `${attachmentFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
-    const attachmentsDir = this.app.vault.getFolderByPath(attachmentFolder);
-    if (!attachmentsDir) await this.app.vault.createFolder(attachmentFolder);
+    // User-configured folder takes priority; fallback to Obsidian's attachment folder
+    const recordingFolder = this.plugin.settings.recordingFolder ||
+      ((this.app.vault as any).getConfig?.('attachmentFolderPath') as string) || 'Attachments';
+    const fileName = `${recordingFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const attachmentsDir = this.app.vault.getFolderByPath(recordingFolder);
+    if (!attachmentsDir) await this.app.vault.createFolder(recordingFolder);
     const buffer = await blob.arrayBuffer();
     const file = await this.app.vault.createBinary(fileName, buffer);
     return `![[${file.path}]]`;

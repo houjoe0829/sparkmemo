@@ -1,5 +1,7 @@
 import {
   App,
+  ExtraButtonComponent,
+  FuzzySuggestModal,
   MarkdownPostProcessorContext,
   MarkdownView,
   Notice,
@@ -9,6 +11,8 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
+  TFolder,
+  TextComponent,
   WorkspaceLeaf,
   moment,
 } from 'obsidian';
@@ -508,14 +512,32 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /** Collect all vault folder paths, sorted and deduplicated. */
+  private getFolderPaths(): string[] {
+    const folders = this.app.vault
+      .getAllFolders()
+      .filter((file): file is TFolder => file instanceof TFolder);
+    const folderPaths = folders.map((folder) => (folder.path === '' ? '/' : folder.path));
+    if (!folderPaths.includes('/')) {
+      folderPaths.unshift('/');
+    }
+    return Array.from(new Set(folderPaths)).sort();
+  }
+
+  /** Creates a FuzzySuggestModal pre-populated with vault folder paths. */
+  private createFolderSuggestModal(onSelect: (value: string) => void): FolderSuggestModal {
+    const folders = this.getFolderPaths();
+    return new FolderSuggestModal(this.app, folders, onSelect);
+  }
+
   display() {
     const { containerEl } = this;
     containerEl.empty();
 
     containerEl.createEl('h2', { text: 'Journal Partner' });
 
-    // ── Scope ──────────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '📍 作用范围' });
+    // ── Timestamp Settings ────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '时间戳设置' });
 
     new Setting(containerEl)
       .setName('日记标题')
@@ -543,9 +565,6 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
-
-    // ── Timestamp ─────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '⏱️ 时间戳' });
 
     new Setting(containerEl)
       .setName('文字颜色')
@@ -627,10 +646,40 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     previewEl.createEl('span', { text: '这里是日记内容…' });
 
     // ── Speech-to-text ────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '🎙️ 语音转文字' });
+    containerEl.createEl('h3', { text: '语音转文字' });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let recordingFolderText: any = null;
+    let apiKeyInputEl: HTMLInputElement | null = null;
+    new Setting(containerEl)
+      .setName('录音存放位置')
+      .setDesc('Vault 相对路径，用于存放录音文件。留空则使用 Obsidian 附件文件夹。')
+      .addText(text => {
+        recordingFolderText = text;
+        text
+          .setPlaceholder('Attachments')
+          .setValue(this.plugin.settings.recordingFolder)
+          .onChange(async value => {
+            this.plugin.settings.recordingFolder = value.trim();
+            await this.plugin.saveSettings();
+          });
+      })
+      .addButton(btn => {
+        btn
+          .setButtonText('📁')
+          .setTooltip('选择目录')
+          .onClick(() => {
+            const modal = this.createFolderSuggestModal((path: string) => {
+              this.plugin.settings.recordingFolder = path;
+              void this.plugin.saveSettings();
+              recordingFolderText.setValue(path);
+            });
+            modal.open();
+          });
+      });
 
     new Setting(containerEl)
-      .setName('转写接口地址')
+      .setName('转写地址')
       .setDesc('OpenAI 兼容的 /audio/transcriptions 地址。留空则关闭录音转文字。')
       .addText(text =>
         text
@@ -647,6 +696,7 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       .setDesc('以 Bearer 形式发送的密钥。可填 OpenAI / Groq / 自建服务的密钥。')
       .addText(text => {
         text.inputEl.type = 'password';
+        apiKeyInputEl = text.inputEl;
         text
           .setPlaceholder('sk-…')
           .setValue(this.plugin.settings.sttApiKey)
@@ -654,6 +704,20 @@ class JournalPartnerSettingTab extends PluginSettingTab {
             this.plugin.settings.sttApiKey = value.trim();
             await this.plugin.saveSettings();
           });
+        return text;
+      })
+      .addExtraButton((button: ExtraButtonComponent) => {
+        let isPassword = true;
+        button.setIcon('eye')
+          .setTooltip('显示/隐藏 API Key')
+          .onClick(() => {
+            isPassword = !isPassword;
+            if (apiKeyInputEl) {
+              apiKeyInputEl.type = isPassword ? 'password' : 'text';
+            }
+            button.setIcon(isPassword ? 'eye' : 'eye-off');
+          });
+        return button;
       });
 
     new Setting(containerEl)
@@ -695,10 +759,26 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       );
 
     // ── Shortcut ──────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '🔗 快捷指令' });
+    containerEl.createEl('h3', { text: '其他' });
 
     new Setting(containerEl)
-      .setName('一键导入 Shortcut')
+      .setName('提交快捷键')
+      .setDesc('在输入框中提交日记的快捷键组合')
+      .addDropdown(dropdown =>
+        dropdown
+          .addOption('shift+enter', 'Shift + Enter')
+          .addOption('ctrl+enter', 'Ctrl + Enter')
+          .addOption('alt+enter', 'Alt + Enter')
+          .addOption('ctrl+shift+enter', 'Ctrl + Shift + Enter')
+          .setValue(this.plugin.settings.submitShortcut)
+          .onChange(async (value: string) => {
+            this.plugin.settings.submitShortcut = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Apple Shortcut')
       .setDesc('配合 iPhone Action Button 使用，快速录音并写入日记')
       .addButton(btn =>
         btn
@@ -711,5 +791,30 @@ class JournalPartnerSettingTab extends PluginSettingTab {
             );
           }),
       );
+  }
+}
+
+/** Fuzzy-suggest modal for selecting a vault folder path. */
+class FolderSuggestModal extends FuzzySuggestModal<string> {
+  private folders: string[];
+  private onSelectFolder: (value: string) => void;
+
+  constructor(app: App, folders: string[], onSelect: (value: string) => void) {
+    super(app);
+    this.folders = folders;
+    this.onSelectFolder = onSelect;
+    this.setPlaceholder('选择或搜索文件夹路径');
+  }
+
+  getItems(): string[] {
+    return this.folders;
+  }
+
+  getItemText(item: string): string {
+    return item;
+  }
+
+  onChooseItem(item: string): void {
+    this.onSelectFolder(item);
   }
 }
