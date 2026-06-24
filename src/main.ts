@@ -179,6 +179,7 @@ export default class JournalPartnerPlugin extends Plugin {
    *
    * The protocol handler is registered specifically for `journal-partner`,
    * so every invocation is implicitly the quick-capture action. We accept:
+   *   - `cmd`  optional command: "record" → open sidebar and start recording
    *   - `text`  (optional if `audio` is given) — entry body
    *   - `time`  optional `HH:MM` override
    *   - `audio` optional vault-relative attachment path; rendered as
@@ -189,6 +190,18 @@ export default class JournalPartnerPlugin extends Plugin {
    * as a routing key.
    */
   private async handleProtocol(params: ObsidianProtocolData): Promise<void> {
+    // ── cmd=record: open sidebar and immediately start recording ──────────
+    if (params.cmd === 'record') {
+      await this.activateCaptureView();
+      // Give Obsidian a tick to mount the leaf before we touch the view
+      window.setTimeout(() => {
+        const leaves = this.app.workspace.getLeavesOfType(CAPTURE_VIEW_TYPE);
+        const view = leaves[0]?.view as JournalCaptureView | undefined;
+        if (view) void view.beginRecording();
+      }, 150);
+      return;
+    }
+
     const text = params.text ?? '';
     const audio = params.audio ?? '';
 
@@ -791,6 +804,34 @@ class JournalPartnerSettingTab extends PluginSettingTab {
             );
           }),
       );
+
+    // URL scheme reference
+    const urlSection = containerEl.createDiv({ cls: 'jp-settings-url-section' });
+    urlSection.style.cssText =
+      'margin-top: 16px; padding: 12px 16px; border-radius: 8px;' +
+      'background: var(--background-secondary); font-size: 0.85em;';
+    urlSection.createEl('div', {
+      text: '快捷指令 URL Scheme',
+      cls: 'jp-settings-url-title',
+    }).style.cssText = 'font-weight: 600; margin-bottom: 8px; color: var(--text-normal);';
+
+    const urlRows: { label: string; url: string }[] = [
+      { label: '打开侧边栏并立即开始录音', url: 'obsidian://journal-partner?cmd=record' },
+      { label: '直接写入文字（不打开 UI）', url: 'obsidian://journal-partner?text=内容' },
+    ];
+    for (const { label, url } of urlRows) {
+      const row = urlSection.createDiv();
+      row.style.cssText = 'margin-bottom: 6px; color: var(--text-muted);';
+      row.createEl('span', { text: `${label}：` });
+      const code = row.createEl('code', { text: url });
+      code.style.cssText =
+        'font-size: 0.9em; cursor: pointer; padding: 1px 4px;' +
+        'border-radius: 3px; background: var(--background-primary-alt);';
+      code.setAttr('title', '点击复制');
+      code.addEventListener('click', () => {
+        void navigator.clipboard.writeText(url).then(() => new Notice('已复制 URL'));
+      });
+    }
   }
 }
 

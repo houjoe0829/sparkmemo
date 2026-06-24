@@ -135,6 +135,30 @@ export class JournalCaptureView extends ItemView {
   private rerenderTimer: number | null = null;
   private intersectionObs: IntersectionObserver | null = null;
 
+  // ── Quick-record via URL scheme ──────────────────────────────────────────
+  /** Bound to the inner startRecording closure once buildInputCard runs. */
+  private startRecordingFn: (() => Promise<void>) | null = null;
+
+  /**
+   * Called by the plugin's URL handler when `cmd=record` is received.
+   * Ensures the capture pane is visible, then starts recording immediately.
+   * Safe to call before `buildInputCard` finishes (startRecordingFn will be
+   * null until then, so we schedule a short retry).
+   */
+  public async beginRecording(): Promise<void> {
+    // Make sure we're on the capture tab so the mic button is visible
+    if (this.currentTab !== 'capture') this.switchTab('capture');
+
+    if (this.startRecordingFn) {
+      await this.startRecordingFn();
+    } else {
+      // If the view isn't fully built yet, retry once the event loop settles
+      window.setTimeout(async () => {
+        if (this.startRecordingFn) await this.startRecordingFn();
+      }, 200);
+    }
+  }
+
   // ── Mobile toolbar auto-hide (scroll-direction triggered) ──
   /** Last observed scrollTop, for direction detection. */
   private lastScrollTop = 0;
@@ -1138,6 +1162,9 @@ export class JournalCaptureView extends ItemView {
       }
     };
 
+    // Expose to beginRecording() so the URL handler can trigger recording.
+    this.startRecordingFn = startRecording;
+
     const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
 
     // Left icon group: image + mic
@@ -2112,7 +2139,8 @@ export class JournalCaptureView extends ItemView {
         .setTitle('删除 memo')
         .setIcon('trash-2')
         .onClick(() => {
-          this.confirmAndDelete(day, entry, 'memo', audioPaths);
+          const mode: DeleteMode = audioPaths.length > 0 ? 'memo+audio' : 'memo';
+          this.confirmAndDelete(day, entry, mode, audioPaths);
         }),
     );
 
@@ -2121,8 +2149,8 @@ export class JournalCaptureView extends ItemView {
         item
           .setTitle(
             audioPaths.length === 1
-              ? '仅删除录音文件'
-              : `仅删除 ${audioPaths.length} 个录音文件`,
+              ? '仅删除录音文件（保留文字）'
+              : `仅删除 ${audioPaths.length} 个录音文件（保留文字）`,
           )
           .setIcon('mic-off')
           .onClick(() => {
