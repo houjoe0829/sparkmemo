@@ -3,8 +3,8 @@
   "name": "Journal Partner",
   "version": "2.5.0",
   "minAppVersion": "1.4.0",
-  "description": "高亮 Journal 区域的时间戳，支持自定义颜色与作用范围，防止意外修改",
-  "author": "Xuan",
-  "authorUrl": "",
+  "description": "Highlight timestamps in your Journal section, capture quick notes, images, and audio from a sidebar, dictate with real-time speech-to-text, and review your year with a heatmap.",
+  "author": "hankzhao",
+  "authorUrl": "https://github.com/zhaohongxuan",
   "isDesktopOnly": false
 }
