@@ -25,6 +25,7 @@ import {
   TFile,
   WorkspaceLeaf,
   moment,
+  requestUrl,
   setIcon,
 } from 'obsidian';
 import {
@@ -405,12 +406,178 @@ export class JournalCaptureView extends ItemView {
       attr: { 'aria-label': '录音' },
     });
     setIcon(micBtn, 'mic');
+
+    // Recording bar — waveform + duration + status, shown only while recording.
+    const recBar = this.inputCardEl.createDiv({ cls: 'jp-recording-bar' });
+    recBar.style.display = 'none';
+    const recCanvas = recBar.createEl('canvas', { cls: 'jp-recording-waveform' });
+    const recMeta = recBar.createDiv({ cls: 'jp-recording-meta' });
+    const recTime = recMeta.createEl('span', { cls: 'jp-recording-time', text: '00:00' });
+    const recStatus = recMeta.createEl('span', { cls: 'jp-recording-status', text: '录音中…' });
+
     let mediaRecorder: MediaRecorder | null = null;
     let audioChunks: Blob[] = [];
     let recordingTimeout: number | null = null;
+    let audioCtx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let rafId: number | null = null;
+    let recordStartedAt = 0;
+    // Realtime STT state
+    let realtimeProcessor: ScriptProcessorNode | null = null;
+    let realtimeTimer: number | null = null;
+    let segmentFrames: Float32Array[] = []; // current VAD segment being built
+    let vadSilenceSamples = 0; // consecutive silent samples within the segment
+    let vadSegmentSamples = 0; // total samples in the current segment
+    let lastTranscript = ''; // trailing text from the previous segment → prompt context
+    let realtimeBaseCursor = 0; // insertion point for streamed text
+    let realtimeRegionStart = 0; // textarea index where the streamed region begins
+    let realtimeActive = false; // whether live streaming is on for this session
+    let pendingFlush: Promise<void> = Promise.resolve(); // serialize segment sends
+    // VAD tuning (sample-based so it adapts to any sample rate).
+    const VAD_FRAME = 4096;            // ScriptProcessor buffer size
+    const VAD_ENERGY_RMS = 0.012;      // below this RMS → considered silence
+    const VAD_SILENCE_CUT_SAMPLES = 0.3; // 300ms of silence ends a segment
+    const VAD_MAX_SEG_SAMPLES = 6.0;   // force-cut a segment at 6s
+    const VAD_MIN_SEG_SAMPLES = 0.8;   // drop segments shorter than 0.8s
+
+    const formatDuration = (ms: number) => {
+      const total = Math.floor(ms / 1000);
+      const m = String(Math.floor(total / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      return `${m}:${s}`;
+    };
+
+    const teardownAnalyser = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (realtimeTimer !== null) {
+        window.clearInterval(realtimeTimer);
+        realtimeTimer = null;
+      }
+      if (realtimeProcessor) {
+        try { realtimeProcessor.disconnect(); } catch { /* noop */ }
+        realtimeProcessor = null;
+      }
+      if (audioCtx) {
+        void audioCtx.close();
+        audioCtx = null;
+        analyser = null;
+      }
+      segmentFrames = [];
+      vadSilenceSamples = 0;
+      vadSegmentSamples = 0;
+      lastTranscript = '';
+    };
+
+    // Pick the best supported recording mime, preferring m4a (mp4) and
+    // gracefully degrading to webm. Chromium historically lacks audio/mp4
+    // support, so探测 is mandatory rather than hard-coding.
+    const pickRecordingMime = (): string => {
+      const candidates = [
+        'audio/mp4;codecs=mp4a.40.2',
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+      ];
+      for (const t of candidates) {
+        try {
+          if (MediaRecorder.isTypeSupported(t)) return t;
+        } catch { /* keep probing */ }
+      }
+      return ''; // let the UA decide
+    };
+
+    const drawWaveform = () => {
+      if (!analyser || !recCanvas) {
+        rafId = null;
+        return;
+      }
+      const ctx2d = recCanvas.getContext('2d');
+      if (!ctx2d) {
+        rafId = null;
+        return;
+      }
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      const w = recCanvas.width;
+      const h = recCanvas.height;
+      ctx2d.clearRect(0, 0, w, h);
+
+      const stroke = getComputedStyle(recBar)
+        .getPropertyValue('--jp-recording-stroke')
+        .trim() || '#7c3aed';
+      ctx2d.fillStyle = stroke;
+
+      // Symmetric capsule bars mirrored around the horizontal mid-line.
+      const barCount = 48;
+      const gap = Math.max(1, w * 0.012);
+      const barW = (w - gap * (barCount - 1)) / barCount;
+      const mid = h / 2;
+      const maxHalf = mid * 0.98; // let bars nearly touch the edges
+      const minHalf = Math.max(1, h * 0.05); // baseline so bars always read
+      const samplesPerBar = buf.length / barCount;
+      const r = barW / 2; // fully rounded → capsule
+      // Per-bar smoothing state, created once and reused across frames.
+      if (!(drawWaveform as any)._smooth) {
+        (drawWaveform as any)._smooth = new Float32Array(barCount);
+      }
+      const smooth = (drawWaveform as any)._smooth as Float32Array;
+      const gain = 2.4; // amplify raw mic level (typically 0.1–0.3)
+
+      for (let i = 0; i < barCount; i++) {
+        // Peak amplitude in this bar's slice of samples.
+        let peak = 0;
+        const start = Math.floor(i * samplesPerBar);
+        const end = Math.floor((i + 1) * samplesPerBar);
+        for (let j = start; j < end; j++) {
+          const v = Math.abs(buf[j] - 128) / 128; // 0..1
+          if (v > peak) peak = v;
+        }
+        // Non-linear expansion so quiet speech still moves the bars visibly:
+        // gain → clamp → sqrt curve lifts the lower end.
+        const expanded = Math.sqrt(Math.min(1, peak * gain));
+        // Smooth toward the new value to avoid jitter (attack/release).
+        const prev = smooth[i];
+        const target = expanded > prev ? expanded : prev * 0.82 + expanded * 0.18;
+        smooth[i] = target;
+        const half = Math.max(minHalf, target * maxHalf);
+        const x = i * (barW + gap);
+        // Top + bottom mirrored capsules.
+        if (typeof ctx2d.roundRect === 'function') {
+          ctx2d.beginPath();
+          ctx2d.roundRect(x, mid - half, barW, half, r);
+          ctx2d.fill();
+          ctx2d.beginPath();
+          ctx2d.roundRect(x, mid, barW, half, r);
+          ctx2d.fill();
+        } else {
+          ctx2d.fillRect(x, mid - half, barW, half);
+          ctx2d.fillRect(x, mid, barW, half);
+        }
+      }
+
+      recTime.setText(formatDuration(performance.now() - recordStartedAt));
+      rafId = requestAnimationFrame(drawWaveform);
+    };
 
     const stopRecording = async () => {
       if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      // Freeze the live UI immediately so the waveform/duration stop the
+      // moment the user clicks stop — don't wait for onstop or network.
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (realtimeTimer !== null) {
+        window.clearInterval(realtimeTimer);
+        realtimeTimer = null;
+      }
+      if (realtimeProcessor) {
+        try { realtimeProcessor.disconnect(); } catch { /* noop */ }
+        realtimeProcessor = null;
+      }
       mediaRecorder.stop();
       mediaRecorder.stream.getTracks().forEach(track => track.stop());
       if (recordingTimeout !== null) {
@@ -419,42 +586,264 @@ export class JournalCaptureView extends ItemView {
       }
     };
 
+    const sttConfigured = () => {
+      const s = this.plugin.settings;
+      return s.sttEndpoint.trim().length > 0 && s.sttApiKey.trim().length > 0;
+    };
+
+    const wantRealtime = () => sttConfigured() && this.plugin.settings.sttRealtime;
+
+    // Append streamed text right after the streaming cursor, keeping the
+    // caret at the end so the next chunk lands next to it.
+    const appendStreamedText = (text: string) => {
+      const ta = this.textareaEl;
+      const pos = realtimeBaseCursor;
+      const before = ta.value.substring(0, pos);
+      const after = ta.value.substring(pos);
+      ta.value = before + text + after;
+      realtimeBaseCursor = pos + text.length;
+      ta.setSelectionRange(realtimeBaseCursor, realtimeBaseCursor);
+      this.refreshSubmitState();
+      this.autoResizeTextarea();
+    };
+
+    // Replace the streamed draft (the region inserted since recording began)
+    // with the final transcript + audio embed.
+    const replaceStreamedText = (audioEmbed: string, text: string) => {
+      const ta = this.textareaEl;
+      const before = ta.value.substring(0, realtimeRegionStart);
+      const tail = ta.value.substring(realtimeBaseCursor);
+      const piece = text.length > 0 ? `${text} ${audioEmbed} ` : `${audioEmbed} `;
+      ta.value = before + piece + tail;
+      const newPos = before.length + piece.length;
+      ta.setSelectionRange(newPos, newPos);
+      this.refreshSubmitState();
+      this.autoResizeTextarea();
+      realtimeBaseCursor = newPos;
+    };
+
+    // Encode captured Float32 PCM frames into a standalone 16-bit PCM WAV
+    // blob — independently decodable, so every chunk transcribes on its own.
+    const encodeWav = (frames: Float32Array[], sampleRate: number): Blob => {
+      const total = frames.reduce((n, f) => n + f.length, 0);
+      if (total === 0) return new Blob([], { type: 'audio/wav' });
+      const buffer = new ArrayBuffer(44 + total * 2);
+      const view = new DataView(buffer);
+      const writeStr = (off: number, s: string) => {
+        for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + total * 2, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);          // PCM
+      view.setUint16(22, 1, true);          // mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      view.setUint32(40, total * 2, true);
+      let off = 44;
+      for (const frame of frames) {
+        for (let i = 0; i < frame.length; i++) {
+          let s = Math.max(-1, Math.min(1, frame[i]));
+          view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+          off += 2;
+        }
+      }
+      return new Blob([buffer], { type: 'audio/wav' });
+    };
+
+    // RMS energy of a PCM frame → drives voice-activity detection.
+    const frameRms = (frame: Float32Array): number => {
+      let sum = 0;
+      for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
+      return Math.sqrt(sum / frame.length);
+    };
+
+    // Transcribe one VAD segment with the previous segment's trailing text as
+    // `prompt` context, then append the result. Serialized so segments are
+    // sent in order even if transcription outpaces real time.
+    const transcribeSegment = (frames: Float32Array[], sr: number) => {
+      pendingFlush = pendingFlush.then(async () => {
+        const wav = encodeWav(frames, sr);
+        if (wav.size < 4000) return; // too short → unstable transcript, skip
+        try {
+          // Feed the tail of the prior transcript as context so cross-segment
+          // homophones / word-boundary carryover resolve correctly.
+          const promptText = lastTranscript.slice(-64);
+          const t = (await this.transcribeAudio(wav, promptText)).trim();
+          if (t.length > 0) {
+            appendStreamedText(t);
+            lastTranscript = (lastTranscript + t).slice(-256);
+          }
+        } catch {
+          // A failed segment shouldn't kill the live session — drop and continue.
+        }
+      });
+    };
+
+    // Flush whatever is currently accumulated in the segment buffer. Used both
+    // by the max-length force-cut and by the final flush on stop.
+    const flushCurrentSegment = () => {
+      if (!audioCtx) return;
+      if (segmentFrames.length === 0) return;
+      const sr = audioCtx.sampleRate;
+      const seg = segmentFrames;
+      segmentFrames = [];
+      vadSegmentSamples = 0;
+      vadSilenceSamples = 0;
+      if (seg.reduce((n, f) => n + f.length, 0) / sr < VAD_MIN_SEG_SAMPLES) return;
+      void transcribeSegment(seg, sr);
+    };
+
+    // Inspect an incoming PCM frame for voice activity; either accumulate it
+    // into the current segment or cut at a silence boundary and transcribe.
+    const ingestFrame = (frame: Float32Array) => {
+      if (!audioCtx) return;
+      const sr = audioCtx.sampleRate;
+      segmentFrames.push(new Float32Array(frame));
+      vadSegmentSamples += frame.length;
+
+      const silent = frameRms(frame) < VAD_ENERGY_RMS;
+      vadSilenceSamples = silent ? vadSilenceSamples + frame.length : 0;
+
+      // Cut after a pause (natural phrase boundary) — best accuracy per send.
+      if (vadSilenceSamples >= VAD_SILENCE_CUT_SAMPLES * sr
+          && vadSegmentSamples >= VAD_MIN_SEG_SAMPLES * sr) {
+        flushCurrentSegment();
+        return;
+      }
+      // Force-cut overly long segments so latency stays bounded.
+      if (vadSegmentSamples >= VAD_MAX_SEG_SAMPLES * sr) {
+        flushCurrentSegment();
+      }
+    };
+
+    const insertAtCursor = (text: string) => {
+      const textarea = this.textareaEl;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const before = textarea.value.substring(0, start);
+      const after = textarea.value.substring(end);
+      const piece = text + ' ';
+      textarea.value = before + piece + after;
+      const newPos = start + piece.length;
+      textarea.setSelectionRange(newPos, newPos);
+      this.refreshSubmitState();
+      this.autoResizeTextarea();
+    };
+
     const startRecording = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
-        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        const mime = pickRecordingMime();
+        mediaRecorder = mime
+          ? new MediaRecorder(stream, { mimeType: mime })
+          : new MediaRecorder(stream);
+        const outType = mime.startsWith('audio/mp4') ? 'audio/mp4' : 'audio/webm';
 
         mediaRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) audioChunks.push(e.data);
         };
 
         mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          // Flush the tail segment, then wait for in-flight segment sends to
+          // settle — but with a hard timeout so a hung network request can
+          // never trap the UI in "recording" state. The analyser/AudioContext
+          // teardown happens AFTER this wait (or the timeout), so the waveform
+          // keeps drawing only until then.
+          if (realtimeActive && audioCtx) flushCurrentSegment();
+          await Promise.race([
+            pendingFlush,
+            new Promise<void>(resolve => window.setTimeout(resolve, 4000)),
+          ]);
+          teardownAnalyser();
+          const audioBlob = new Blob(audioChunks, { type: outType });
+          const wantSTT = sttConfigured();
+          if (wantSTT) recStatus.setText('转写中…');
+          else recBar.style.display = 'none';
           try {
-            const result = await this.saveAudioToVault(audioBlob);
-            const textarea = this.textareaEl;
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const before = textarea.value.substring(0, start);
-            const after = textarea.value.substring(end);
-            textarea.value = before + result + ' ' + after;
-            const newPos = start + result.length + 1;
-            textarea.setSelectionRange(newPos, newPos);
-            this.refreshSubmitState();
-            this.autoResizeTextarea();
+            const audioEmbed = await this.saveAudioToVault(audioBlob);
+            let text = '';
+            if (wantSTT) {
+              // Final pass over the complete recording — replaces the live
+              // chunk-stitched draft with a clean, accurate transcript.
+              try {
+                text = (await this.transcribeAudio(audioBlob)).trim();
+              } catch (err) {
+                new Notice(`转写失败：${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+            recBar.style.display = 'none';
+            if (realtimeActive) {
+              // Swap the streamed draft for the final transcript.
+              replaceStreamedText(audioEmbed, text);
+            } else {
+              insertAtCursor(text.length > 0 ? `${text} ${audioEmbed}` : audioEmbed);
+            }
           } catch (err) {
+            recBar.style.display = 'none';
             new Notice(`录音保存失败：${err instanceof Error ? err.message : String(err)}`);
           }
         };
 
         mediaRecorder.start();
+
+        // Decide live-streaming for this session.
+        realtimeActive = wantRealtime();
+
+        // Wire up the live waveform + duration. Do NOT connect analyser to
+        // destination — that would route mic back to speakers and cause feedback.
+        try {
+          const Ctor = window.AudioContext || (window as any).webkitAudioContext;
+          audioCtx = new Ctor();
+          const source = audioCtx.createMediaStreamSource(stream);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 1024;
+          source.connect(analyser);
+
+          // Realtime capture: tap the same source via a ScriptProcessor and
+          // segment by voice activity (silence boundaries) for transcription.
+          if (realtimeActive) {
+            realtimeRegionStart = this.textareaEl.selectionStart;
+            realtimeBaseCursor = realtimeRegionStart;
+            lastTranscript = '';
+            segmentFrames = [];
+            vadSilenceSamples = 0;
+            vadSegmentSamples = 0;
+            const sp = audioCtx.createScriptProcessor(VAD_FRAME, 1, 1);
+            sp.onaudioprocess = (ev: AudioProcessingEvent) => {
+              ingestFrame(ev.inputBuffer.getChannelData(0));
+            };
+            source.connect(sp);
+            // ScriptProcessor must connect somewhere to fire; analyser suffices.
+            sp.connect(analyser);
+            realtimeProcessor = sp;
+          }
+
+          // Reveal the bar FIRST, then measure — reading clientWidth while
+          // display:none returns 0 and the canvas ends up 1px wide (invisible).
+          recStatus.setText(realtimeActive ? '实时转写中…' : '录音中…');
+          recBar.style.display = '';
+          const dpr = window.devicePixelRatio || 1;
+          recCanvas.width = Math.max(1, recCanvas.clientWidth) * dpr;
+          recCanvas.height = Math.max(1, recCanvas.clientHeight) * dpr;
+          recordStartedAt = performance.now();
+          rafId = requestAnimationFrame(drawWaveform);
+        } catch {
+          // Analyser/realtime are optional — recording still works without them.
+        }
+
         micBtn.addClass('is-recording');
         setIcon(micBtn, 'square');
 
         recordingTimeout = window.setTimeout(() => {
           void stopRecording();
-          new Notice('录音已自动停止（最長5分钟）');
+          new Notice('录音已自动停止（最长5分钟）');
         }, 5 * 60 * 1000);
       } catch (err) {
         new Notice(`无法访问麦克风：${err instanceof Error ? err.message : String(err)}`);
@@ -519,6 +908,70 @@ export class JournalCaptureView extends ItemView {
     const buffer = await blob.arrayBuffer();
     const file = await this.app.vault.createBinary(fileName, buffer);
     return `![[${file.path}]]`;
+  }
+
+  /**
+   * Transcribe an audio blob via an OpenAI-compatible /audio/transcriptions
+   * endpoint. Builds the multipart/form-data body by hand because Obsidian's
+   * `requestUrl` has no multipart helper. Returns the plain-text transcript.
+   */
+  private async transcribeAudio(blob: Blob, prompt = ''): Promise<string> {
+    const s = this.plugin.settings;
+    const endpoint = s.sttEndpoint.trim();
+    const apiKey = s.sttApiKey.trim();
+    if (endpoint.length === 0 || apiKey.length === 0) return '';
+
+    const boundary = '----JPBoundary' + Math.floor(Math.random() * 1e9).toString(16);
+    const enc = new TextEncoder();
+    const parts: Uint8Array[] = [];
+
+    const field = (name: string, value: string) => {
+      parts.push(
+        enc.encode(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+        ),
+      );
+    };
+    field('model', s.sttModel.trim() || 'whisper-1');
+    field('response_format', 'json');
+    const lang = s.sttLanguage.trim();
+    if (lang.length > 0) field('language', lang);
+    // Prior-segment context — improves cross-boundary word accuracy. Whisper
+    // and SenseVoice both honour the `prompt` field as a style/context hint.
+    const promptText = prompt.trim();
+    if (promptText.length > 0) field('prompt', promptText);
+
+    const fileBytes = new Uint8Array(await blob.arrayBuffer());
+    // Derive filename from the blob's mime so the endpoint sees a sensible ext.
+    const ext = blob.type.includes('mp4') ? 'm4a'
+      : blob.type.includes('wav') ? 'wav' : 'webm';
+    parts.push(
+      enc.encode(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.${ext}"\r\nContent-Type: ${blob.type || 'audio/webm'}\r\n\r\n`,
+      ),
+    );
+    parts.push(fileBytes);
+    parts.push(enc.encode(`\r\n--${boundary}--\r\n`));
+
+    const total = parts.reduce((sum, p) => sum + p.length, 0);
+    const body = new Uint8Array(total);
+    let offset = 0;
+    for (const p of parts) {
+      body.set(p, offset);
+      offset += p.length;
+    }
+
+    const resp = await requestUrl({
+      url: endpoint,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body: body.buffer as ArrayBuffer,
+    });
+    const text = resp.json?.text;
+    return typeof text === 'string' ? text : '';
   }
 
   private buildTimeline(root: HTMLElement) {

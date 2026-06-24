@@ -209,6 +209,41 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+/* Live recording bar: waveform + duration + status */
+.jp-recording-bar {
+  --jp-recording-stroke: var(--jp-tl-dot, #7c3aed);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+.jp-recording-waveform {
+  flex: 1;
+  height: 34px;
+  display: block;
+  min-width: 0;
+}
+.jp-recording-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  line-height: 1.1;
+}
+.jp-recording-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.jp-recording-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
 .jp-capture-actions {
   display: flex;
   align-items: center;

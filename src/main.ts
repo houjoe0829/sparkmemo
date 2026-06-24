@@ -626,6 +626,74 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     });
     previewEl.createEl('span', { text: '这里是日记内容…' });
 
+    // ── Speech-to-text ────────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '🎙️ 语音转文字' });
+
+    new Setting(containerEl)
+      .setName('转写接口地址')
+      .setDesc('OpenAI 兼容的 /audio/transcriptions 地址。留空则关闭录音转文字。')
+      .addText(text =>
+        text
+          .setPlaceholder('https://api.openai.com/v1/audio/transcriptions')
+          .setValue(this.plugin.settings.sttEndpoint)
+          .onChange(async value => {
+            this.plugin.settings.sttEndpoint = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('API Key')
+      .setDesc('以 Bearer 形式发送的密钥。可填 OpenAI / Groq / 自建服务的密钥。')
+      .addText(text => {
+        text.inputEl.type = 'password';
+        text
+          .setPlaceholder('sk-…')
+          .setValue(this.plugin.settings.sttApiKey)
+          .onChange(async value => {
+            this.plugin.settings.sttApiKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName('模型')
+      .setDesc('multipart 中的 model 字段，如 whisper-1、whisper-large-v3。')
+      .addText(text =>
+        text
+          .setPlaceholder('whisper-1')
+          .setValue(this.plugin.settings.sttModel)
+          .onChange(async value => {
+            this.plugin.settings.sttModel = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('语言')
+      .setDesc('ISO-639-1 语言提示，如 zh、en。留空让模型自动识别。')
+      .addText(text =>
+        text
+          .setPlaceholder('zh')
+          .setValue(this.plugin.settings.sttLanguage)
+          .onChange(async value => {
+            this.plugin.settings.sttLanguage = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('实时转写')
+      .setDesc('录音时边说边出字（约每 1.5 秒一批），停止后用完整音频重转一次替换草稿，兼顾实时与准确。')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.sttRealtime)
+          .onChange(async value => {
+            this.plugin.settings.sttRealtime = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
     // ── Shortcut ──────────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '🔗 快捷指令' });
 

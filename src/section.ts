@@ -26,6 +26,16 @@ export interface JournalPartnerSettings {
   readonlyTimestamps: boolean;
   /** When true, pressing Enter inside the journal section auto-inserts a timestamp on the new line */
   autoTimestamp: boolean;
+  /** OpenAI-compatible audio transcription endpoint (e.g. https://api.openai.com/v1/audio/transcriptions). Empty disables STT. */
+  sttEndpoint: string;
+  /** Bearer API key sent to the STT endpoint. */
+  sttApiKey: string;
+  /** Model name passed in the multipart `model` field (e.g. whisper-1, whisper-large-v3). */
+  sttModel: string;
+  /** ISO-639-1 language hint passed as `language` (e.g. zh, en). Empty lets the model auto-detect. */
+  sttLanguage: string;
+  /** When true, transcription runs live in ~1.5s chunks while recording (dictation-style). */
+  sttRealtime: boolean;
 }
 
 export const DEFAULT_SETTINGS: JournalPartnerSettings = {
@@ -36,6 +46,11 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   timestampBgColor: '#ede9fe',
   readonlyTimestamps: true,
   autoTimestamp: true,
+  sttEndpoint: '',
+  sttApiKey: '',
+  sttModel: 'whisper-1',
+  sttLanguage: 'zh',
+  sttRealtime: true,
 };
 
 export type Rng = { from: number; to: number };
