@@ -154,7 +154,7 @@
   font-family: inherit;
   font-size: 14px;
   line-height: 1.55;
-  padding: 0 0 0 28px;
+  padding: 0;
   box-sizing: border-box;
 }
 .jp-capture-input::placeholder {
@@ -164,21 +164,14 @@
   position: relative;
 }
 .jp-capture-button-row {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
   display: inline-flex;
-  flex-direction: column;
-  justify-content: flex-start;
+  flex-direction: row;
+  align-items: center;
   gap: 0;
-  padding-top: 6px;
-  padding-left: 4px;
-  z-index: 1;
-}
-.jp-capture-button-row {
-  display: inline-flex;
-  gap: 4px;
+  background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
+  border-radius: 999px;
+  padding: 0 4px;
 }
 .jp-capture-image-btn,
 .jp-capture-mic-btn {
@@ -186,10 +179,10 @@
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
-  color: var(--text-muted) !important;
+  color: color-mix(in srgb, var(--jp-tl-dot) 70%, var(--text-muted)) !important;
   cursor: pointer;
-  padding: 4px 6px !important;
-  border-radius: 4px;
+  padding: 3px 6px !important;
+  border-radius: 999px;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -201,8 +194,8 @@
 }
 .jp-capture-image-btn:hover,
 .jp-capture-mic-btn:hover {
-  color: var(--text-normal) !important;
-  background-color: var(--background-secondary) !important;
+  color: var(--jp-tl-dot) !important;
+  background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
 .jp-capture-image-btn svg,
 .jp-capture-mic-btn svg {

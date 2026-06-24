@@ -276,31 +276,8 @@ export class JournalCaptureView extends ItemView {
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
-    // Wrapper for textarea (position:relative so the button row can be
-    // absolute-positioned on top of the left edge, keeping the placeholder
-    // and text indented consistently without empty space beside the icon).
+    // Wrapper for textarea
     const inputWrapper = this.inputCardEl.createDiv({ cls: 'jp-capture-input-wrapper' });
-
-    // Button row — placed inside inputWrapper so it overlays the left edge
-    // of the textarea using position:absolute, aligning with the text line.
-    const buttonRow = inputWrapper.createDiv({ cls: 'jp-capture-button-row' });
-
-    // Image upload button
-    const imageBtn = buttonRow.createEl('button', {
-      cls: 'jp-capture-image-btn',
-      attr: { 'aria-label': '上传图片' },
-    });
-    setIcon(imageBtn, 'image');
-    imageBtn.addEventListener('click', () => {
-      fileInput.click();
-    });
-
-    // Microphone button
-    const micBtn = buttonRow.createEl('button', {
-      cls: 'jp-capture-mic-btn',
-      attr: { 'aria-label': '录音' },
-    });
-    setIcon(micBtn, 'mic');
 
     this.textareaEl = inputWrapper.createEl('textarea', {
       cls: 'jp-capture-input',
@@ -861,6 +838,28 @@ export class JournalCaptureView extends ItemView {
       }
     };
 
+    const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
+
+    // Left icon group: image + mic
+    const buttonRow = actions.createDiv({ cls: 'jp-capture-button-row' });
+
+    // Image upload button
+    const imageBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-image-btn',
+      attr: { 'aria-label': '上传图片' },
+    });
+    setIcon(imageBtn, 'image');
+    imageBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    // Microphone button
+    const micBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-mic-btn',
+      attr: { 'aria-label': '录音' },
+    });
+    setIcon(micBtn, 'mic');
+
     micBtn.addEventListener('click', async () => {
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
         await startRecording();
@@ -870,8 +869,6 @@ export class JournalCaptureView extends ItemView {
         setIcon(micBtn, 'mic');
       }
     });
-
-    const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
