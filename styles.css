@@ -164,6 +164,19 @@
   position: relative;
 }
 .jp-capture-button-row {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0;
+  padding-top: 6px;
+  padding-left: 4px;
+  z-index: 1;
+}
+.jp-capture-button-row {
   display: inline-flex;
   gap: 4px;
 }

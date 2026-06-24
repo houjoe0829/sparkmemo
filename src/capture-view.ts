@@ -276,8 +276,31 @@ export class JournalCaptureView extends ItemView {
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
-    // Wrapper for textarea
+    // Wrapper for textarea (position:relative so the button row can be
+    // absolute-positioned on top of the left edge, keeping the placeholder
+    // and text indented consistently without empty space beside the icon).
     const inputWrapper = this.inputCardEl.createDiv({ cls: 'jp-capture-input-wrapper' });
+
+    // Button row — placed inside inputWrapper so it overlays the left edge
+    // of the textarea using position:absolute, aligning with the text line.
+    const buttonRow = inputWrapper.createDiv({ cls: 'jp-capture-button-row' });
+
+    // Image upload button
+    const imageBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-image-btn',
+      attr: { 'aria-label': '上传图片' },
+    });
+    setIcon(imageBtn, 'image');
+    imageBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    // Microphone button
+    const micBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-mic-btn',
+      attr: { 'aria-label': '录音' },
+    });
+    setIcon(micBtn, 'mic');
 
     this.textareaEl = inputWrapper.createEl('textarea', {
       cls: 'jp-capture-input',
@@ -395,24 +418,7 @@ export class JournalCaptureView extends ItemView {
       }
     });
 
-    // Image upload button
-    const imageBtn = this.inputCardEl.createEl('button', {
-      cls: 'jp-capture-image-btn',
-      attr: { 'aria-label': '上传图片' },
-    });
-    setIcon(imageBtn, 'image');
-    imageBtn.addEventListener('click', () => {
-      fileInput.click();
-    });
-
-    // Microphone button
-    const micBtn = this.inputCardEl.createEl('button', {
-      cls: 'jp-capture-mic-btn',
-      attr: { 'aria-label': '录音' },
-    });
-    setIcon(micBtn, 'mic');
-
-    // Recording bar — waveform + duration + status, shown only while recording.
+    // Hidden file input for image upload
     const recBar = this.inputCardEl.createDiv({ cls: 'jp-recording-bar' });
     recBar.style.display = 'none';
     const recCanvas = recBar.createEl('canvas', { cls: 'jp-recording-waveform' });
@@ -866,11 +872,6 @@ export class JournalCaptureView extends ItemView {
     });
 
     const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
-
-    // Button row inside actions, left side
-    const buttonRow = actions.createDiv({ cls: 'jp-capture-button-row' });
-    buttonRow.appendChild(imageBtn);
-    buttonRow.appendChild(micBtn);
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
