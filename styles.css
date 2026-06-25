@@ -1117,3 +1117,49 @@
 .theme-dark .jp-stats-cell.level-0 {
   background: color-mix(in srgb, var(--text-faint) 18%, transparent);
 }
+
+/* ── STT settings usage guide ───────────────────────────────────────────── */
+.jp-stt-guide {
+  margin: 6px 0 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.jp-stt-guide p {
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+.jp-stt-guide p:last-child {
+  margin-bottom: 0;
+}
+.jp-stt-guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.jp-stt-guide-table th,
+.jp-stt-guide-table td {
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-all;
+}
+.jp-stt-guide-table th {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-weight: 600;
+}
+.jp-stt-guide-table td:first-child {
+  color: var(--text-normal);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.jp-stt-guide-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}

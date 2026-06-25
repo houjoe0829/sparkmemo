@@ -661,6 +661,38 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     // ── Speech-to-text ────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '语音转文字' });
 
+    // Usage guide — explains how STT works here and lists mainstream / free models.
+    const guide = containerEl.createEl('div', { cls: 'jp-stt-guide' });
+    guide.createEl('p', {
+      text: '录音转文字使用 OpenAI 兼容的 /audio/transcriptions 接口。填好转写地址与 API Key 即可开启；留空则关闭转写，麦克风仅作纯录音。也可不配置，直接用系统听写（macOS 双击 Fn / iOS 键盘麦克风）往输入框输入。',
+    });
+    guide.createEl('p', {
+      text: '实时转写模式：边说边出字，在停顿处切句并带上下文拼接；停止后用完整音频整段重转替换草稿。模型选 SpeechTokenizer 系即可，无需额外配置。',
+    });
+    const table = guide.createEl('table', { cls: 'jp-stt-guide-table' });
+    const thead = table.createEl('thead');
+    const headRow = thead.createEl('tr');
+    for (const h of ['服务商', '转写地址', '模型', '费用', '说明']) {
+      headRow.createEl('th', { text: h });
+    }
+    const tbody = table.createEl('tbody');
+    const rows: [string, string, string, string, string][] = [
+      ['SiliconFlow（国内推荐）', 'https://api.siliconflow.cn/v1/audio/transcriptions', 'FunAudioLLM/SenseVoiceSmall', '免费', '国内可直连，中文质量好，注册实名后生成 Key'],
+      ['Groq', 'https://api.groq.com/openai/v1/audio/transcriptions', 'whisper-large-v3', '有免费额度', '速度极快，需网络可达'],
+      ['OpenAI', 'https://api.openai.com/v1/audio/transcriptions', 'whisper-1', '付费', '官方接口，需外网'],
+      ['阿里百炼', '需用 DashScope 兼容端点', 'paraformer-v2', '有免费额度', '中文优秀，注意接口格式'],
+      ['自建 faster-whisper', 'http://你的服务器:9000/v1/audio/transcriptions', 'whisper-1 / small / medium', '免费', 'Docker 部署 OpenAI 兼容服务，隐私无忧'],
+    ];
+    for (const r of rows) {
+      const tr = tbody.createEl('tr');
+      for (const cell of r) tr.createEl('td', { text: cell });
+    }
+    guide.createEl('p', {
+      cls: 'jp-stt-guide-hint',
+      text: '提示：以上服务的额度与模型名以官网公示为准，可能随时调整。SenseVoiceSmall 当前在 SiliconFlow 标注为免费。',
+    });
+
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let recordingFolderText: any = null;
     let apiKeyInputEl: HTMLInputElement | null = null;
