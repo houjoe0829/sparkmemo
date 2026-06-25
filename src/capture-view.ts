@@ -745,12 +745,14 @@ export class JournalCaptureView extends ItemView {
     let realtimeRegionStart = 0; // textarea index where the streamed region begins
     let realtimeActive = false; // whether live streaming is on for this session
     let pendingFlush: Promise<void> = Promise.resolve(); // serialize segment sends
+    let vadFirstSegment = true; // until the first segment flushes, allow an early first-word cut
     // VAD tuning (sample-based so it adapts to any sample rate).
     const VAD_FRAME = 4096;            // ScriptProcessor buffer size
-    const VAD_ENERGY_RMS = 0.012;      // below this RMS → considered silence
-    const VAD_SILENCE_CUT_SAMPLES = 0.3; // 300ms of silence ends a segment
-    const VAD_MAX_SEG_SAMPLES = 6.0;   // force-cut a segment at 6s
+    const VAD_ENERGY_RMS = 0.018;      // below this RMS → considered silence (raised so ambient noise doesn't mask pauses)
+    const VAD_SILENCE_CUT_SAMPLES = 0.25; // 250ms of silence ends a segment
+    const VAD_MAX_SEG_SAMPLES = 3.0;   // force-cut a segment at 3s (caps worst-case latency)
     const VAD_MIN_SEG_SAMPLES = 0.8;   // drop segments shorter than 0.8s
+    const VAD_FIRST_FLUSH_SAMPLES = 1.2; // first segment flushes early for fast first-word feedback
 
     const formatDuration = (ms: number) => {
       const total = Math.floor(ms / 1000);
@@ -1008,6 +1010,7 @@ export class JournalCaptureView extends ItemView {
       vadSegmentSamples = 0;
       vadSilenceSamples = 0;
       if (seg.reduce((n, f) => n + f.length, 0) / sr < VAD_MIN_SEG_SAMPLES) return;
+      vadFirstSegment = false;
       void transcribeSegment(seg, sr);
     };
 
@@ -1025,6 +1028,12 @@ export class JournalCaptureView extends ItemView {
       // Cut after a pause (natural phrase boundary) — best accuracy per send.
       if (vadSilenceSamples >= VAD_SILENCE_CUT_SAMPLES * sr
           && vadSegmentSamples >= VAD_MIN_SEG_SAMPLES * sr) {
+        flushCurrentSegment();
+        return;
+      }
+      // First segment flushes early (before any pause) so the user sees the
+      // first words quickly instead of waiting for a silence boundary.
+      if (vadFirstSegment && vadSegmentSamples >= VAD_FIRST_FLUSH_SAMPLES * sr) {
         flushCurrentSegment();
         return;
       }
@@ -1127,6 +1136,7 @@ export class JournalCaptureView extends ItemView {
             segmentFrames = [];
             vadSilenceSamples = 0;
             vadSegmentSamples = 0;
+            vadFirstSegment = true;
             const sp = audioCtx.createScriptProcessor(VAD_FRAME, 1, 1);
             sp.onaudioprocess = (ev: AudioProcessingEvent) => {
               ingestFrame(ev.inputBuffer.getChannelData(0));
