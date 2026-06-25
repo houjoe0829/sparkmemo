@@ -667,7 +667,7 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       text: '录音转文字使用 OpenAI 兼容的 /audio/transcriptions 接口。填好转写地址与 API Key 即可开启；留空则关闭转写，麦克风仅作纯录音。也可不配置，直接用系统听写（macOS 双击 Fn / iOS 键盘麦克风）往输入框输入。',
     });
     guide.createEl('p', {
-      text: '实时转写模式：边说边出字，在停顿处切句并带上下文拼接；停止后用完整音频整段重转替换草稿。',
+      text: '实时转写模式：边说边出字，在停顿处切句并带上下文拼接。停止后默认保留实时草稿（快）；可在下方开启「停止后整段重转」用完整音频再转一次替换草稿（更准但需等待）。',
     });
     const table = guide.createEl('table', { cls: 'jp-stt-guide-table' });
     const thead = table.createEl('thead');
@@ -810,12 +810,24 @@ class JournalPartnerSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('实时转写')
-      .setDesc('录音时边说边出字（约每 1.5 秒一批），停止后用完整音频重转一次替换草稿，兼顾实时与准确。')
+      .setDesc('录音时边说边出字，在停顿处切句并带上下文拼接。关闭则录完整段后一次性转写。')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.sttRealtime)
           .onChange(async value => {
             this.plugin.settings.sttRealtime = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('停止后整段重转')
+      .setDesc('仅在实时转写开启时生效。开启后，停止录音时用完整音频再转写一次替换实时草稿，更准确但多一次调用、需等待。默认关闭——保留实时草稿即可。')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.sttFinalRebuild)
+          .onChange(async value => {
+            this.plugin.settings.sttFinalRebuild = value;
             await this.plugin.saveSettings();
           }),
       );

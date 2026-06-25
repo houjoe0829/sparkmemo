@@ -36,6 +36,8 @@ export interface JournalPartnerSettings {
   sttLanguage: string;
   /** When true, transcription runs live in ~1.5s chunks while recording (dictation-style). */
   sttRealtime: boolean;
+  /** When true (and realtime on), the streamed draft is replaced by a full-recording re-transcription on stop. */
+  sttFinalRebuild: boolean;
   /** Vault-relative folder for saving audio recordings. Empty uses Obsidian's attachment folder. */
   recordingFolder: string;
   /** Keyboard shortcut to submit entry: 'shift+enter' | 'ctrl+enter' | 'alt+enter' | 'ctrl+shift+enter' */
@@ -55,6 +57,7 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   sttModel: 'whisper-1',
   sttLanguage: 'zh',
   sttRealtime: true,
+  sttFinalRebuild: false,
   recordingFolder: '',
   submitShortcut: 'shift+enter',
 };

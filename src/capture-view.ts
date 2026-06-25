@@ -1085,14 +1085,19 @@ export class JournalCaptureView extends ItemView {
           teardownAnalyser();
           const audioBlob = new Blob(audioChunks, { type: outType });
           const wantSTT = sttConfigured();
-          if (wantSTT) recStatus.setText('转写中…');
+          const rebuilding = wantSTT && (!realtimeActive || this.plugin.settings.sttFinalRebuild);
+          if (rebuilding) recStatus.setText('转写中…');
           else recBar.style.display = 'none';
           try {
             const audioEmbed = await this.saveAudioToVault(audioBlob);
             let text = '';
-            if (wantSTT) {
-              // Final pass over the complete recording — replaces the live
-              // chunk-stitched draft with a clean, accurate transcript.
+            // In realtime mode, only re-transcribe the full recording when the
+            // user opted into the final rebuild; otherwise keep the streamed
+            // draft as-is (faster, no extra API call) and just append audio.
+            const doFinalRebuild = wantSTT && realtimeActive
+              ? this.plugin.settings.sttFinalRebuild
+              : wantSTT;
+            if (doFinalRebuild) {
               try {
                 text = (await this.transcribeAudio(audioBlob)).trim();
               } catch (err) {
@@ -1100,7 +1105,10 @@ export class JournalCaptureView extends ItemView {
               }
             }
             recBar.style.display = 'none';
-            if (realtimeActive) {
+            if (realtimeActive && !this.plugin.settings.sttFinalRebuild) {
+              // Keep the live draft; append the audio embed after it.
+              appendStreamedText(` ${audioEmbed}`);
+            } else if (realtimeActive) {
               // Swap the streamed draft for the final transcript.
               replaceStreamedText(audioEmbed, text);
             } else {
