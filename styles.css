@@ -174,7 +174,8 @@
   padding: 0 4px;
 }
 .jp-capture-image-btn,
-.jp-capture-mic-btn {
+.jp-capture-mic-btn,
+.jp-capture-clear-btn {
   background: transparent !important;
   border: none !important;
   outline: none !important;
@@ -193,12 +194,14 @@
   appearance: none !important;
 }
 .jp-capture-image-btn:hover,
-.jp-capture-mic-btn:hover {
+.jp-capture-mic-btn:hover,
+.jp-capture-clear-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
 .jp-capture-image-btn svg,
-.jp-capture-mic-btn svg {
+.jp-capture-mic-btn svg,
+.jp-capture-clear-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -1181,4 +1184,23 @@
 }
 .jp-stt-guide-table td a {
   font-size: 11.5px;
+}
+
+/* ── Clear-input confirm modal ──────────────────────────────────────────── */
+.jp-clear-confirm .jp-clear-confirm-question {
+  margin: 0 0 10px;
+  color: var(--text-normal);
+  line-height: 1.6;
+}
+.jp-clear-confirm-list {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  max-height: 160px;
+  overflow: auto;
+}
+.jp-clear-confirm-list li {
+  word-break: break-all;
+  margin: 2px 0;
 }
