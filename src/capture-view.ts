@@ -1220,7 +1220,7 @@ export class JournalCaptureView extends ItemView {
       cls: 'jp-capture-clear-btn',
       attr: { 'aria-label': '清空' },
     });
-    setIcon(clearBtn, 'eraser');
+    setIcon(clearBtn, 'delete-back-2');
     clearBtn.addEventListener('click', () => {
       const value = this.textareaEl.value;
       if (value.trim().length === 0) return; // nothing to clear
