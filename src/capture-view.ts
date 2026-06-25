@@ -748,11 +748,11 @@ export class JournalCaptureView extends ItemView {
     let vadFirstSegment = true; // until the first segment flushes, allow an early first-word cut
     // VAD tuning (sample-based so it adapts to any sample rate).
     const VAD_FRAME = 4096;            // ScriptProcessor buffer size
-    const VAD_ENERGY_RMS = 0.018;      // below this RMS → considered silence (raised so ambient noise doesn't mask pauses)
-    const VAD_SILENCE_CUT_SAMPLES = 0.25; // 250ms of silence ends a segment
-    const VAD_MAX_SEG_SAMPLES = 3.0;   // force-cut a segment at 3s (caps worst-case latency)
+    const VAD_ENERGY_RMS = 0.012;      // below this RMS → considered silence (lowered so brief in-speech dips aren't misread as pauses)
+    const VAD_SILENCE_CUT_SAMPLES = 0.45; // 450ms of silence ends a segment — long enough to ride through mid-sentence breaths
+    const VAD_MAX_SEG_SAMPLES = 4.0;   // force-cut a segment at 4s (caps worst-case latency)
     const VAD_MIN_SEG_SAMPLES = 0.8;   // drop segments shorter than 0.8s
-    const VAD_FIRST_FLUSH_SAMPLES = 1.2; // first segment flushes early for fast first-word feedback
+    const VAD_FIRST_FLUSH_SAMPLES = 2.4; // first segment flushes early — but not so early it splits the opening sentence
 
     const formatDuration = (ms: number) => {
       const total = Math.floor(ms / 1000);
