@@ -58,7 +58,7 @@
 - **日期栏排序按钮**：每个日期标题卡片的右上角都有排序切换按钮，按当日时间正序 / 倒序展示
 - **右键管理 memo**：右键（或移动端长按）任意气泡，可复制原文、删除当前 memo；若该条 memo 附带录音，还会出现「删除 memo 和录音文件」与「仅删除录音文件」两个选项，录音走 Obsidian 回收站可恢复。可在设置中关闭「删除前确认」跳过对话框
 
-<img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/ad0b758f-d304-4b16-ae81-c2b3afd7aa5e" />
+<img width="1783" height="1166" alt="image" src="https://github.com/user-attachments/assets/78684cb8-c30b-449e-b348-914636021e23" />
 
 #### 📊 统计 Tab
 
