@@ -722,10 +722,17 @@ export class JournalCaptureView extends ItemView {
     // Hidden file input for image upload
     const recBar = this.inputCardEl.createDiv({ cls: 'jp-recording-bar' });
     recBar.style.display = 'none';
-    const recCanvas = recBar.createEl('canvas', { cls: 'jp-recording-waveform' });
-    const recMeta = recBar.createDiv({ cls: 'jp-recording-meta' });
+    const recWaveRow = recBar.createDiv({ cls: 'jp-recording-wave-row' });
+    const recCanvas = recWaveRow.createEl('canvas', { cls: 'jp-recording-waveform' });
+    const recMeta = recWaveRow.createDiv({ cls: 'jp-recording-meta' });
     const recTime = recMeta.createEl('span', { cls: 'jp-recording-time', text: '00:00' });
     const recStatus = recMeta.createEl('span', { cls: 'jp-recording-status', text: '录音中…' });
+    // Centered stop button shown beneath the waveform while recording.
+    const recStopBtn = recBar.createEl('button', {
+      cls: 'jp-recording-stop',
+      attr: { 'aria-label': '停止' },
+    });
+    setIcon(recStopBtn, 'square');
 
     let mediaRecorder: MediaRecorder | null = null;
     let audioChunks: Blob[] = [];
@@ -921,21 +928,6 @@ export class JournalCaptureView extends ItemView {
       this.autoResizeTextarea();
     };
 
-    // Replace the streamed draft (the region inserted since recording began)
-    // with the final transcript + audio embed.
-    const replaceStreamedText = (audioEmbed: string, text: string) => {
-      const ta = this.textareaEl;
-      const before = ta.value.substring(0, realtimeRegionStart);
-      const tail = ta.value.substring(realtimeBaseCursor);
-      const piece = text.length > 0 ? `${text} ${audioEmbed} ` : `${audioEmbed} `;
-      ta.value = before + piece + tail;
-      const newPos = before.length + piece.length;
-      ta.setSelectionRange(newPos, newPos);
-      this.refreshSubmitState();
-      this.autoResizeTextarea();
-      realtimeBaseCursor = newPos;
-    };
-
     // Encode captured Float32 PCM frames into a standalone 16-bit PCM WAV
     // blob — independently decodable, so every chunk transcribes on its own.
     const encodeWav = (frames: Float32Array[], sampleRate: number): Blob => {
@@ -1072,51 +1064,62 @@ export class JournalCaptureView extends ItemView {
         };
 
         mediaRecorder.onstop = async () => {
-          // Flush the tail segment, then wait for in-flight segment sends to
-          // settle — but with a hard timeout so a hung network request can
-          // never trap the UI in "recording" state. The analyser/AudioContext
-          // teardown happens AFTER this wait (or the timeout), so the waveform
-          // keeps drawing only until then.
+          // Flush the tail segment and snapshot the in-flight chain BEFORE
+          // any await. We must insert the audio embed *after* every queued
+          // segment's `appendStreamedText` has run, otherwise a slow final
+          // segment would land AFTER the embed (re-ordering the text).
+          //
+          // We capture `pendingFlush` here and await it (no timeout race) so
+          // the chain fully drains. The waveform is torn down immediately so
+          // the UI doesn't appear stuck; only the final text append waits on
+          // the network. A genuinely-hung segment is rare; if it happens the
+          // user can reload the plugin and the text already on screen is kept.
           if (realtimeActive && audioCtx) flushCurrentSegment();
-          await Promise.race([
-            pendingFlush,
-            new Promise<void>(resolve => window.setTimeout(resolve, 4000)),
-          ]);
+          const flushChain = pendingFlush;
           teardownAnalyser();
           const audioBlob = new Blob(audioChunks, { type: outType });
           const wantSTT = sttConfigured();
-          const rebuilding = wantSTT && (!realtimeActive || this.plugin.settings.sttFinalRebuild);
-          if (rebuilding) recStatus.setText('转写中…');
-          else recBar.style.display = 'none';
+          // Keep the recBar visible with a breathing effect while we finish
+          // the final transcription. The stop button is hidden (recording
+          // already stopped) and the icon group + NOTE button stay hidden
+          // until the final text has landed (so the user sees the result
+          // appear together with the action buttons coming back).
+          recStatus.setText('转写中…');
+          recBar.addClass('is-transcribing');
+          recBar.style.display = '';
           try {
             const audioEmbed = await this.saveAudioToVault(audioBlob);
             let text = '';
-            // In realtime mode, only re-transcribe the full recording when the
-            // user opted into the final rebuild; otherwise keep the streamed
-            // draft as-is (faster, no extra API call) and just append audio.
-            const doFinalRebuild = wantSTT && realtimeActive
-              ? this.plugin.settings.sttFinalRebuild
-              : wantSTT;
-            if (doFinalRebuild) {
+            // In realtime mode, keep the streamed draft as-is (faster, no
+            // extra API call) and just append audio. In non-realtime mode,
+            // transcribe the full recording now.
+            if (!realtimeActive && wantSTT) {
               try {
                 text = (await this.transcribeAudio(audioBlob)).trim();
               } catch (err) {
                 new Notice(`转写失败：${err instanceof Error ? err.message : String(err)}`);
               }
             }
-            recBar.style.display = 'none';
-            if (realtimeActive && !this.plugin.settings.sttFinalRebuild) {
+            // Drain any still-in-flight live segments before we touch the
+            // text again. This guarantees the embed lands at the end of the
+            // streamed text, never in the middle.
+            await flushChain;
+            if (realtimeActive) {
               // Keep the live draft; append the audio embed after it.
               appendStreamedText(` ${audioEmbed}`);
-            } else if (realtimeActive) {
-              // Swap the streamed draft for the final transcript.
-              replaceStreamedText(audioEmbed, text);
             } else {
               insertAtCursor(text.length > 0 ? `${text} ${audioEmbed}` : audioEmbed);
             }
           } catch (err) {
-            recBar.style.display = 'none';
             new Notice(`录音保存失败：${err instanceof Error ? err.message : String(err)}`);
+          } finally {
+            // RecBar fades out and the action bar (icon group + NOTE button)
+            // comes back together — the user sees the result and the controls
+            // to act on it arrive in the same beat.
+            recBar.removeClass('is-transcribing');
+            recBar.removeClass('jp-bar-entering');
+            recBar.style.display = 'none';
+            actions.removeClass('is-recording');
           }
         };
 
@@ -1157,8 +1160,11 @@ export class JournalCaptureView extends ItemView {
 
           // Reveal the bar FIRST, then measure — reading clientWidth while
           // display:none returns 0 and the canvas ends up 1px wide (invisible).
+          // The `jp-bar-entering` class triggers a one-shot fade+slide
+          // animation; we remove it after hide so the next show replays it.
           recStatus.setText(realtimeActive ? '实时转写中…' : '录音中…');
           recBar.style.display = '';
+          recBar.addClass('jp-bar-entering');
           const dpr = window.devicePixelRatio || 1;
           recCanvas.width = Math.max(1, recCanvas.clientWidth) * dpr;
           recCanvas.height = Math.max(1, recCanvas.clientHeight) * dpr;
@@ -1168,8 +1174,15 @@ export class JournalCaptureView extends ItemView {
           // Analyser/realtime are optional — recording still works without them.
         }
 
-        micBtn.addClass('is-recording');
+        // Switch the mic icon to a stop square first so the user gets
+        // immediate click feedback, then add the is-recording class so the
+        // colour change is animated (not a flash). Trigger the focus-
+        // recording mode (icon group + submit collapse) at the same time
+        // as the recBar reveal so the two animations overlap and feel like
+        // a single transition rather than a sequence.
         setIcon(micBtn, 'square');
+        micBtn.addClass('is-recording');
+        actions.addClass('is-recording');
 
         recordingTimeout = window.setTimeout(() => {
           void stopRecording();
@@ -1205,15 +1218,30 @@ export class JournalCaptureView extends ItemView {
     });
     setIcon(micBtn, 'mic');
 
+    // Shared stop path: stop recording + restore the idle UI (icon group,
+    // submit button) with a smooth transition. The actual text insert /
+    // transcription runs async in onstop, independent of this UI restore.
+    //
+    // We deliberately keep `actions.is-recording` set here so the icon group
+    // and NOTE button stay hidden until the final text has been written. The
+    // recBar is switched to its "transcribing" state by onstop, and only
+    // removed from .is-recording once the last segment has landed.
+    const doStop = async () => {
+      await stopRecording();
+      micBtn.removeClass('is-recording');
+      setIcon(micBtn, 'mic');
+    };
+
     micBtn.addEventListener('click', async () => {
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
         await startRecording();
       } else {
-        await stopRecording();
-        micBtn.removeClass('is-recording');
-        setIcon(micBtn, 'mic');
+        await doStop();
       }
     });
+
+    // Stop button centered under the waveform.
+    recStopBtn.addEventListener('click', () => void doStop());
 
     // Clear button — wipes the textarea and trashes any embedded audio files.
     const clearBtn = buttonRow.createEl('button', {

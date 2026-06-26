@@ -820,18 +820,6 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
-      .setName('停止后整段重转')
-      .setDesc('仅在实时转写开启时生效。开启后，停止录音时用完整音频再转写一次替换实时草稿，更准确但多一次调用、需等待。默认关闭——保留实时草稿即可。')
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.sttFinalRebuild)
-          .onChange(async value => {
-            this.plugin.settings.sttFinalRebuild = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
     // ── Shortcut ──────────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '其他' });
 

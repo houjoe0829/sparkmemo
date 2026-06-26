@@ -214,6 +214,9 @@
   color: var(--text-error);
   animation: jp-recording-pulse 1s ease-in-out infinite;
 }
+.jp-capture-mic-btn {
+  transition: color 0.25s ease, background-color 0.25s ease;
+}
 @keyframes jp-recording-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -222,12 +225,27 @@
 .jp-recording-bar {
   --jp-recording-stroke: var(--jp-tl-dot, #7c3aed);
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 8px;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 10px;
+  border-radius: 12px;
   background: var(--background-secondary);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  transform-origin: top center;
+}
+/* One-shot fade + slide-down when the bar enters the DOM. Class is added
+   after `display:''` is set and removed on hide so it can replay next time. */
+.jp-recording-bar.jp-bar-entering {
+  animation: jp-recording-bar-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes jp-recording-bar-in {
+  0%   { opacity: 0; transform: translateY(-6px) scaleY(0.92); }
+  100% { opacity: 1; transform: translateY(0)    scaleY(1);    }
+}
+/* Top row: waveform + time/status */
+.jp-recording-bar > :nth-child(1) {
+  /* waveform + meta sit in a flex row */
 }
 .jp-recording-waveform {
   flex: 1;
@@ -252,6 +270,74 @@
 .jp-recording-status {
   font-size: 11px;
   color: var(--text-muted);
+}
+/* Waveform + meta live in a flex row; stop button sits centered below. */
+.jp-recording-bar .jp-recording-waveform,
+.jp-recording-bar .jp-recording-meta {
+  /* placed via the row wrapper created at runtime */
+}
+.jp-recording-wave-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.jp-recording-stop {
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-error);
+  color: var(--text-on-accent, #fff);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--text-error) 40%, transparent);
+  animation: jp-recording-pulse 1.2s ease-in-out infinite;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+}
+.jp-recording-stop:hover {
+  transform: scale(1.06);
+}
+.jp-recording-stop:active {
+  transform: scale(0.94);
+}
+.jp-recording-stop svg {
+  width: 14px !important;
+  height: 14px !important;
+  display: block;
+  fill: currentColor;
+  stroke: none;
+}
+
+/* Transcribing state: shown after the user clicks stop but before the final
+   text lands. RecBar stays visible with a slow breathing effect on the
+   waveform row + status text. The stop button is hidden (no longer needed),
+   the icon group + NOTE button stay hidden too (we're still working). */
+.jp-recording-bar.is-transcribing {
+  background: color-mix(in srgb, var(--background-secondary) 70%, var(--background-primary) 30%);
+}
+.jp-recording-bar.is-transcribing .jp-recording-stop {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+.jp-recording-bar.is-transcribing .jp-recording-wave-row {
+  animation: jp-transcribing-breathe 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+.jp-recording-bar.is-transcribing .jp-recording-status {
+  color: var(--text-accent);
+}
+@keyframes jp-transcribing-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 .jp-capture-actions {
   display: flex;
@@ -1203,4 +1289,35 @@
 .jp-clear-confirm-list li {
   word-break: break-all;
   margin: 2px 0;
+}
+
+/* ── Focus-recording mode ───────────────────────────────────────────────── */
+/* When recording, the icon group + submit button fade/collapse out so the
+   waveform and centered stop button own the space. Animated via the
+   is-recording class on .jp-capture-actions. */
+.jp-capture-button-row,
+.jp-capture-submit {
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease,
+    max-width 0.3s ease,
+    margin 0.3s ease,
+    padding 0.3s ease;
+  overflow: hidden;
+}
+.jp-capture-actions.is-recording .jp-capture-button-row,
+.jp-capture-actions.is-recording .jp-capture-submit {
+  opacity: 0;
+  transform: translateY(4px);
+  max-width: 0;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* When recording, the actions row is empty — collapse its height too. */
+.jp-capture-actions.is-recording {
+  margin-top: 0;
+  min-height: 0;
+  transition: margin-top 0.3s ease, min-height 0.3s ease;
 }
