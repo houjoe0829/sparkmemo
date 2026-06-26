@@ -13,7 +13,7 @@
     "journal",
     "timestamp"
   ],
-  "author": "",
+  "author": "hankzhao",
   "license": "MIT",
   "devDependencies": {
     "@codemirror/state": "^6.4.1",
