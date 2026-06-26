@@ -1,5 +1,7 @@
 import {
   App,
+  ExtraButtonComponent,
+  FuzzySuggestModal,
   MarkdownPostProcessorContext,
   MarkdownView,
   Notice,
@@ -9,6 +11,8 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
+  TFolder,
+  TextComponent,
   WorkspaceLeaf,
   moment,
 } from 'obsidian';
@@ -175,6 +179,7 @@ export default class JournalPartnerPlugin extends Plugin {
    *
    * The protocol handler is registered specifically for `journal-partner`,
    * so every invocation is implicitly the quick-capture action. We accept:
+   *   - `cmd`  optional command: "record" → open sidebar and start recording
    *   - `text`  (optional if `audio` is given) — entry body
    *   - `time`  optional `HH:MM` override
    *   - `audio` optional vault-relative attachment path; rendered as
@@ -185,6 +190,18 @@ export default class JournalPartnerPlugin extends Plugin {
    * as a routing key.
    */
   private async handleProtocol(params: ObsidianProtocolData): Promise<void> {
+    // ── cmd=record: open sidebar and immediately start recording ──────────
+    if (params.cmd === 'record') {
+      await this.activateCaptureView();
+      // Give Obsidian a tick to mount the leaf before we touch the view
+      window.setTimeout(() => {
+        const leaves = this.app.workspace.getLeavesOfType(CAPTURE_VIEW_TYPE);
+        const view = leaves[0]?.view as JournalCaptureView | undefined;
+        if (view) void view.beginRecording();
+      }, 150);
+      return;
+    }
+
     const text = params.text ?? '';
     const audio = params.audio ?? '';
 
@@ -508,14 +525,32 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /** Collect all vault folder paths, sorted and deduplicated. */
+  private getFolderPaths(): string[] {
+    const folders = this.app.vault
+      .getAllFolders()
+      .filter((file): file is TFolder => file instanceof TFolder);
+    const folderPaths = folders.map((folder) => (folder.path === '' ? '/' : folder.path));
+    if (!folderPaths.includes('/')) {
+      folderPaths.unshift('/');
+    }
+    return Array.from(new Set(folderPaths)).sort();
+  }
+
+  /** Creates a FuzzySuggestModal pre-populated with vault folder paths. */
+  private createFolderSuggestModal(onSelect: (value: string) => void): FolderSuggestModal {
+    const folders = this.getFolderPaths();
+    return new FolderSuggestModal(this.app, folders, onSelect);
+  }
+
   display() {
     const { containerEl } = this;
     containerEl.empty();
 
     containerEl.createEl('h2', { text: 'Journal Partner' });
 
-    // ── Scope ──────────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '📍 作用范围' });
+    // ── Timestamp Settings ────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '时间戳设置' });
 
     new Setting(containerEl)
       .setName('日记标题')
@@ -543,9 +578,6 @@ class JournalPartnerSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
-
-    // ── Timestamp ─────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '⏱️ 时间戳' });
 
     new Setting(containerEl)
       .setName('文字颜色')
@@ -626,11 +658,189 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     });
     previewEl.createEl('span', { text: '这里是日记内容…' });
 
-    // ── Shortcut ──────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '🔗 快捷指令' });
+    // ── Speech-to-text ────────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '语音转文字' });
+
+    // Usage guide — explains how STT works here and lists mainstream / free models.
+    const guide = containerEl.createEl('div', { cls: 'jp-stt-guide' });
+    guide.createEl('p', {
+      text: '录音转文字使用 OpenAI 兼容的 /audio/transcriptions 接口。填好转写地址与 API Key 即可开启；留空则关闭转写，麦克风仅作纯录音。也可不配置，直接用系统听写（macOS 双击 Fn / iOS 键盘麦克风）往输入框输入。',
+    });
+    guide.createEl('p', {
+      text: '实时转写模式：边说边出字，在停顿处切句并带上下文拼接。停止后默认保留实时草稿（快）；可在下方开启「停止后整段重转」用完整音频再转一次替换草稿（更准但需等待）。',
+    });
+    const table = guide.createEl('table', { cls: 'jp-stt-guide-table' });
+    const thead = table.createEl('thead');
+    const headRow = thead.createEl('tr');
+    for (const h of ['服务商', '转写地址', '模型', '费用', '说明']) {
+      headRow.createEl('th', { text: h });
+    }
+    const tbody = table.createEl('tbody');
+    // [服务商, 官网, 转写地址, 模型, 费用, 说明]
+    const rows: [string, string, string, string, string, string][] = [
+      ['SiliconFlow（国内推荐）', 'https://siliconflow.cn', 'https://api.siliconflow.cn/v1/audio/transcriptions', 'FunAudioLLM/SenseVoiceSmall', '免费', '国内可直连，中文质量好，注册实名后生成 Key'],
+      ['Groq', 'https://console.groq.com', 'https://api.groq.com/openai/v1/audio/transcriptions', 'whisper-large-v3', '有免费额度', '速度极快，需网络可达'],
+      ['OpenAI', 'https://platform.openai.com', 'https://api.openai.com/v1/audio/transcriptions', 'whisper-1', '付费', '官方接口，需外网'],
+      ['阿里百炼', 'https://bailian.console.aliyun.com', '需用 DashScope 兼容端点', 'paraformer-v2', '有免费额度', '中文优秀，注意接口格式'],
+      ['自建 faster-whisper', 'https://github.com/ahmetoner/whisper-asr-webservice', 'http://你的服务器:9000/v1/audio/transcriptions', 'whisper-1 / small / medium', '免费', 'Docker 部署 OpenAI 兼容服务，隐私无忧'],
+    ];
+    for (const r of rows) {
+      const [name, nameUrl, endpoint, model, cost, note] = r;
+      const tr = tbody.createEl('tr');
+      const nameTd = tr.createEl('td');
+      const nameA = nameTd.createEl('a', { text: name });
+      nameA.href = nameUrl;
+      nameA.target = '_blank';
+      nameA.rel = 'noopener';
+      const epTd = tr.createEl('td');
+      const epA = epTd.createEl('a', { text: endpoint });
+      epA.href = endpoint.startsWith('http') ? endpoint : nameUrl;
+      epA.target = '_blank';
+      epA.rel = 'noopener';
+      tr.createEl('td', { text: model });
+      tr.createEl('td', { text: cost });
+      tr.createEl('td', { text: note });
+    }
+    const hintP = guide.createEl('p', { cls: 'jp-stt-guide-hint' });
+    hintP.appendText('提示：以上服务的额度与模型名以官网公示为准，可能随时调整。SenseVoiceSmall 当前在 SiliconFlow 标注为免费 → ');
+    const hintA = hintP.createEl('a', { text: 'SiliconFlow 定价' });
+    hintA.href = 'https://siliconflow.cn/pricing';
+    hintA.target = '_blank';
+    hintA.rel = 'noopener';
+    hintP.appendText('。');
+
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let recordingFolderText: any = null;
+    let apiKeyInputEl: HTMLInputElement | null = null;
+    new Setting(containerEl)
+      .setName('录音存放位置')
+      .setDesc('Vault 相对路径，用于存放录音文件。留空则使用 Obsidian 附件文件夹。')
+      .addText(text => {
+        recordingFolderText = text;
+        text
+          .setPlaceholder('Attachments')
+          .setValue(this.plugin.settings.recordingFolder)
+          .onChange(async value => {
+            this.plugin.settings.recordingFolder = value.trim();
+            await this.plugin.saveSettings();
+          });
+      })
+      .addButton(btn => {
+        btn
+          .setButtonText('📁')
+          .setTooltip('选择目录')
+          .onClick(() => {
+            const modal = this.createFolderSuggestModal((path: string) => {
+              this.plugin.settings.recordingFolder = path;
+              void this.plugin.saveSettings();
+              recordingFolderText.setValue(path);
+            });
+            modal.open();
+          });
+      });
 
     new Setting(containerEl)
-      .setName('一键导入 Shortcut')
+      .setName('转写地址')
+      .setDesc('OpenAI 兼容的 /audio/transcriptions 地址。留空则关闭录音转文字。')
+      .addText(text =>
+        text
+          .setPlaceholder('https://api.openai.com/v1/audio/transcriptions')
+          .setValue(this.plugin.settings.sttEndpoint)
+          .onChange(async value => {
+            this.plugin.settings.sttEndpoint = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('API Key')
+      .setDesc('以 Bearer 形式发送的密钥。可填 OpenAI / Groq / 自建服务的密钥。')
+      .addText(text => {
+        text.inputEl.type = 'password';
+        apiKeyInputEl = text.inputEl;
+        text
+          .setPlaceholder('sk-…')
+          .setValue(this.plugin.settings.sttApiKey)
+          .onChange(async value => {
+            this.plugin.settings.sttApiKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+        return text;
+      })
+      .addExtraButton((button: ExtraButtonComponent) => {
+        let isPassword = true;
+        button.setIcon('eye')
+          .setTooltip('显示/隐藏 API Key')
+          .onClick(() => {
+            isPassword = !isPassword;
+            if (apiKeyInputEl) {
+              apiKeyInputEl.type = isPassword ? 'password' : 'text';
+            }
+            button.setIcon(isPassword ? 'eye' : 'eye-off');
+          });
+        return button;
+      });
+
+    new Setting(containerEl)
+      .setName('模型')
+      .setDesc('multipart 中的 model 字段，如 whisper-1、whisper-large-v3。')
+      .addText(text =>
+        text
+          .setPlaceholder('whisper-1')
+          .setValue(this.plugin.settings.sttModel)
+          .onChange(async value => {
+            this.plugin.settings.sttModel = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('语言')
+      .setDesc('ISO-639-1 语言提示，如 zh、en。留空让模型自动识别。')
+      .addText(text =>
+        text
+          .setPlaceholder('zh')
+          .setValue(this.plugin.settings.sttLanguage)
+          .onChange(async value => {
+            this.plugin.settings.sttLanguage = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('实时转写')
+      .setDesc('录音时边说边出字，在停顿处切句并带上下文拼接。关闭则录完整段后一次性转写。')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.sttRealtime)
+          .onChange(async value => {
+            this.plugin.settings.sttRealtime = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    // ── Shortcut ──────────────────────────────────────────────────────────
+    containerEl.createEl('h3', { text: '其他' });
+
+    new Setting(containerEl)
+      .setName('提交快捷键')
+      .setDesc('在输入框中提交日记的快捷键组合')
+      .addDropdown(dropdown =>
+        dropdown
+          .addOption('shift+enter', 'Shift + Enter')
+          .addOption('ctrl+enter', 'Ctrl + Enter')
+          .addOption('alt+enter', 'Alt + Enter')
+          .addOption('ctrl+shift+enter', 'Ctrl + Shift + Enter')
+          .setValue(this.plugin.settings.submitShortcut)
+          .onChange(async (value: string) => {
+            this.plugin.settings.submitShortcut = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Apple Shortcut')
       .setDesc('配合 iPhone Action Button 使用，快速录音并写入日记')
       .addButton(btn =>
         btn
@@ -643,5 +853,57 @@ class JournalPartnerSettingTab extends PluginSettingTab {
             );
           }),
       );
+
+    // URL scheme reference
+    const urlSection = containerEl.createDiv({ cls: 'jp-settings-url-section' });
+    urlSection.style.cssText =
+      'margin-top: 16px; padding: 12px 16px; border-radius: 8px;' +
+      'background: var(--background-secondary); font-size: 0.85em;';
+    urlSection.createEl('div', {
+      text: 'URL Scheme',
+      cls: 'jp-settings-url-title',
+    }).style.cssText = 'font-weight: 600; margin-bottom: 8px; color: var(--text-normal);';
+
+    const urlDesc = urlSection.createEl('div', {
+      text: '可在浏览器地址栏、快捷指令、自动化 App 等任意位置调用，自动打开侧边栏并开始录音。',
+    });
+    urlDesc.style.cssText = 'margin-bottom: 10px; color: var(--text-muted);';
+
+    const url = 'obsidian://journal-partner?cmd=record';
+    const row = urlSection.createDiv();
+    row.style.cssText = 'color: var(--text-muted);';
+    const code = row.createEl('code', { text: url });
+    code.style.cssText =
+      'font-size: 0.9em; cursor: pointer; padding: 1px 4px;' +
+      'border-radius: 3px; background: var(--background-primary-alt);';
+    code.setAttr('title', '点击复制');
+    code.addEventListener('click', () => {
+      void navigator.clipboard.writeText(url).then(() => new Notice('已复制 URL'));
+    });
+  }
+}
+
+/** Fuzzy-suggest modal for selecting a vault folder path. */
+class FolderSuggestModal extends FuzzySuggestModal<string> {
+  private folders: string[];
+  private onSelectFolder: (value: string) => void;
+
+  constructor(app: App, folders: string[], onSelect: (value: string) => void) {
+    super(app);
+    this.folders = folders;
+    this.onSelectFolder = onSelect;
+    this.setPlaceholder('选择或搜索文件夹路径');
+  }
+
+  getItems(): string[] {
+    return this.folders;
+  }
+
+  getItemText(item: string): string {
+    return item;
+  }
+
+  onChooseItem(item: string): void {
+    this.onSelectFolder(item);
   }
 }

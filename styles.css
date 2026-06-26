@@ -154,7 +154,7 @@
   font-family: inherit;
   font-size: 14px;
   line-height: 1.55;
-  padding: 0 0 0 28px;
+  padding: 0;
   box-sizing: border-box;
 }
 .jp-capture-input::placeholder {
@@ -165,18 +165,25 @@
 }
 .jp-capture-button-row {
   display: inline-flex;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
+  border-radius: 999px;
+  padding: 0 4px;
 }
 .jp-capture-image-btn,
-.jp-capture-mic-btn {
+.jp-capture-mic-btn,
+.jp-capture-clear-btn {
   background: transparent !important;
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
-  color: var(--text-muted) !important;
+  color: color-mix(in srgb, var(--jp-tl-dot) 70%, var(--text-muted)) !important;
   cursor: pointer;
-  padding: 4px 6px !important;
-  border-radius: 4px;
+  padding: 3px 6px !important;
+  border-radius: 999px;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -187,12 +194,14 @@
   appearance: none !important;
 }
 .jp-capture-image-btn:hover,
-.jp-capture-mic-btn:hover {
-  color: var(--text-normal) !important;
-  background-color: var(--background-secondary) !important;
+.jp-capture-mic-btn:hover,
+.jp-capture-clear-btn:hover {
+  color: var(--jp-tl-dot) !important;
+  background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
 .jp-capture-image-btn svg,
-.jp-capture-mic-btn svg {
+.jp-capture-mic-btn svg,
+.jp-capture-clear-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -205,9 +214,130 @@
   color: var(--text-error);
   animation: jp-recording-pulse 1s ease-in-out infinite;
 }
+.jp-capture-mic-btn {
+  transition: color 0.25s ease, background-color 0.25s ease;
+}
 @keyframes jp-recording-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+/* Live recording bar: waveform + duration + status */
+.jp-recording-bar {
+  --jp-recording-stroke: var(--jp-tl-dot, #7c3aed);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--background-secondary);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  transform-origin: top center;
+}
+/* One-shot fade + slide-down when the bar enters the DOM. Class is added
+   after `display:''` is set and removed on hide so it can replay next time. */
+.jp-recording-bar.jp-bar-entering {
+  animation: jp-recording-bar-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes jp-recording-bar-in {
+  0%   { opacity: 0; transform: translateY(-6px) scaleY(0.92); }
+  100% { opacity: 1; transform: translateY(0)    scaleY(1);    }
+}
+/* Top row: waveform + time/status */
+.jp-recording-bar > :nth-child(1) {
+  /* waveform + meta sit in a flex row */
+}
+.jp-recording-waveform {
+  flex: 1;
+  height: 34px;
+  display: block;
+  min-width: 0;
+}
+.jp-recording-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  line-height: 1.1;
+}
+.jp-recording-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.jp-recording-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+/* Waveform + meta live in a flex row; stop button sits centered below. */
+.jp-recording-bar .jp-recording-waveform,
+.jp-recording-bar .jp-recording-meta {
+  /* placed via the row wrapper created at runtime */
+}
+.jp-recording-wave-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.jp-recording-stop {
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-error);
+  color: var(--text-on-accent, #fff);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--text-error) 40%, transparent);
+  animation: jp-recording-pulse 1.2s ease-in-out infinite;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+}
+.jp-recording-stop:hover {
+  transform: scale(1.06);
+}
+.jp-recording-stop:active {
+  transform: scale(0.94);
+}
+.jp-recording-stop svg {
+  width: 14px !important;
+  height: 14px !important;
+  display: block;
+  fill: currentColor;
+  stroke: none;
+}
+
+/* Transcribing state: shown after the user clicks stop but before the final
+   text lands. RecBar stays visible with a slow breathing effect on the
+   waveform row + status text. The stop button is hidden (no longer needed),
+   the icon group + NOTE button stay hidden too (we're still working). */
+.jp-recording-bar.is-transcribing {
+  background: color-mix(in srgb, var(--background-secondary) 70%, var(--background-primary) 30%);
+}
+.jp-recording-bar.is-transcribing .jp-recording-stop {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+.jp-recording-bar.is-transcribing .jp-recording-wave-row {
+  animation: jp-transcribing-breathe 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+.jp-recording-bar.is-transcribing .jp-recording-status {
+  color: var(--text-accent);
+}
+@keyframes jp-transcribing-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 .jp-capture-actions {
   display: flex;
@@ -410,6 +540,31 @@
   width: 14px;
   height: 14px;
 }
+/* Locate / open-note button in date header */
+.jp-timeline-open-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.jp-timeline-open-btn:hover {
+  color: var(--jp-tl-dot);
+  background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
+}
+.jp-timeline-open-btn svg {
+  width: 13px;
+  height: 13px;
+}
 .jp-timeline-header-title {
   font-size: 16px;
   font-weight: 700;
@@ -592,21 +747,64 @@
 .jp-tab-bar {
   display: flex;
   justify-content: center;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
   padding: 0 2px;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
+}
+/* Search bar — appears below tab bar when search tab is active */
+.jp-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 10px;
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+.jp-search-bar-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.jp-search-bar-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-search-input {
+  flex: 1;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 13px;
+  padding: 0;
+  min-width: 0;
+}
+.jp-search-input::placeholder {
+  color: var(--text-faint);
+}
+/* Keyword highlight in search results */
+.jp-search-highlight {
+  background: color-mix(in srgb, var(--jp-tl-dot) 22%, transparent);
+  color: var(--jp-tl-dot);
+  border-radius: 3px;
+  padding: 0 1px;
+  font-weight: 600;
 }
 .jp-tab-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 14px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: 999px;
+  border-radius: 50%;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
@@ -614,12 +812,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 .jp-tab-btn-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
+}
+/* Text label is no longer used, hidden if accidentally present */
+.jp-tab-btn-text {
+  display: none;
 }
 .jp-tab-btn:hover {
   color: var(--text-normal);
@@ -641,6 +843,45 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* ── Random review pane ───────────────────────────────────────────────────── */
+
+.jp-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.jp-review-date {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-normal);
+  letter-spacing: 0.02em;
+}
+.jp-review-reroll-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.jp-review-reroll-btn:hover {
+  color: var(--jp-tl-dot);
+  background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
+}
+.jp-review-reroll-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* ── Yearly stats view ────────────────────────────────────────────────────
@@ -964,4 +1205,119 @@
 /* Dark theme: bump level-0 contrast so empty days don't disappear. */
 .theme-dark .jp-stats-cell.level-0 {
   background: color-mix(in srgb, var(--text-faint) 18%, transparent);
+}
+
+/* ── STT settings usage guide ───────────────────────────────────────────── */
+.jp-stt-guide {
+  margin: 6px 0 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.jp-stt-guide p {
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+.jp-stt-guide p:last-child {
+  margin-bottom: 0;
+}
+.jp-stt-guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.jp-stt-guide-table th,
+.jp-stt-guide-table td {
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-all;
+}
+.jp-stt-guide-table th {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-weight: 600;
+}
+.jp-stt-guide-table td:first-child {
+  color: var(--text-normal);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.jp-stt-guide-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+/* Make the STT guide selectable & its links clickable — Obsidian's settings
+   container disables text selection by default, which blocks copying URLs. */
+.jp-stt-guide {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+.jp-stt-guide a {
+  color: var(--text-accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+.jp-stt-guide a:hover {
+  text-decoration: underline;
+}
+.jp-stt-guide-table td a {
+  font-size: 11.5px;
+}
+
+/* ── Clear-input confirm modal ──────────────────────────────────────────── */
+.jp-clear-confirm .jp-clear-confirm-question {
+  margin: 0 0 10px;
+  color: var(--text-normal);
+  line-height: 1.6;
+}
+.jp-clear-confirm-list {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  max-height: 160px;
+  overflow: auto;
+}
+.jp-clear-confirm-list li {
+  word-break: break-all;
+  margin: 2px 0;
+}
+
+/* ── Focus-recording mode ───────────────────────────────────────────────── */
+/* When recording, the icon group + submit button fade/collapse out so the
+   waveform and centered stop button own the space. Animated via the
+   is-recording class on .jp-capture-actions. */
+.jp-capture-button-row,
+.jp-capture-submit {
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease,
+    max-width 0.3s ease,
+    margin 0.3s ease,
+    padding 0.3s ease;
+  overflow: hidden;
+}
+.jp-capture-actions.is-recording .jp-capture-button-row,
+.jp-capture-actions.is-recording .jp-capture-submit {
+  opacity: 0;
+  transform: translateY(4px);
+  max-width: 0;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* When recording, the actions row is empty — collapse its height too. */
+.jp-capture-actions.is-recording {
+  margin-top: 0;
+  min-height: 0;
+  transition: margin-top 0.3s ease, min-height 0.3s ease;
 }
