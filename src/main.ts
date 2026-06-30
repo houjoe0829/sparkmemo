@@ -537,6 +537,26 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     return Array.from(new Set(folderPaths)).sort();
   }
 
+  /**
+   * Best-effort synchronous read of Obsidian's configured attachment folder,
+   * for the settings placeholder so users see the real fallback (not a
+   * hard-coded "Attachments") when they leave the field blank.
+   *
+   * `app.getConfig('attachmentFolderPath')` returns undefined on some Obsidian
+   * versions, so we read the in-memory vault config object directly — it's a
+   * plain property access, cheap and safe to call during settings render.
+   * Special values: `.` = same folder as the note, `/` or empty = vault root.
+   */
+  private attachmentFolderLabel(): string {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const folder = (this.app as any).vault?.config?.attachmentFolderPath as
+      | string
+      | undefined;
+    if (!folder || folder === '/' || folder === '') return 'Vault 根目录';
+    if (folder === '.') return '与日记同目录';
+    return folder;
+  }
+
   /** Creates a FuzzySuggestModal pre-populated with vault folder paths. */
   private createFolderSuggestModal(onSelect: (value: string) => void): FolderSuggestModal {
     const folders = this.getFolderPaths();
@@ -719,7 +739,7 @@ class JournalPartnerSettingTab extends PluginSettingTab {
       .addText(text => {
         recordingFolderText = text;
         text
-          .setPlaceholder('Attachments')
+          .setPlaceholder(this.attachmentFolderLabel())
           .setValue(this.plugin.settings.recordingFolder)
           .onChange(async value => {
             this.plugin.settings.recordingFolder = value.trim();
@@ -822,6 +842,35 @@ class JournalPartnerSettingTab extends PluginSettingTab {
 
     // ── Shortcut ──────────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '其他' });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let imageFolderText: any = null;
+    new Setting(containerEl)
+      .setName('图片存放位置')
+      .setDesc('Vault 相对路径，用于存放粘贴/上传的图片。留空则使用 Obsidian 附件文件夹。')
+      .addText(text => {
+        imageFolderText = text;
+        text
+          .setPlaceholder(this.attachmentFolderLabel())
+          .setValue(this.plugin.settings.imageFolder)
+          .onChange(async value => {
+            this.plugin.settings.imageFolder = value.trim();
+            await this.plugin.saveSettings();
+          });
+      })
+      .addButton(btn => {
+        btn
+          .setButtonText('📁')
+          .setTooltip('选择目录')
+          .onClick(() => {
+            const modal = this.createFolderSuggestModal((path: string) => {
+              this.plugin.settings.imageFolder = path;
+              void this.plugin.saveSettings();
+              imageFolderText.setValue(path);
+            });
+            modal.open();
+          });
+      });
 
     new Setting(containerEl)
       .setName('提交快捷键')

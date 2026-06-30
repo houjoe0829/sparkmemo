@@ -1266,6 +1266,43 @@ export class JournalCaptureView extends ItemView {
     this.refreshSubmitState();
   }
 
+  /**
+   * Resolve the full vault path to save an attachment at.
+   *
+   * - If the user configured a folder in plugin settings, that wins. We still
+   *   route it through `getAvailablePathForAttachment` so the path is joined
+   *   and de-duped consistently, then force the configured folder back in.
+   * - Otherwise defer entirely to Obsidian's attachment resolution, which
+   *   reads the real "Files & links → Default location for new attachments"
+   *   setting (`attachmentFolderPath`, NOT the new-file setting) and honours
+   *   every mode including the `.` (same folder as note) and `/` (vault root)
+   *   special values. It also creates the parent dir and de-dupes filenames.
+   *
+   * Note: `FileManager.getNewFileParent` reads the *new-note* location
+   * (`newFileLocation` / `newFileFolderPath`), which is a different setting
+   * from the attachment folder — using it here was a bug that landed files in
+   * the new-note folder instead of the attachment folder.
+   */
+  private async resolveAttachmentPath(configuredFolder: string, baseName: string): Promise<string> {
+    const todayNote = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+    const sourcePath = todayNote?.path ?? '';
+    const fullPath = await this.app.fileManager.getAvailablePathForAttachment(baseName, sourcePath);
+    const configured = configuredFolder.trim();
+    if (configured.length === 0) return fullPath;
+    // Override the folder with the user-configured one, keep Obsidian's
+    // de-duped filename (it may have appended " 1", " 2", … on collisions).
+    const slash = fullPath.lastIndexOf('/');
+    const dedupedName = slash === -1 ? fullPath : fullPath.slice(slash + 1);
+    const override = configured === '/' ? dedupedName : `${configured}/${dedupedName}`;
+    // The configured folder may not exist yet (getAvailablePathForAttachment
+    // only guarantees the *attachment*-setting folder). Ensure it does so the
+    // createBinary below doesn't throw "folder does not exist".
+    if (configured !== '/' && !this.app.vault.getAbstractFileByPath(configured)) {
+      await this.app.vault.createFolder(configured);
+    }
+    return override;
+  }
+
   private async saveImageToVault(blob: Blob): Promise<string> {
     const ext = blob.type === 'image/png' ? 'png'
       : blob.type === 'image/gif' ? 'gif'
@@ -1273,14 +1310,10 @@ export class JournalCaptureView extends ItemView {
       : blob.type === 'image/jpeg' ? 'jpg' : 'png';
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
-    // Read Obsidian's configured attachment folder (defaults to 'Attachments' if not set)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const attachmentFolder = (this.app.vault as any).getConfig?.('attachmentFolderPath') as string || 'Attachments';
-    const fileName = `${attachmentFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
-    const attachmentsDir = this.app.vault.getFolderByPath(attachmentFolder);
-    if (!attachmentsDir) await this.app.vault.createFolder(attachmentFolder);
+    const baseName = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const filePath = await this.resolveAttachmentPath(this.plugin.settings.imageFolder, baseName);
     const buffer = await blob.arrayBuffer();
-    const file = await this.app.vault.createBinary(fileName, buffer);
+    const file = await this.app.vault.createBinary(filePath, buffer);
     return `![](${file.path})`;
   }
 
@@ -1288,14 +1321,10 @@ export class JournalCaptureView extends ItemView {
     const ext = blob.type === 'audio/mp4' ? 'm4a' : 'webm';
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
-    // User-configured folder takes priority; fallback to Obsidian's attachment folder
-    const recordingFolder = this.plugin.settings.recordingFolder ||
-      ((this.app.vault as any).getConfig?.('attachmentFolderPath') as string) || 'Attachments';
-    const fileName = `${recordingFolder}/${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
-    const attachmentsDir = this.app.vault.getFolderByPath(recordingFolder);
-    if (!attachmentsDir) await this.app.vault.createFolder(recordingFolder);
+    const baseName = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
+    const filePath = await this.resolveAttachmentPath(this.plugin.settings.recordingFolder, baseName);
     const buffer = await blob.arrayBuffer();
-    const file = await this.app.vault.createBinary(fileName, buffer);
+    const file = await this.app.vault.createBinary(filePath, buffer);
     return `![[${file.path}]]`;
   }
 
