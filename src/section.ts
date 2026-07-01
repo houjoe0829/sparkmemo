@@ -38,6 +38,8 @@ export interface JournalPartnerSettings {
   sttRealtime: boolean;
   /** Vault-relative folder for saving audio recordings. Empty uses Obsidian's attachment folder. */
   recordingFolder: string;
+  /** Vault-relative folder for saving pasted/uploaded images. Empty uses Obsidian's attachment folder. */
+  imageFolder: string;
   /** Keyboard shortcut to submit entry: 'shift+enter' | 'ctrl+enter' | 'alt+enter' | 'ctrl+shift+enter' */
   submitShortcut: string;
 }
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   sttLanguage: 'zh',
   sttRealtime: true,
   recordingFolder: '',
+  imageFolder: '',
   submitShortcut: 'shift+enter',
 };
 
@@ -203,7 +206,11 @@ export function parseJournalEntries(
   pattern: string,
 ): JournalEntry[] {
   const tsRe = new RegExp(`^[-*+]\\s+(${pattern})\\s+(.*)$`);
-  const lines = sectionText.split('\n');
+  // Normalize line endings (CRLF / lone CR → LF). Otherwise a trailing "\r"
+  // breaks the `(.*)$` anchor below — `.` won't match CR and `$` (no `m`
+  // flag) won't anchor before it, so every entry silently fails to parse on
+  // Windows/iCloud-synced files.
+  const lines = sectionText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const entries: JournalEntry[] = [];
 
   for (let i = 0; i < lines.length; i++) {
