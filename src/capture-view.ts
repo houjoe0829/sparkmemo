@@ -1269,38 +1269,62 @@ export class JournalCaptureView extends ItemView {
   /**
    * Resolve the full vault path to save an attachment at.
    *
-   * - If the user configured a folder in plugin settings, that wins. We still
-   *   route it through `getAvailablePathForAttachment` so the path is joined
-   *   and de-duped consistently, then force the configured folder back in.
-   * - Otherwise defer entirely to Obsidian's attachment resolution, which
-   *   reads the real "Files & links → Default location for new attachments"
-   *   setting (`attachmentFolderPath`, NOT the new-file setting) and honours
-   *   every mode including the `.` (same folder as note) and `/` (vault root)
-   *   special values. It also creates the parent dir and de-dupes filenames.
+   * - No configured folder → defer entirely to Obsidian's
+   *   `getAvailablePathForAttachment`: it reads the real "Files & links →
+   *   Default location for new attachments" setting (`attachmentFolderPath`,
+   *   NOT the new-file setting), honours the `.` (same folder as note) and
+   *   `/` (vault root) special values, creates the parent dir, and de-dupes.
+   * - Configured folder (or `/` for vault root) → de-dupe the base name
+   *   against THAT folder and ensure it exists. `getAvailablePathForAttachment`
+   *   can't be reused here: it de-dupes against the *attachment*-setting
+   *   folder, so when the two differ the suffix would be wrong — it would
+   *   skip a name that collides in our folder, or append one needlessly.
    *
    * Note: `FileManager.getNewFileParent` reads the *new-note* location
-   * (`newFileLocation` / `newFileFolderPath`), which is a different setting
-   * from the attachment folder — using it here was a bug that landed files in
-   * the new-note folder instead of the attachment folder.
+   * (`newFileLocation` / `newFileFolderPath`), a different setting from the
+   * attachment folder — using it here was a bug that landed files in the
+   * new-note folder instead of the attachment folder.
    */
   private async resolveAttachmentPath(configuredFolder: string, baseName: string): Promise<string> {
-    const todayNote = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
-    const sourcePath = todayNote?.path ?? '';
-    const fullPath = await this.app.fileManager.getAvailablePathForAttachment(baseName, sourcePath);
     const configured = configuredFolder.trim();
-    if (configured.length === 0) return fullPath;
-    // Override the folder with the user-configured one, keep Obsidian's
-    // de-duped filename (it may have appended " 1", " 2", … on collisions).
-    const slash = fullPath.lastIndexOf('/');
-    const dedupedName = slash === -1 ? fullPath : fullPath.slice(slash + 1);
-    const override = configured === '/' ? dedupedName : `${configured}/${dedupedName}`;
-    // The configured folder may not exist yet (getAvailablePathForAttachment
-    // only guarantees the *attachment*-setting folder). Ensure it does so the
-    // createBinary below doesn't throw "folder does not exist".
-    if (configured !== '/' && !this.app.vault.getAbstractFileByPath(configured)) {
-      await this.app.vault.createFolder(configured);
+    if (configured.length === 0) {
+      const todayNote = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+      const sourcePath = todayNote?.path ?? '';
+      return this.app.fileManager.getAvailablePathForAttachment(baseName, sourcePath);
     }
-    return override;
+    // User-configured folder (`/` → vault root). De-dupe against it directly.
+    const folder = configured === '/' ? '' : configured;
+    const prefix = folder ? `${folder}/` : '';
+    let candidate = `${prefix}${baseName}`;
+    if (this.app.vault.getAbstractFileByPath(candidate)) {
+      const dot = baseName.lastIndexOf('.');
+      const stem = dot === -1 ? baseName : baseName.slice(0, dot);
+      const ext = dot === -1 ? '' : baseName.slice(dot);
+      let n = 1;
+      candidate = `${prefix}${stem} ${n}${ext}`;
+      while (this.app.vault.getAbstractFileByPath(candidate)) {
+        n++;
+        candidate = `${prefix}${stem} ${n}${ext}`;
+      }
+    }
+    await this.ensureAttachmentFolder(folder);
+    return candidate;
+  }
+
+  /**
+   * Create `folder` and any missing parents. `vault.createFolder` only
+   * creates a single level, so a nested configured path like `Assets/Audio`
+   * would fail if `Assets` doesn't exist yet. No-op for empty (vault root).
+   */
+  private async ensureAttachmentFolder(folder: string): Promise<void> {
+    if (!folder) return;
+    let current = '';
+    for (const part of folder.split('/').filter(Boolean)) {
+      current = current ? `${current}/${part}` : part;
+      if (!this.app.vault.getAbstractFileByPath(current)) {
+        await this.app.vault.createFolder(current);
+      }
+    }
   }
 
   private async saveImageToVault(blob: Blob): Promise<string> {

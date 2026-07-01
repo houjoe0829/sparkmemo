@@ -557,6 +557,47 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     return folder;
   }
 
+  /**
+   * A folder-picker setting row shared by the recording and image folders: a
+   * text field (placeholder = Obsidian's real attachment folder) plus a 📁
+   * button that opens the fuzzy folder-suggest modal. `key` selects which
+   * settings field to read/write.
+   */
+  private addFolderSetting(
+    containerEl: HTMLElement,
+    name: string,
+    desc: string,
+    key: 'recordingFolder' | 'imageFolder',
+  ): void {
+    let textComp: TextComponent | null = null;
+    new Setting(containerEl)
+      .setName(name)
+      .setDesc(desc)
+      .addText(text => {
+        textComp = text;
+        text
+          .setPlaceholder(this.attachmentFolderLabel())
+          .setValue(this.plugin.settings[key])
+          .onChange(async value => {
+            this.plugin.settings[key] = value.trim();
+            await this.plugin.saveSettings();
+          });
+      })
+      .addButton(btn => {
+        btn
+          .setButtonText('📁')
+          .setTooltip('选择目录')
+          .onClick(() => {
+            const modal = this.createFolderSuggestModal((path: string) => {
+              this.plugin.settings[key] = path;
+              void this.plugin.saveSettings();
+              textComp?.setValue(path);
+            });
+            modal.open();
+          });
+      });
+  }
+
   /** Creates a FuzzySuggestModal pre-populated with vault folder paths. */
   private createFolderSuggestModal(onSelect: (value: string) => void): FolderSuggestModal {
     const folders = this.getFolderPaths();
@@ -730,35 +771,13 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     hintP.appendText('。');
 
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let recordingFolderText: any = null;
     let apiKeyInputEl: HTMLInputElement | null = null;
-    new Setting(containerEl)
-      .setName('录音存放位置')
-      .setDesc('Vault 相对路径，用于存放录音文件。留空则使用 Obsidian 附件文件夹。')
-      .addText(text => {
-        recordingFolderText = text;
-        text
-          .setPlaceholder(this.attachmentFolderLabel())
-          .setValue(this.plugin.settings.recordingFolder)
-          .onChange(async value => {
-            this.plugin.settings.recordingFolder = value.trim();
-            await this.plugin.saveSettings();
-          });
-      })
-      .addButton(btn => {
-        btn
-          .setButtonText('📁')
-          .setTooltip('选择目录')
-          .onClick(() => {
-            const modal = this.createFolderSuggestModal((path: string) => {
-              this.plugin.settings.recordingFolder = path;
-              void this.plugin.saveSettings();
-              recordingFolderText.setValue(path);
-            });
-            modal.open();
-          });
-      });
+    this.addFolderSetting(
+      containerEl,
+      '录音存放位置',
+      'Vault 相对路径，用于存放录音文件。留空则使用 Obsidian 附件文件夹。',
+      'recordingFolder',
+    );
 
     new Setting(containerEl)
       .setName('转写地址')
@@ -843,34 +862,12 @@ class JournalPartnerSettingTab extends PluginSettingTab {
     // ── Shortcut ──────────────────────────────────────────────────────────
     containerEl.createEl('h3', { text: '其他' });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let imageFolderText: any = null;
-    new Setting(containerEl)
-      .setName('图片存放位置')
-      .setDesc('Vault 相对路径，用于存放粘贴/上传的图片。留空则使用 Obsidian 附件文件夹。')
-      .addText(text => {
-        imageFolderText = text;
-        text
-          .setPlaceholder(this.attachmentFolderLabel())
-          .setValue(this.plugin.settings.imageFolder)
-          .onChange(async value => {
-            this.plugin.settings.imageFolder = value.trim();
-            await this.plugin.saveSettings();
-          });
-      })
-      .addButton(btn => {
-        btn
-          .setButtonText('📁')
-          .setTooltip('选择目录')
-          .onClick(() => {
-            const modal = this.createFolderSuggestModal((path: string) => {
-              this.plugin.settings.imageFolder = path;
-              void this.plugin.saveSettings();
-              imageFolderText.setValue(path);
-            });
-            modal.open();
-          });
-      });
+    this.addFolderSetting(
+      containerEl,
+      '图片存放位置',
+      'Vault 相对路径，用于存放粘贴/上传的图片。留空则使用 Obsidian 附件文件夹。',
+      'imageFolder',
+    );
 
     new Setting(containerEl)
       .setName('提交快捷键')
