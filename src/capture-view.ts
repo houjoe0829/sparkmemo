@@ -2646,17 +2646,9 @@ class ImageTimeConfirmModal extends Modal {
     titleEl.setText('图片时间与当前时间不符');
     contentEl.addClass('jp-image-time-confirm');
 
-    const d = this.opts.capturedAt;
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const capturedLabel =
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-      `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
     contentEl.createEl('p', {
       cls: 'jp-image-time-confirm-question',
-      text:
-        `这张图片拍摄于 ${capturedLabel}，与当前时间相差约 ${Math.round(this.opts.diffMinutes)} 分钟。` +
-        '是否使用图片拍摄时间记录这条 memo？',
+      text: `图片拍摄时间与当前时间相差约 ${Math.round(this.opts.diffMinutes)} 分钟，是否使用图片拍摄时间记录这条 memo？`,
     });
 
     const actions = contentEl.createDiv({ cls: 'jp-image-time-confirm-actions' });
