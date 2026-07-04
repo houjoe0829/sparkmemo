@@ -44,6 +44,12 @@ export interface SparkMemoSettings {
   submitShortcut: string;
   /** When true, adding an image whose capture time differs from now by more than 5 minutes prompts to use the image's time instead. */
   imageTimeCheck: boolean;
+  /** When true, images are downscaled/re-encoded before saving to the vault. Off by default. */
+  imageCompressionEnabled: boolean;
+  /** WebP re-encode quality, 0.1–1.0. Ignored for PNG (lossless) and GIF (untouched, to preserve animation). */
+  imageCompressionQuality: number;
+  /** Max long-edge size in pixels; images larger than this are downscaled. 0 disables resizing. */
+  imageCompressionMaxSize: number;
 }
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
@@ -63,6 +69,9 @@ export const DEFAULT_SETTINGS: SparkMemoSettings = {
   imageFolder: '',
   submitShortcut: 'cmd+enter',
   imageTimeCheck: true,
+  imageCompressionEnabled: true,
+  imageCompressionQuality: 0.8,
+  imageCompressionMaxSize: 1920,
 };
 
 export type Rng = { from: number; to: number };

@@ -227,6 +227,14 @@
   display: none;
   margin-bottom: 0;
 }
+/* Pending-image row: a plain horizontal strip regardless of count — the
+   2×2 grid look is reserved for how multiple images render in the
+   timeline once submitted, not this preview. */
+.jp-capture-image-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .jp-capture-attachment-thumb {
   position: relative;
   width: 56px;
@@ -638,10 +646,9 @@
   padding: 10px 14px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   font-size: 13.5px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--text-normal);
   word-break: break-word;
-  white-space: pre-wrap;
 }
 
 /* Dark theme adjustments */
@@ -744,18 +751,37 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Markdown rendered body — flatten paragraph margins so bubbles stay tight */
+/* Markdown rendered body — flatten paragraph margins so bubbles stay tight.
+   Obsidian's reading-view renderer wraps every top-level block (paragraph,
+   list, ...) in its own `.el-p` / `.el-ul` / `.el-ol` div and puts the
+   actual `--p-spacing`-driven vertical margin on *that* wrapper, not on the
+   inner `<p>`/`<ul>`/`<ol>` tag — styling the inner tags (as we did before)
+   never touched the real source of the gap. */
 .jp-timeline-bubble > :first-child {
   margin-top: 0;
 }
 .jp-timeline-bubble > :last-child {
   margin-bottom: 0;
 }
-.jp-timeline-bubble p {
-  margin: 0;
+.jp-timeline-bubble p,
+.jp-timeline-bubble ul,
+.jp-timeline-bubble ol {
+  margin: 0 !important;
 }
-.jp-timeline-bubble p + p {
-  margin-top: 4px;
+.jp-timeline-bubble > div {
+  margin: 0 !important;
+}
+.jp-timeline-bubble > div + div {
+  margin-top: 4px !important;
+}
+.jp-timeline-bubble li {
+  margin: 0 !important;
+}
+.jp-timeline-bubble li + li {
+  margin-top: 2px !important;
+}
+.jp-timeline-bubble li p {
+  margin: 0 !important;
 }
 /* Embedded images shouldn't blow the bubble out */
 .jp-timeline-bubble img,
@@ -768,11 +794,56 @@
 .jp-timeline-bubble .internal-embed {
   display: block;
 }
-/* Lists inside bubbles: tighter padding */
+/* Multi-image memo (2–9 images submitted together): grid instead of a
+   vertical stack, "moments"-style. Column count follows the same
+   convention as WeChat Moments: 2/3 images sit in a single row of that
+   count, 4 forms a 2×2 square, 5+ wraps a 3-column grid. */
+.jp-timeline-image-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  max-width: 280px;
+  margin-top: 8px !important;
+}
+.jp-timeline-image-grid[data-count="1"] {
+  grid-template-columns: 1fr;
+  max-width: 320px;
+}
+.jp-timeline-image-grid[data-count="2"] {
+  grid-template-columns: repeat(2, 1fr);
+}
+.jp-timeline-image-grid[data-count="4"] {
+  grid-template-columns: repeat(2, 1fr);
+}
+.jp-timeline-image-grid .internal-embed {
+  margin: 0 !important;
+  cursor: zoom-in;
+}
+.jp-timeline-image-grid .internal-embed img {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  margin: 0 !important;
+}
+/* A lone image keeps its natural aspect ratio instead of being cropped
+   into a square — the square crop only makes sense once there's a grid
+   to keep visually even. */
+.jp-timeline-image-grid[data-count="1"] .internal-embed img {
+  aspect-ratio: auto;
+  height: auto;
+}
+/* Non-grid embeds (single images that never went through applyImageGrid,
+   e.g. inserted by hand rather than via the capture panel) are still
+   worth a zoom cursor + click-to-preview. */
+.jp-timeline-bubble .internal-embed img {
+  cursor: zoom-in;
+}
+/* Lists inside bubbles: tighter padding (margin is zeroed above, on the
+   `.el-ul`/`.el-ol` wrapper div instead). */
 .jp-timeline-bubble ul,
 .jp-timeline-bubble ol {
   padding-left: 18px;
-  margin: 4px 0;
 }
 
 /* Override Obsidian default textarea focus/hover styles for an immersive

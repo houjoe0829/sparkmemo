@@ -113,6 +113,8 @@ export class JournalCaptureView extends ItemView {
   private captureTimePillEl!: HTMLElement;
   /** Images picked but not yet appended to the note text; flushed on submit. */
   private pendingImages: TFile[] = [];
+  /** Hard cap on pending images per entry — keeps the preview grid to a single row/2×2 square. */
+  private static readonly MAX_PENDING_IMAGES = 9;
   /** Recordings made but not yet appended to the note text; flushed on submit. */
   private pendingAudio: { file: TFile; duration: string }[] = [];
   /**
@@ -571,6 +573,8 @@ export class JournalCaptureView extends ItemView {
       // Render markdown first, then highlight keywords in the resulting DOM text nodes
       void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope).then(() => {
         this.highlightKeyword(bubble, query);
+        this.applyImageGrid(bubble);
+        this.attachImagePreviews(bubble);
       });
 
       const openMenu = (evt: MouseEvent) => {
@@ -579,6 +583,75 @@ export class JournalCaptureView extends ItemView {
       };
       head.addEventListener('contextmenu', openMenu);
       bubble.addEventListener('contextmenu', openMenu);
+    }
+  }
+
+  /**
+   * When a memo's images were submitted together (see `handleSubmit`, which
+   * joins all pending images/audio into one space-separated line of
+   * `![[...]]` embeds), Obsidian's renderer places them as sibling embed
+   * spans wherever that line ends up in the DOM — not reliably inside a
+   * `<p>`. If the memo body ends with a list (numbered notes, etc.) right
+   * before the images with no blank line between them, the image line gets
+   * absorbed as a "tight list" continuation directly inside that list
+   * item's `<li>`, with no paragraph wrapper at all, only a `<br>`
+   * separating it from the preceding text.
+   *
+   * So instead of assuming a wrapper tag, this groups image embeds by
+   * whatever DOM parent they actually share, and — as long as nothing but
+   * the embeds themselves and `<br>` separators sit between the first and
+   * last embed in that parent — lifts that run out into its own grid
+   * `<div>`, leaving any other sibling content (like the list item's text)
+   * untouched.
+   */
+  private applyImageGrid(bubble: HTMLElement) {
+    const embeds = Array.from(bubble.querySelectorAll('.internal-embed'))
+      .filter(el => el.querySelector('img'));
+
+    const byParent = new Map<Element, Element[]>();
+    for (const embed of embeds) {
+      const parent = embed.parentElement;
+      if (!parent) continue;
+      if (!byParent.has(parent)) byParent.set(parent, []);
+      byParent.get(parent)!.push(embed);
+    }
+
+    for (const [parent, group] of byParent) {
+      if (group.length < 2) continue;
+
+      const elementChildren = Array.from(parent.children);
+      const first = elementChildren.indexOf(group[0]);
+      const last = elementChildren.indexOf(group[group.length - 1]);
+      const between = elementChildren.slice(first, last + 1);
+      if (between.some(el => !group.includes(el) && el.tagName !== 'BR')) continue;
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'jp-timeline-image-grid';
+      wrapper.setAttribute('data-count', String(group.length));
+      parent.insertBefore(wrapper, group[0]);
+      for (const el of between) {
+        if (el.tagName === 'BR') el.remove();
+      }
+      for (const embed of group) wrapper.appendChild(embed);
+    }
+  }
+
+  /**
+   * Makes every embedded image in a rendered bubble clickable for a
+   * full-screen preview (reuses the same `ImagePreviewModal` as the
+   * pending-attachment thumbnails). Applies to single images too, not just
+   * grid ones — otherwise a memo with exactly one photo would be the odd
+   * one out.
+   */
+  private attachImagePreviews(bubble: HTMLElement) {
+    for (const embed of Array.from(bubble.querySelectorAll('.internal-embed'))) {
+      const img = embed.querySelector('img');
+      if (!img) continue;
+      (embed as HTMLElement).addEventListener('click', evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        new ImagePreviewModal(this.app, img.getAttribute('src') ?? '', img.getAttribute('alt') ?? '').open();
+      });
     }
   }
 
@@ -654,28 +727,27 @@ export class JournalCaptureView extends ItemView {
       if (!items) return;
       // Only intercept if focus is inside our textarea
       if (!this.inputCardEl.contains(document.activeElement)) return;
+      const images: File[] = [];
       for (const item of Array.from(items)) {
         if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         const blob = item.getAsFile();
-        if (!blob) continue;
-        await this.addImageFile(blob);
-        return;
+        if (blob) images.push(blob);
       }
+      if (images.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      await this.addImageFiles(images);
     }, true);
     // Image drag & drop
     this.textareaEl.addEventListener('drop', async (e) => {
       const files = e.dataTransfer?.files;
       if (!files) return;
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith('image/')) continue;
-        e.preventDefault();
-        e.stopPropagation();
-        await this.addImageFile(file);
-        return;
-      }
+      const images = Array.from(files).filter(f => f.type.startsWith('image/'));
+      if (images.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      await this.addImageFiles(images);
     });
     this.textareaEl.addEventListener('dragover', (e) => {
       if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
@@ -687,16 +759,17 @@ export class JournalCaptureView extends ItemView {
       attr: {
         type: 'file',
         accept: 'image/*',
+        multiple: 'true',
       },
     });
     fileInput.style.display = 'none';
     fileInput.addEventListener('change', async () => {
       const files = fileInput.files;
       if (!files || files.length === 0) return;
-      const file = files[0];
-      if (!file.type.startsWith('image/')) return;
+      const images = Array.from(files).filter(f => f.type.startsWith('image/'));
       fileInput.value = '';
-      await this.addImageFile(file);
+      if (images.length === 0) return;
+      await this.addImageFiles(images);
     });
 
     // Hidden file input for image upload
@@ -1030,6 +1103,10 @@ export class JournalCaptureView extends ItemView {
     };
 
     const startRecording = async () => {
+      if (this.pendingImages.length > 0) {
+        new Notice('已添加图片，无法同时录音');
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
@@ -1202,15 +1279,30 @@ export class JournalCaptureView extends ItemView {
     };
 
     plusBtn.addEventListener('click', (evt: MouseEvent) => {
+      // Images and audio are mutually exclusive per entry — once one kind
+      // has a pending attachment, the other option is grayed out. Images
+      // additionally gray out once the 4-image cap is reached.
+      const hasAudio = this.pendingAudio.length > 0;
+      const hasImages = this.pendingImages.length > 0;
+      const imageMaxedOut = this.pendingImages.length >= JournalCaptureView.MAX_PENDING_IMAGES;
+      const imageDisabled = hasAudio || imageMaxedOut;
+      const micDisabled = hasImages;
+
       const menu = new Menu();
       menu.addItem(item => item
-        .setTitle('上传图片')
+        .setTitle(`上传图片（最多 ${JournalCaptureView.MAX_PENDING_IMAGES} 张）`)
         .setIcon('image')
-        .onClick(() => fileInput.click()));
+        .setDisabled(imageDisabled)
+        .onClick(() => {
+          if (imageDisabled) return;
+          fileInput.click();
+        }));
       menu.addItem(item => item
         .setTitle('录音')
         .setIcon('mic')
+        .setDisabled(micDisabled)
         .onClick(async () => {
+          if (micDisabled) return;
           if (!mediaRecorder || mediaRecorder.state === 'inactive') {
             await startRecording();
           } else {
@@ -1328,29 +1420,34 @@ export class JournalCaptureView extends ItemView {
     const isEmpty = this.pendingImages.length === 0 && this.pendingAudio.length === 0;
     this.attachmentListEl.toggleClass('jp-capture-attachments--empty', isEmpty);
 
-    for (const file of this.pendingImages) {
-      const thumb = this.attachmentListEl.createDiv({ cls: 'jp-capture-attachment-thumb' });
-      const imgWrap = thumb.createDiv({ cls: 'jp-capture-attachment-thumb-img' });
-      const src = this.app.vault.getResourcePath(file);
-      const img = imgWrap.createEl('img', { attr: { src } });
-      img.alt = file.name;
-      imgWrap.addEventListener('click', () => {
-        new ImagePreviewModal(this.app, src, file.name).open();
-      });
-      const removeBtn = thumb.createEl('button', {
-        cls: 'jp-capture-attachment-remove',
-        attr: { 'aria-label': '移除图片' },
-      });
-      setIcon(removeBtn, 'x');
-      removeBtn.addEventListener('click', () => {
-        this.pendingImages = this.pendingImages.filter(f => f !== file);
-        this.renderAttachmentList();
-        this.refreshSubmitState();
-        if (this.pendingImages.length === 0) {
-          this.pendingCaptureOverride = null;
-          this.renderCaptureTimePill();
-        }
-      });
+    if (this.pendingImages.length > 0) {
+      // Plain horizontal row of thumbnails — the grid layout is for the
+      // submitted timeline entry, not this pending preview.
+      const grid = this.attachmentListEl.createDiv({ cls: 'jp-capture-image-grid' });
+      for (const file of this.pendingImages) {
+        const thumb = grid.createDiv({ cls: 'jp-capture-attachment-thumb' });
+        const imgWrap = thumb.createDiv({ cls: 'jp-capture-attachment-thumb-img' });
+        const src = this.app.vault.getResourcePath(file);
+        const img = imgWrap.createEl('img', { attr: { src } });
+        img.alt = file.name;
+        imgWrap.addEventListener('click', () => {
+          new ImagePreviewModal(this.app, src, file.name).open();
+        });
+        const removeBtn = thumb.createEl('button', {
+          cls: 'jp-capture-attachment-remove',
+          attr: { 'aria-label': '移除图片' },
+        });
+        setIcon(removeBtn, 'x');
+        removeBtn.addEventListener('click', () => {
+          this.pendingImages = this.pendingImages.filter(f => f !== file);
+          this.renderAttachmentList();
+          this.refreshSubmitState();
+          if (this.pendingImages.length === 0) {
+            this.pendingCaptureOverride = null;
+            this.renderCaptureTimePill();
+          }
+        });
+      }
     }
 
     for (const audio of this.pendingAudio) {
@@ -1407,42 +1504,132 @@ export class JournalCaptureView extends ItemView {
   }
 
   /**
-   * Saves the picked/pasted/dropped image, adds it to the pending strip, and
-   * — if enabled — checks the image's own capture time against now.
+   * Saves the picked/pasted/dropped image(s), adds them to the pending
+   * strip (capped at `MAX_PENDING_IMAGES`), and — if enabled — checks the
+   * *earliest* capture time across this batch against now.
    */
-  private async addImageFile(file: File): Promise<void> {
+  private async addImageFiles(files: File[]): Promise<void> {
+    if (this.pendingAudio.length > 0) {
+      new Notice('已添加录音，无法同时添加图片');
+      return;
+    }
+    const room = JournalCaptureView.MAX_PENDING_IMAGES - this.pendingImages.length;
+    if (room <= 0) {
+      new Notice(`最多添加 ${JournalCaptureView.MAX_PENDING_IMAGES} 张图片`);
+      return;
+    }
+    const accepted = files.slice(0, room);
+    if (files.length > accepted.length) {
+      new Notice(`最多添加 ${JournalCaptureView.MAX_PENDING_IMAGES} 张图片，已忽略多余的 ${files.length - accepted.length} 张`);
+    }
+
     try {
-      const saved = await this.saveImageToVault(file);
-      this.addPendingImage(saved);
-      await this.maybeCheckImageTime(file);
+      let originalTotal = 0;
+      let compressedTotal = 0;
+      let compressedCount = 0;
+      for (const file of accepted) {
+        const result = await this.maybeCompressImage(file);
+        const saved = await this.saveImageToVault(result.blob);
+        this.addPendingImage(saved);
+        if (result.compressed) {
+          compressedCount++;
+          originalTotal += result.originalSize;
+          compressedTotal += result.compressedSize;
+        }
+      }
+      if (compressedCount > 0) {
+        const savedPct = Math.round((1 - compressedTotal / originalTotal) * 100);
+        new Notice(
+          `🗜️ 已压缩 ${compressedCount} 张图片：${formatBytes(originalTotal)} → ${formatBytes(compressedTotal)}（节省 ${savedPct}%）`,
+        );
+      }
+      // Capture-time check reads the *original* files — compression can
+      // strip EXIF, but the original still carries it in memory here.
+      await this.maybeCheckImageTimes(accepted);
     } catch (err) {
       new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   /**
-   * If the image carries a capture time (EXIF for JPEGs, otherwise the
-   * file's last-modified time) that differs from "now" by more than 5
-   * minutes, ask the user whether to anchor this entry to the image's time
-   * instead — including its calendar date, so a photo from an earlier day
-   * lands in that day's daily note rather than today's. Only asks once per
-   * pending-image batch — once an override is set, later images in the same
-   * batch are assumed to belong to the same moment.
+   * Downscales/re-encodes an image before it's written to the vault, if
+   * the "图片压缩" setting is on. GIFs are left untouched (canvas re-encoding
+   * would flatten the animation to a single frame). Falls back to the
+   * original file whenever compression isn't smaller or fails outright —
+   * this is a size optimization, never something that should block a save.
    */
-  private async maybeCheckImageTime(file: File): Promise<void> {
+  private async maybeCompressImage(file: File): Promise<{ blob: Blob; compressed: boolean; originalSize: number; compressedSize: number }> {
+    const settings = this.plugin.settings;
+    const uncompressed = { blob: file as Blob, compressed: false, originalSize: file.size, compressedSize: file.size };
+    if (!settings.imageCompressionEnabled) return uncompressed;
+    if (file.type === 'image/gif') return uncompressed;
+
+    try {
+      const bitmap = await createImageBitmap(file);
+      let { width, height } = bitmap;
+      const maxSize = settings.imageCompressionMaxSize;
+      if (maxSize > 0 && (width > maxSize || height > maxSize)) {
+        const scale = maxSize / Math.max(width, height);
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return uncompressed;
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close();
+
+      // PNG stays PNG (lossless — quality is ignored, only resizing helps);
+      // everything else re-encodes to WebP, which beats JPEG at the same
+      // quality setting for most photos (same approach as most image
+      // converter plugins' recommended "web optimized" preset).
+      //
+      // iOS/Safari's canvas can *decode* WebP but historically cannot
+      // *encode* it — `toBlob(..., 'image/webp', ...)` silently resolves
+      // `null` there instead of erroring. Fall back to a JPEG re-encode in
+      // that case so iOS still gets the resize + quality-reduction benefit
+      // instead of silently keeping the untouched original.
+      const toBlob = (type: string) => new Promise<Blob | null>(resolve =>
+        canvas.toBlob(resolve, type, settings.imageCompressionQuality));
+      const outType = file.type === 'image/png' ? 'image/png' : 'image/webp';
+      let blob = await toBlob(outType);
+      if (!blob && outType === 'image/webp') blob = await toBlob('image/jpeg');
+      if (!blob || blob.size >= file.size) return uncompressed;
+      return { blob, compressed: true, originalSize: file.size, compressedSize: blob.size };
+    } catch (err) {
+      console.error('[Spark Memo] image compression failed, using original', err);
+      return uncompressed;
+    }
+  }
+
+  /**
+   * If any image in this batch carries a capture time (EXIF for JPEGs,
+   * otherwise the file's last-modified time) that differs from "now" by
+   * more than 5 minutes, ask the user whether to anchor this entry to the
+   * *earliest* of those capture times instead — including its calendar
+   * date, so a photo from an earlier day lands in that day's daily note
+   * rather than today's. Only asks once per pending-image batch — once an
+   * override is set, later images are assumed to belong to the same moment.
+   */
+  private async maybeCheckImageTimes(files: File[]): Promise<void> {
     if (!this.plugin.settings.imageTimeCheck) return;
     if (this.pendingCaptureOverride) return;
 
-    const capturedAt = await getImageCaptureTime(file);
-    if (!capturedAt) return;
+    const capturedTimes = (await Promise.all(files.map(f => getImageCaptureTime(f))))
+      .filter((d): d is Date => d !== null);
+    if (capturedTimes.length === 0) return;
 
-    const diffMinutes = Math.abs(Date.now() - capturedAt.getTime()) / 60000;
+    const earliest = capturedTimes.reduce((a, b) => (a < b ? a : b));
+    const diffMinutes = Math.abs(Date.now() - earliest.getTime()) / 60000;
     if (diffMinutes <= 5) return;
 
-    const useImageTime = await confirmUseImageTime(this.app, capturedAt, diffMinutes);
+    const useImageTime = await confirmUseImageTime(this.app, earliest, diffMinutes);
     if (useImageTime) {
-      const capturedDate = moment(capturedAt);
-      this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(capturedAt) };
+      const capturedDate = moment(earliest);
+      this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(earliest) };
       this.renderCaptureTimePill();
       new Notice(
         capturedDate.isSame(moment(), 'day')
@@ -1779,7 +1966,11 @@ export class JournalCaptureView extends ItemView {
 
       // Body bubble: chat-style rounded card holding the rendered markdown.
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope);
+      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope)
+        .then(() => {
+          this.applyImageGrid(bubble);
+          this.attachImagePreviews(bubble);
+        });
 
       // Context menu: copy / delete (with optional audio cleanup).
       // Attached to both the timestamp pill and bubble so right-click /
@@ -1934,7 +2125,11 @@ export class JournalCaptureView extends ItemView {
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
       head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, scope);
+      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, scope)
+        .then(() => {
+          this.applyImageGrid(bubble);
+          this.attachImagePreviews(bubble);
+        });
     }
   }
 
@@ -2604,6 +2799,13 @@ export class JournalCaptureView extends ItemView {
       this.refreshSubmitState();
     }
   }
+}
+
+/** Human-readable file size, e.g. 512 → "512 B", 2_400_000 → "2.4 MB". */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ── Image capture-time helpers ──────────────────────────────────────────────

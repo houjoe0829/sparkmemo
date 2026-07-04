@@ -764,6 +764,46 @@ class SparkMemoSettingTab extends PluginSettingTab {
     );
 
     new Setting(containerEl)
+      .setName('图片压缩')
+      .setDesc('添加图片时自动按下方设置压缩后再存入 Vault，可节省空间。GIF 不会被压缩（保留动画）')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.imageCompressionEnabled)
+          .onChange(async value => {
+            this.plugin.settings.imageCompressionEnabled = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('压缩质量')
+      .setDesc('数值越低文件越小、画质越差（0.1–1.0）。仅对压缩后转为 WebP 的图片生效，PNG 无损不受影响')
+      .addSlider(slider =>
+        slider
+          .setLimits(0.1, 1, 0.05)
+          .setValue(this.plugin.settings.imageCompressionQuality)
+          .setDynamicTooltip()
+          .onChange(async value => {
+            this.plugin.settings.imageCompressionQuality = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('压缩最大边长')
+      .setDesc('图片长边超过该像素值时会被等比缩小，0 表示不限制尺寸')
+      .addText(text =>
+        text
+          .setPlaceholder('1920')
+          .setValue(String(this.plugin.settings.imageCompressionMaxSize))
+          .onChange(async value => {
+            const n = parseInt(value, 10);
+            this.plugin.settings.imageCompressionMaxSize = Number.isFinite(n) && n >= 0 ? n : 0;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName('图片时间校验')
       .setDesc('添加图片时，若图片拍摄时间与当前时间相差超过 5 分钟，弹窗询问是否改用图片时间记录')
       .addToggle(toggle =>

@@ -1,6 +1,6 @@
 {
   "name": "spark-memo",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Obsidian plugin – Spark Memo journal timestamp highlighter",
   "main": "dist/main.js",
   "scripts": {
