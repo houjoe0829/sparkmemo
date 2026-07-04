@@ -40,9 +40,11 @@ import {
   deleteEntryFromSection,
   extractAudioEmbeds,
   findSection,
+  formatTimeHHMM,
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
 } from './section';
+import { readExifCaptureDate } from './exif';
 import {
   YearStats,
   AllTimeStats,
@@ -110,6 +112,13 @@ export class JournalCaptureView extends ItemView {
   private attachmentListEl!: HTMLElement;
   /** Images picked but not yet appended to the note text; flushed on submit. */
   private pendingImages: TFile[] = [];
+  /**
+   * HH:MM chosen from a photo's capture time, overriding "now" for the next
+   * submit. Set when the user opts into a captured-time mismatch prompt
+   * (see `maybeCheckImageTime`); cleared once the pending images are empty
+   * or the entry is submitted.
+   */
+  private pendingTimestampOverride: string | null = null;
 
   // DOM references (stats pane)
   private statsToolbarEl!: HTMLElement;
@@ -644,12 +653,7 @@ export class JournalCaptureView extends ItemView {
         e.stopImmediatePropagation();
         const blob = item.getAsFile();
         if (!blob) continue;
-        try {
-          const file = await this.saveImageToVault(blob);
-          this.addPendingImage(file);
-        } catch (err) {
-          new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
-        }
+        await this.addImageFile(blob);
         return;
       }
     }, true);
@@ -661,12 +665,7 @@ export class JournalCaptureView extends ItemView {
         if (!file.type.startsWith('image/')) continue;
         e.preventDefault();
         e.stopPropagation();
-        try {
-          const saved = await this.saveImageToVault(file);
-          this.addPendingImage(saved);
-        } catch (err) {
-          new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
-        }
+        await this.addImageFile(file);
         return;
       }
     });
@@ -689,12 +688,7 @@ export class JournalCaptureView extends ItemView {
       const file = files[0];
       if (!file.type.startsWith('image/')) return;
       fileInput.value = '';
-      try {
-        const saved = await this.saveImageToVault(file);
-        this.addPendingImage(saved);
-      } catch (err) {
-        new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
-      }
+      await this.addImageFile(file);
     });
 
     // Hidden file input for image upload
@@ -1353,7 +1347,47 @@ export class JournalCaptureView extends ItemView {
         this.pendingImages = this.pendingImages.filter(f => f !== file);
         this.renderAttachmentList();
         this.refreshSubmitState();
+        if (this.pendingImages.length === 0) this.pendingTimestampOverride = null;
       });
+    }
+  }
+
+  /**
+   * Saves the picked/pasted/dropped image, adds it to the pending strip, and
+   * — if enabled — checks the image's own capture time against now.
+   */
+  private async addImageFile(file: File): Promise<void> {
+    try {
+      const saved = await this.saveImageToVault(file);
+      this.addPendingImage(saved);
+      await this.maybeCheckImageTime(file);
+    } catch (err) {
+      new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * If the image carries a capture time (EXIF for JPEGs, otherwise the
+   * file's last-modified time) that differs from "now" by more than 5
+   * minutes, ask the user whether to anchor this entry's timestamp to the
+   * image's time instead. Only asks once per pending-image batch — once an
+   * override is set, later images in the same batch are assumed to belong
+   * to the same moment.
+   */
+  private async maybeCheckImageTime(file: File): Promise<void> {
+    if (!this.plugin.settings.imageTimeCheck) return;
+    if (this.pendingTimestampOverride) return;
+
+    const capturedAt = await getImageCaptureTime(file);
+    if (!capturedAt) return;
+
+    const diffMinutes = Math.abs(Date.now() - capturedAt.getTime()) / 60000;
+    if (diffMinutes <= 5) return;
+
+    const useImageTime = await confirmUseImageTime(this.app, capturedAt, diffMinutes);
+    if (useImageTime) {
+      this.pendingTimestampOverride = formatTimeHHMM(capturedAt);
+      new Notice(`✅ 已改用图片时间 ${this.pendingTimestampOverride} 记录`);
     }
   }
 
@@ -2511,11 +2545,12 @@ export class JournalCaptureView extends ItemView {
     this.submitBtn.setText('写入中…');
 
     try {
-      const ok = await this.plugin.writeToTodayJournal(raw);
+      const ok = await this.plugin.writeToTodayJournal(raw, this.pendingTimestampOverride ?? undefined);
       if (!ok) return;
 
       this.textareaEl.value = '';
       this.pendingImages = [];
+      this.pendingTimestampOverride = null;
       this.renderAttachmentList();
       this.autoResizeTextarea();
 
@@ -2539,6 +2574,110 @@ export class JournalCaptureView extends ItemView {
       this.submitBtn.setText(originalText ?? 'NOTE');
       this.refreshSubmitState();
     }
+  }
+}
+
+// ── Image capture-time helpers ──────────────────────────────────────────────
+
+/**
+ * Best-effort "when was this photo taken": EXIF DateTimeOriginal for JPEGs,
+ * falling back to the file's last-modified time (meaningful for drag/dropped
+ * or file-picker-selected files; a pasted screenshot's lastModified is
+ * essentially "now", so it won't spuriously trigger the mismatch prompt).
+ */
+async function getImageCaptureTime(file: File): Promise<Date | null> {
+  if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
+    try {
+      const buffer = await file.arrayBuffer();
+      const exifDate = readExifCaptureDate(buffer);
+      if (exifDate) return exifDate;
+    } catch {
+      // fall through to lastModified
+    }
+  }
+  return file.lastModified ? new Date(file.lastModified) : null;
+}
+
+/**
+ * Asks whether to anchor the entry's timestamp to a photo's capture time
+ * instead of "now". Resolves `true` only on an explicit "使用图片时间"
+ * click — dismissing (Esc / click-outside / "使用当前时间") resolves `false`
+ * and leaves the default "now" timestamp untouched.
+ */
+function confirmUseImageTime(
+  app: import('obsidian').App,
+  capturedAt: Date,
+  diffMinutes: number,
+): Promise<boolean> {
+  return new Promise(resolve => {
+    new ImageTimeConfirmModal(app, { capturedAt, diffMinutes }, resolve).open();
+  });
+}
+
+interface ImageTimeConfirmOptions {
+  capturedAt: Date;
+  diffMinutes: number;
+}
+
+class ImageTimeConfirmModal extends Modal {
+  private opts: ImageTimeConfirmOptions;
+  private resolve: (useImageTime: boolean) => void;
+  private decided = false;
+
+  constructor(
+    app: import('obsidian').App,
+    opts: ImageTimeConfirmOptions,
+    resolve: (useImageTime: boolean) => void,
+  ) {
+    super(app);
+    this.opts = opts;
+    this.resolve = resolve;
+  }
+
+  private decide(useImageTime: boolean): void {
+    if (this.decided) return;
+    this.decided = true;
+    this.resolve(useImageTime);
+    this.close();
+  }
+
+  onOpen(): void {
+    const { contentEl, titleEl } = this;
+    titleEl.setText('图片时间与当前时间不符');
+    contentEl.addClass('jp-image-time-confirm');
+
+    const d = this.opts.capturedAt;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const capturedLabel =
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    contentEl.createEl('p', {
+      cls: 'jp-image-time-confirm-question',
+      text:
+        `这张图片拍摄于 ${capturedLabel}，与当前时间相差约 ${Math.round(this.opts.diffMinutes)} 分钟。` +
+        '是否使用图片拍摄时间记录这条 memo？',
+    });
+
+    const actions = contentEl.createDiv({ cls: 'jp-image-time-confirm-actions' });
+    const useNowBtn = actions.createEl('button', {
+      cls: 'jp-image-time-confirm-cancel',
+      text: '使用当前时间',
+    });
+    useNowBtn.addEventListener('click', () => this.decide(false));
+
+    const useImageBtn = actions.createEl('button', {
+      cls: 'mod-cta jp-image-time-confirm-confirm',
+      text: '使用图片时间',
+    });
+    useImageBtn.addEventListener('click', () => this.decide(true));
+
+    window.setTimeout(() => useNowBtn.focus(), 0);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    this.decide(false); // dismissed → keep the default "now" timestamp
   }
 }
 

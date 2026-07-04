@@ -756,6 +756,18 @@ class SparkMemoSettingTab extends PluginSettingTab {
     );
 
     new Setting(containerEl)
+      .setName('图片时间校验')
+      .setDesc('添加图片时，若图片拍摄时间与当前时间相差超过 5 分钟，弹窗询问是否改用图片时间记录')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.imageTimeCheck)
+          .onChange(async value => {
+            this.plugin.settings.imageTimeCheck = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName('提交快捷键')
       .setDesc('在输入框中提交日记的快捷键组合')
       .addDropdown(dropdown =>

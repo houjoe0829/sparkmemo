@@ -42,6 +42,8 @@ export interface SparkMemoSettings {
   imageFolder: string;
   /** Keyboard shortcut to submit entry: 'shift+enter' | 'ctrl+enter' | 'alt+enter' | 'ctrl+shift+enter' */
   submitShortcut: string;
+  /** When true, adding an image whose capture time differs from now by more than 5 minutes prompts to use the image's time instead. */
+  imageTimeCheck: boolean;
 }
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: SparkMemoSettings = {
   recordingFolder: '',
   imageFolder: '',
   submitShortcut: 'cmd+enter',
+  imageTimeCheck: true,
 };
 
 export type Rng = { from: number; to: number };
@@ -150,14 +153,18 @@ export function getTimestampRanges(
   return result;
 }
 
+/** Format a `Date` as a local HH:MM timestamp string. */
+export function formatTimeHHMM(date: Date): string {
+  return (
+    String(date.getHours()).padStart(2, '0') +
+    ':' +
+    String(date.getMinutes()).padStart(2, '0')
+  );
+}
+
 /** Generate a timestamp string for the current local time in HH:MM format. */
 export function generateTimestamp(): string {
-  const now = new Date();
-  return (
-    String(now.getHours()).padStart(2, '0') +
-    ':' +
-    String(now.getMinutes()).padStart(2, '0')
-  );
+  return formatTimeHHMM(new Date());
 }
 
 /** Build a CM6 DecorationSet that marks every timestamp in the target section. */

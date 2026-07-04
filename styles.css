@@ -795,6 +795,34 @@
   cursor: pointer;
 }
 
+/* ── Image-time confirm modal ─────────────────────────────────────────────
+   Shown when an added image's capture time (EXIF, or last-modified as a
+   fallback) differs from the current time by more than 5 minutes. */
+.jp-image-time-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.jp-image-time-confirm-question {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.jp-image-time-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.jp-image-time-confirm-cancel,
+.jp-image-time-confirm-confirm {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ── Tab bar (capture / stats) ──────────────────────────────────────────── */
 
 /* Tabs sit at the very top of the view, above the input card / stats
