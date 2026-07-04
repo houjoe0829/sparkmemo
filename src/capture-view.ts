@@ -107,6 +107,9 @@ export class JournalCaptureView extends ItemView {
   private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
   private submitBtn!: HTMLButtonElement;
+  private attachmentListEl!: HTMLElement;
+  /** Images picked but not yet appended to the note text; flushed on submit. */
+  private pendingImages: TFile[] = [];
 
   // DOM references (stats pane)
   private statsToolbarEl!: HTMLElement;
@@ -642,17 +645,8 @@ export class JournalCaptureView extends ItemView {
         const blob = item.getAsFile();
         if (!blob) continue;
         try {
-          const result = await this.saveImageToVault(blob);
-          const textarea = this.textareaEl;
-          const start = textarea.selectionStart;
-          const end = textarea.selectionEnd;
-          const before = textarea.value.substring(0, start);
-          const after = textarea.value.substring(end);
-          textarea.value = before + result + ' ' + after;
-          const newPos = start + result.length + 1;
-          textarea.setSelectionRange(newPos, newPos);
-          this.refreshSubmitState();
-          this.autoResizeTextarea();
+          const file = await this.saveImageToVault(blob);
+          this.addPendingImage(file);
         } catch (err) {
           new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
         }
@@ -668,16 +662,8 @@ export class JournalCaptureView extends ItemView {
         e.preventDefault();
         e.stopPropagation();
         try {
-          const result = await this.saveImageToVault(file);
-          const start = this.textareaEl.selectionStart;
-          const end = this.textareaEl.selectionEnd;
-          const before = this.textareaEl.value.substring(0, start);
-          const after = this.textareaEl.value.substring(end);
-          this.textareaEl.value = before + result + ' ' + after;
-          const newPos = start + result.length + 1;
-          this.textareaEl.setSelectionRange(newPos, newPos);
-          this.refreshSubmitState();
-          this.autoResizeTextarea();
+          const saved = await this.saveImageToVault(file);
+          this.addPendingImage(saved);
         } catch (err) {
           new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
         }
@@ -704,17 +690,8 @@ export class JournalCaptureView extends ItemView {
       if (!file.type.startsWith('image/')) return;
       fileInput.value = '';
       try {
-        const result = await this.saveImageToVault(file);
-        const textarea = this.textareaEl;
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const before = textarea.value.substring(0, start);
-        const after = textarea.value.substring(end);
-        textarea.value = before + result + ' ' + after;
-        const newPos = start + result.length + 1;
-        textarea.setSelectionRange(newPos, newPos);
-        this.refreshSubmitState();
-        this.autoResizeTextarea();
+        const saved = await this.saveImageToVault(file);
+        this.addPendingImage(saved);
       } catch (err) {
         new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
       }
@@ -1199,8 +1176,13 @@ export class JournalCaptureView extends ItemView {
 
     const actions = this.inputCardEl.createDiv({ cls: 'jp-capture-actions' });
 
+    // Left side: icon-button pill + pending-image thumbnails, grouped so
+    // `justify-content: space-between` on `actions` only splits this group
+    // from the submit button.
+    const leftGroup = actions.createDiv({ cls: 'jp-capture-left-group' });
+
     // Left icon group: image + mic
-    const buttonRow = actions.createDiv({ cls: 'jp-capture-button-row' });
+    const buttonRow = leftGroup.createDiv({ cls: 'jp-capture-button-row' });
 
     // Image upload button
     const imageBtn = buttonRow.createEl('button', {
@@ -1252,9 +1234,14 @@ export class JournalCaptureView extends ItemView {
     setIcon(clearBtn, 'delete');
     clearBtn.addEventListener('click', () => {
       const value = this.textareaEl.value;
-      if (value.trim().length === 0) return; // nothing to clear
+      if (value.trim().length === 0 && this.pendingImages.length === 0) return; // nothing to clear
       void this.confirmClearInput(value);
     });
+
+    // Pending-image thumbnail strip, shown to the right of the icon-button
+    // pill (as a sibling, not nested inside it) so the remove badge isn't
+    // clipped by the pill's rounded border.
+    this.attachmentListEl = leftGroup.createDiv({ cls: 'jp-capture-attachments jp-capture-attachments--empty' });
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
@@ -1328,7 +1315,7 @@ export class JournalCaptureView extends ItemView {
     }
   }
 
-  private async saveImageToVault(blob: Blob): Promise<string> {
+  private async saveImageToVault(blob: Blob): Promise<TFile> {
     const ext = blob.type === 'image/png' ? 'png'
       : blob.type === 'image/gif' ? 'gif'
       : blob.type === 'image/webp' ? 'webp'
@@ -1338,8 +1325,36 @@ export class JournalCaptureView extends ItemView {
     const baseName = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
     const filePath = await this.resolveAttachmentPath(this.plugin.settings.imageFolder, baseName);
     const buffer = await blob.arrayBuffer();
-    const file = await this.app.vault.createBinary(filePath, buffer);
-    return `![](${file.path})`;
+    return this.app.vault.createBinary(filePath, buffer);
+  }
+
+  /** Adds a saved image to the pending-attachments strip (not the text body). */
+  private addPendingImage(file: TFile) {
+    this.pendingImages.push(file);
+    this.renderAttachmentList();
+    this.refreshSubmitState();
+  }
+
+  /** Re-renders the thumbnail strip from `pendingImages`. */
+  private renderAttachmentList() {
+    this.attachmentListEl.empty();
+    this.attachmentListEl.toggleClass('jp-capture-attachments--empty', this.pendingImages.length === 0);
+    for (const file of this.pendingImages) {
+      const thumb = this.attachmentListEl.createDiv({ cls: 'jp-capture-attachment-thumb' });
+      const imgWrap = thumb.createDiv({ cls: 'jp-capture-attachment-thumb-img' });
+      const img = imgWrap.createEl('img', { attr: { src: this.app.vault.getResourcePath(file) } });
+      img.alt = file.name;
+      const removeBtn = thumb.createEl('button', {
+        cls: 'jp-capture-attachment-remove',
+        attr: { 'aria-label': '移除图片' },
+      });
+      setIcon(removeBtn, 'x');
+      removeBtn.addEventListener('click', () => {
+        this.pendingImages = this.pendingImages.filter(f => f !== file);
+        this.renderAttachmentList();
+        this.refreshSubmitState();
+      });
+    }
   }
 
   private async saveAudioToVault(blob: Blob): Promise<string> {
@@ -1425,7 +1440,7 @@ export class JournalCaptureView extends ItemView {
   // ── Behaviour ───────────────────────────────────────────────────────────
 
   private refreshSubmitState() {
-    const hasContent = this.textareaEl.value.trim().length > 0;
+    const hasContent = this.textareaEl.value.trim().length > 0 || this.pendingImages.length > 0;
     this.submitBtn.toggleClass('jp-capture-submit--disabled', !hasContent);
     this.submitBtn.disabled = !hasContent;
   }
@@ -1474,6 +1489,8 @@ export class JournalCaptureView extends ItemView {
         }
       }
       this.textareaEl.value = '';
+      this.pendingImages = [];
+      this.renderAttachmentList();
       this.refreshSubmitState();
       this.autoResizeTextarea();
       new Notice(
@@ -2475,8 +2492,13 @@ export class JournalCaptureView extends ItemView {
   // ── Submit / write path ─────────────────────────────────────────────────
 
   private async handleSubmit(): Promise<void> {
-    const raw = this.textareaEl.value;
-    if (raw.trim().length === 0) return;
+    const text = this.textareaEl.value;
+    if (text.trim().length === 0 && this.pendingImages.length === 0) return;
+
+    const imageEmbeds = this.pendingImages.map(file => `![[${file.path}]]`).join(' ');
+    const raw = imageEmbeds
+      ? (text.trim().length > 0 ? `${text}\n${imageEmbeds}` : imageEmbeds)
+      : text;
 
     if (!appHasDailyNotesPluginLoaded()) {
       new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
@@ -2493,6 +2515,8 @@ export class JournalCaptureView extends ItemView {
       if (!ok) return;
 
       this.textareaEl.value = '';
+      this.pendingImages = [];
+      this.renderAttachmentList();
       this.autoResizeTextarea();
 
       // vault.modify will catch-up the today section automatically; if
