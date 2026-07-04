@@ -45,6 +45,7 @@ import {
   removeAudioEmbedsFromEntry,
 } from './section';
 import { readExifCaptureDate } from './exif';
+import { encodeWebp } from './webp-encoder';
 import {
   YearStats,
   AllTimeStats,
@@ -1582,21 +1583,34 @@ export class JournalCaptureView extends ItemView {
       ctx.drawImage(bitmap, 0, 0, width, height);
       bitmap.close();
 
-      // PNG stays PNG (lossless — quality is ignored, only resizing helps);
-      // everything else re-encodes to WebP, which beats JPEG at the same
-      // quality setting for most photos (same approach as most image
-      // converter plugins' recommended "web optimized" preset).
-      //
-      // iOS/Safari's canvas can *decode* WebP but historically cannot
-      // *encode* it — `toBlob(..., 'image/webp', ...)` silently resolves
-      // `null` there instead of erroring. Fall back to a JPEG re-encode in
-      // that case so iOS still gets the resize + quality-reduction benefit
-      // instead of silently keeping the untouched original.
-      const toBlob = (type: string) => new Promise<Blob | null>(resolve =>
-        canvas.toBlob(resolve, type, settings.imageCompressionQuality));
-      const outType = file.type === 'image/png' ? 'image/png' : 'image/webp';
-      let blob = await toBlob(outType);
-      if (!blob && outType === 'image/webp') blob = await toBlob('image/jpeg');
+      // Everything (including PNG) re-encodes to lossy WebP via a bundled
+      // WASM encoder (see webp-encoder.ts) rather than the browser's own
+      // `canvas.toBlob('image/webp', ...)` — Safari/iOS can *decode* WebP
+      // but has never implemented canvas *encoding* to it, so toBlob would
+      // silently resolve `null` there. The WASM path works identically on
+      // every platform, so iOS gets the same compression as desktop. WebP's
+      // lossy mode still supports an alpha channel, so transparent PNGs
+      // are preserved.
+      let blob: Blob | null = null;
+      let outType = 'image/webp';
+      try {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const encoded = await encodeWebp(imageData, { quality: Math.round(settings.imageCompressionQuality * 100) });
+        blob = new Blob([encoded], { type: 'image/webp' });
+      } catch (err) {
+        console.error('[Spark Memo] WASM WebP encode failed, falling back to JPEG', err);
+        outType = 'image/jpeg';
+        blob = await new Promise<Blob | null>(resolve =>
+          canvas.toBlob(resolve, outType, settings.imageCompressionQuality));
+      }
+      console.log('[Spark Memo] compress', {
+        originalType: file.type,
+        originalSize: file.size,
+        originalDims: `${bitmap.width}x${bitmap.height}`,
+        targetDims: `${width}x${height}`,
+        outType,
+        outSize: blob?.size,
+      });
       if (!blob || blob.size >= file.size) return uncompressed;
       return { blob, compressed: true, originalSize: file.size, compressedSize: blob.size };
     } catch (err) {

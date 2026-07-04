@@ -777,7 +777,7 @@ class SparkMemoSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('压缩质量')
-      .setDesc('数值越低文件越小、画质越差（0.1–1.0）。仅对压缩后转为 WebP 的图片生效，PNG 无损不受影响')
+      .setDesc('数值越低文件越小、画质越差（0.1–1.0）。所有图片（含 PNG）压缩后都会转为 WebP')
       .addSlider(slider =>
         slider
           .setLimits(0.1, 1, 0.05)
@@ -832,6 +832,10 @@ class SparkMemoSettingTab extends PluginSettingTab {
           }),
       );
 
+    containerEl.createEl('div', {
+      cls: 'jp-settings-version',
+      text: `Spark Memo v${__PLUGIN_VERSION__} (build ${__BUILD_NUMBER__})`,
+    });
   }
 }
 

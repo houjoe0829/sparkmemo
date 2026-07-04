@@ -4,8 +4,8 @@
   "description": "Obsidian plugin – Spark Memo journal timestamp highlighter",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "esbuild src/main.ts --bundle --external:obsidian --external:electron --external:@codemirror/* --external:@lezer/* --external:builtin-modules --format=cjs --target=es2018 --sourcemap=inline --log-level:info --watch --outfile:dist/main.js",
-    "build": "tsc -noEmit -skipLibCheck && esbuild src/main.ts --bundle --external:obsidian --external:electron --external:@codemirror/* --external:@lezer/* --external:builtin-modules --format=cjs --target=es2018 --sourcemap --tree-shaking --outfile=dist/main.js",
+    "dev": "node scripts/build.js --watch",
+    "build": "tsc -noEmit -skipLibCheck && node scripts/build.js",
     "deploy": "bash deploy.sh"
   },
   "keywords": [
@@ -26,6 +26,7 @@
     "typescript": "^5.5.3"
   },
   "dependencies": {
+    "@jsquash/webp": "^1.5.0",
     "obsidian-daily-notes-interface": "^0.9.5"
   }
 }

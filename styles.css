@@ -135,11 +135,12 @@
 .is-mobile .jp-capture-card:focus-within {
   border-color: var(--background-modifier-border-hover);
 }
-/* iOS WebView clips the first character of a <textarea> placeholder when
-   padding-left is 0. A small horizontal pad keeps "What's happening?"
-   from getting its W cut off, without changing the desktop layout. */
+/* iOS WebView clips the top-left corner of a <textarea> placeholder's first
+   glyph when both padding-top and padding-left are near 0. A small pad on
+   all sides keeps "What's happening?" from getting its W corner cut off,
+   without changing the desktop layout. */
 .is-mobile .jp-capture-input {
-  padding: 2px 4px;
+  padding: 4px 4px 2px 6px;
 }
 .jp-capture-input {
   width: 100%;
@@ -1533,4 +1534,10 @@
   margin-top: 0;
   min-height: 0;
   transition: margin-top 0.3s ease, min-height 0.3s ease;
+}
+.jp-settings-version {
+  margin-top: 1.5em;
+  font-size: 0.75em;
+  color: var(--text-faint);
+  text-align: center;
 }
