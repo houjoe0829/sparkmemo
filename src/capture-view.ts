@@ -110,8 +110,11 @@ export class JournalCaptureView extends ItemView {
   private textareaEl!: HTMLTextAreaElement;
   private submitBtn!: HTMLButtonElement;
   private attachmentListEl!: HTMLElement;
+  private captureTimePillEl!: HTMLElement;
   /** Images picked but not yet appended to the note text; flushed on submit. */
   private pendingImages: TFile[] = [];
+  /** Recordings made but not yet appended to the note text; flushed on submit. */
+  private pendingAudio: { file: TFile; duration: string }[] = [];
   /**
    * Date + HH:MM taken from a photo's capture time, overriding "today, now"
    * for the next submit — the entry is written into `date`'s daily note
@@ -613,6 +616,10 @@ export class JournalCaptureView extends ItemView {
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
+    // Pending-image thumbnail strip — sits above the textarea, pushing it
+    // down, so added images preview like an attachment card would.
+    this.attachmentListEl = this.inputCardEl.createDiv({ cls: 'jp-capture-attachments jp-capture-attachments--empty' });
+
     // Wrapper for textarea
     const inputWrapper = this.inputCardEl.createDiv({ cls: 'jp-capture-input-wrapper' });
 
@@ -1049,6 +1056,7 @@ export class JournalCaptureView extends ItemView {
           // user can reload the plugin and the text already on screen is kept.
           if (realtimeActive && audioCtx) flushCurrentSegment();
           const flushChain = pendingFlush;
+          const duration = formatDuration(performance.now() - recordStartedAt);
           teardownAnalyser();
           const audioBlob = new Blob(audioChunks, { type: outType });
           const wantSTT = sttConfigured();
@@ -1061,11 +1069,13 @@ export class JournalCaptureView extends ItemView {
           recBar.addClass('is-transcribing');
           recBar.style.display = '';
           try {
-            const audioEmbed = await this.saveAudioToVault(audioBlob);
+            const audioFile = await this.saveAudioToVault(audioBlob);
             let text = '';
             // In realtime mode, keep the streamed draft as-is (faster, no
-            // extra API call) and just append audio. In non-realtime mode,
-            // transcribe the full recording now.
+            // extra API call). In non-realtime mode, transcribe the full
+            // recording now. Either way, the audio itself becomes a pending
+            // attachment (like images) instead of an inline embed link —
+            // only the transcript text lands in the textarea.
             if (!realtimeActive && wantSTT) {
               try {
                 text = (await this.transcribeAudio(audioBlob)).trim();
@@ -1074,15 +1084,13 @@ export class JournalCaptureView extends ItemView {
               }
             }
             // Drain any still-in-flight live segments before we touch the
-            // text again. This guarantees the embed lands at the end of the
-            // streamed text, never in the middle.
+            // text again, so the transcript is fully settled before we hand
+            // control back to the user.
             await flushChain;
-            if (realtimeActive) {
-              // Keep the live draft; append the audio embed after it.
-              appendStreamedText(` ${audioEmbed}`);
-            } else {
-              insertAtCursor(text.length > 0 ? `${text} ${audioEmbed}` : audioEmbed);
+            if (!realtimeActive && text.length > 0) {
+              insertAtCursor(text);
             }
+            this.addPendingAudio(audioFile, duration);
           } catch (err) {
             new Notice(`录音保存失败：${err instanceof Error ? err.message : String(err)}`);
           } finally {
@@ -1147,14 +1155,9 @@ export class JournalCaptureView extends ItemView {
           // Analyser/realtime are optional — recording still works without them.
         }
 
-        // Switch the mic icon to a stop square first so the user gets
-        // immediate click feedback, then add the is-recording class so the
-        // colour change is animated (not a flash). Trigger the focus-
-        // recording mode (icon group + submit collapse) at the same time
-        // as the recBar reveal so the two animations overlap and feel like
-        // a single transition rather than a sequence.
-        setIcon(micBtn, 'square');
-        micBtn.addClass('is-recording');
+        // Trigger the focus-recording mode (icon group + submit collapse) at
+        // the same time as the recBar reveal so the two animations overlap
+        // and feel like a single transition rather than a sequence.
         actions.addClass('is-recording');
 
         recordingTimeout = window.setTimeout(() => {
@@ -1176,25 +1179,15 @@ export class JournalCaptureView extends ItemView {
     // from the submit button.
     const leftGroup = actions.createDiv({ cls: 'jp-capture-left-group' });
 
-    // Left icon group: image + mic
+    // Single "+" button — opens a dropdown to choose image upload or
+    // recording, instead of showing both as separate icon buttons.
     const buttonRow = leftGroup.createDiv({ cls: 'jp-capture-button-row' });
 
-    // Image upload button
-    const imageBtn = buttonRow.createEl('button', {
-      cls: 'jp-capture-image-btn',
-      attr: { 'aria-label': '上传图片' },
+    const plusBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-plus-btn',
+      attr: { 'aria-label': '添加' },
     });
-    setIcon(imageBtn, 'image');
-    imageBtn.addEventListener('click', () => {
-      fileInput.click();
-    });
-
-    // Microphone button
-    const micBtn = buttonRow.createEl('button', {
-      cls: 'jp-capture-mic-btn',
-      attr: { 'aria-label': '录音' },
-    });
-    setIcon(micBtn, 'mic');
+    setIcon(plusBtn, 'plus');
 
     // Shared stop path: stop recording + restore the idle UI (icon group,
     // submit button) with a smooth transition. The actual text insert /
@@ -1206,47 +1199,46 @@ export class JournalCaptureView extends ItemView {
     // removed from .is-recording once the last segment has landed.
     const doStop = async () => {
       await stopRecording();
-      micBtn.removeClass('is-recording');
-      setIcon(micBtn, 'mic');
     };
 
-    micBtn.addEventListener('click', async () => {
-      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-        await startRecording();
-      } else {
-        await doStop();
-      }
+    plusBtn.addEventListener('click', (evt: MouseEvent) => {
+      const menu = new Menu();
+      menu.addItem(item => item
+        .setTitle('上传图片')
+        .setIcon('image')
+        .onClick(() => fileInput.click()));
+      menu.addItem(item => item
+        .setTitle('录音')
+        .setIcon('mic')
+        .onClick(async () => {
+          if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+            await startRecording();
+          } else {
+            await doStop();
+          }
+        }));
+      menu.showAtMouseEvent(evt);
     });
 
     // Stop button centered under the waveform.
     recStopBtn.addEventListener('click', () => void doStop());
 
-    // Clear button — wipes the textarea and trashes any embedded audio files.
-    const clearBtn = buttonRow.createEl('button', {
-      cls: 'jp-capture-clear-btn',
-      attr: { 'aria-label': '清空' },
-    });
-    setIcon(clearBtn, 'delete');
-    clearBtn.addEventListener('click', () => {
-      const value = this.textareaEl.value;
-      if (value.trim().length === 0 && this.pendingImages.length === 0) return; // nothing to clear
-      void this.confirmClearInput(value);
-    });
-
-    // Pending-image thumbnail strip, shown to the right of the icon-button
-    // pill (as a sibling, not nested inside it) so the remove badge isn't
-    // clipped by the pill's rounded border.
-    this.attachmentListEl = leftGroup.createDiv({ cls: 'jp-capture-attachments jp-capture-attachments--empty' });
+    // Capture-time override pill — shown to the right of the icon-button
+    // pill once the user opts into using an image's capture time instead of
+    // "now". Removable, since the user may change their mind before submit.
+    this.captureTimePillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-capture-time-pill--hidden' });
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
-      text: 'NOTE',
+      attr: { 'aria-label': '记录' },
     });
+    setIcon(this.submitBtn, 'arrow-up');
     this.submitBtn.addEventListener('click', () => {
       void this.handleSubmit();
     });
 
     this.refreshSubmitState();
+    this.renderCaptureTimePill();
   }
 
   /**
@@ -1330,15 +1322,21 @@ export class JournalCaptureView extends ItemView {
     this.refreshSubmitState();
   }
 
-  /** Re-renders the thumbnail strip from `pendingImages`. */
+  /** Re-renders the attachment strip from `pendingImages` and `pendingAudio`. */
   private renderAttachmentList() {
     this.attachmentListEl.empty();
-    this.attachmentListEl.toggleClass('jp-capture-attachments--empty', this.pendingImages.length === 0);
+    const isEmpty = this.pendingImages.length === 0 && this.pendingAudio.length === 0;
+    this.attachmentListEl.toggleClass('jp-capture-attachments--empty', isEmpty);
+
     for (const file of this.pendingImages) {
       const thumb = this.attachmentListEl.createDiv({ cls: 'jp-capture-attachment-thumb' });
       const imgWrap = thumb.createDiv({ cls: 'jp-capture-attachment-thumb-img' });
-      const img = imgWrap.createEl('img', { attr: { src: this.app.vault.getResourcePath(file) } });
+      const src = this.app.vault.getResourcePath(file);
+      const img = imgWrap.createEl('img', { attr: { src } });
       img.alt = file.name;
+      imgWrap.addEventListener('click', () => {
+        new ImagePreviewModal(this.app, src, file.name).open();
+      });
       const removeBtn = thumb.createEl('button', {
         cls: 'jp-capture-attachment-remove',
         attr: { 'aria-label': '移除图片' },
@@ -1348,9 +1346,64 @@ export class JournalCaptureView extends ItemView {
         this.pendingImages = this.pendingImages.filter(f => f !== file);
         this.renderAttachmentList();
         this.refreshSubmitState();
-        if (this.pendingImages.length === 0) this.pendingCaptureOverride = null;
+        if (this.pendingImages.length === 0) {
+          this.pendingCaptureOverride = null;
+          this.renderCaptureTimePill();
+        }
       });
     }
+
+    for (const audio of this.pendingAudio) {
+      const card = this.attachmentListEl.createDiv({ cls: 'jp-capture-attachment-audio' });
+      const iconEl = card.createSpan({ cls: 'jp-capture-attachment-audio-icon' });
+      setIcon(iconEl, 'mic');
+      card.createSpan({ cls: 'jp-capture-attachment-audio-duration', text: audio.duration });
+      const removeBtn = card.createEl('button', {
+        cls: 'jp-capture-attachment-remove',
+        attr: { 'aria-label': '移除录音' },
+      });
+      setIcon(removeBtn, 'x');
+      removeBtn.addEventListener('click', async () => {
+        this.pendingAudio = this.pendingAudio.filter(a => a !== audio);
+        this.renderAttachmentList();
+        this.refreshSubmitState();
+        try {
+          await this.app.fileManager.trashFile(audio.file);
+        } catch (err) {
+          console.error('[Spark Memo] trash pending audio failed', err);
+        }
+      });
+    }
+  }
+
+  /**
+   * Shows/hides the capture-time override pill next to the image/mic
+   * buttons. Visible only while `pendingCaptureOverride` is set; clicking
+   * its × reverts to recording with the current time.
+   */
+  private renderCaptureTimePill() {
+    this.captureTimePillEl.empty();
+    const override = this.pendingCaptureOverride;
+    this.captureTimePillEl.toggleClass('jp-capture-time-pill--hidden', !override);
+    if (!override) return;
+
+    const iconEl = this.captureTimePillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
+    setIcon(iconEl, 'clock');
+    const label = override.date.isSame(moment(), 'day')
+      ? override.time
+      : `${override.date.format('MM-DD')} ${override.time}`;
+    this.captureTimePillEl.createSpan({ cls: 'jp-capture-time-pill-text', text: label });
+
+    const clearBtn = this.captureTimePillEl.createEl('button', {
+      cls: 'jp-capture-time-pill-clear',
+      attr: { 'aria-label': '改回使用当前时间' },
+    });
+    setIcon(clearBtn, 'x');
+    clearBtn.addEventListener('click', () => {
+      this.pendingCaptureOverride = null;
+      this.renderCaptureTimePill();
+      new Notice('已改回使用当前时间记录');
+    });
   }
 
   /**
@@ -1390,6 +1443,7 @@ export class JournalCaptureView extends ItemView {
     if (useImageTime) {
       const capturedDate = moment(capturedAt);
       this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(capturedAt) };
+      this.renderCaptureTimePill();
       new Notice(
         capturedDate.isSame(moment(), 'day')
           ? `✅ 已改用图片时间 ${this.pendingCaptureOverride.time} 记录`
@@ -1398,15 +1452,21 @@ export class JournalCaptureView extends ItemView {
     }
   }
 
-  private async saveAudioToVault(blob: Blob): Promise<string> {
+  private async saveAudioToVault(blob: Blob): Promise<TFile> {
     const ext = blob.type === 'audio/mp4' ? 'm4a' : 'webm';
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const baseName = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.${ext}`;
     const filePath = await this.resolveAttachmentPath(this.plugin.settings.recordingFolder, baseName);
     const buffer = await blob.arrayBuffer();
-    const file = await this.app.vault.createBinary(filePath, buffer);
-    return `![[${file.path}]]`;
+    return this.app.vault.createBinary(filePath, buffer);
+  }
+
+  /** Adds a saved recording to the pending-attachments strip (not the text body). */
+  private addPendingAudio(file: TFile, duration: string) {
+    this.pendingAudio.push({ file, duration });
+    this.renderAttachmentList();
+    this.refreshSubmitState();
   }
 
   /**
@@ -1481,68 +1541,11 @@ export class JournalCaptureView extends ItemView {
   // ── Behaviour ───────────────────────────────────────────────────────────
 
   private refreshSubmitState() {
-    const hasContent = this.textareaEl.value.trim().length > 0 || this.pendingImages.length > 0;
+    const hasContent = this.textareaEl.value.trim().length > 0
+      || this.pendingImages.length > 0
+      || this.pendingAudio.length > 0;
     this.submitBtn.toggleClass('jp-capture-submit--disabled', !hasContent);
     this.submitBtn.disabled = !hasContent;
-  }
-
-  /**
-   * Confirm-then-clear the capture textarea. Any `![[*.m4a]]` audio embeds
-   * in the text are extracted and their files moved to Obsidian's trash
-   * (recoverable), matching the timeline's delete-with-audio behaviour.
-   * Image embeds are text-only cleared (no file deletion) — clearing is for
-   * discarding a draft, not housekeeping attachments.
-   */
-  private async confirmClearInput(value: string): Promise<void> {
-    const audioPaths = extractAudioEmbeds(value);
-    const modal = new Modal(this.app);
-    modal.titleEl.setText('清空输入框');
-    modal.contentEl.addClass('jp-clear-confirm');
-    modal.contentEl.createEl('p', {
-      cls: 'jp-clear-confirm-question',
-      text: audioPaths.length > 0
-        ? `确定清空输入框吗？将同时删除 ${audioPaths.length} 个录音文件（移入回收站，可恢复）。`
-        : '确定清空输入框吗？',
-    });
-    if (audioPaths.length > 0) {
-      const list = modal.contentEl.createEl('ul', { cls: 'jp-clear-confirm-list' });
-      for (const p of audioPaths) list.createEl('li', { text: p });
-    }
-    const actions = modal.contentEl.createDiv({ cls: 'jp-delete-confirm-actions' });
-    const cancelBtn = actions.createEl('button', { cls: 'jp-delete-confirm-cancel', text: '取消' });
-    cancelBtn.addEventListener('click', () => modal.close());
-    const confirmBtn = actions.createEl('button', {
-      cls: 'mod-warning jp-delete-confirm-confirm',
-      text: '清空',
-    });
-    confirmBtn.addEventListener('click', async () => {
-      modal.close();
-      // Trash embedded audio files (recoverable via Obsidian trash).
-      let trashed = 0;
-      for (const path of audioPaths) {
-        const af = this.app.vault.getAbstractFileByPath(path);
-        if (!(af instanceof TFile)) continue;
-        try {
-          await this.app.fileManager.trashFile(af);
-          trashed++;
-        } catch (err) {
-          console.error(`[Spark Memo] trash audio failed: ${path}`, err);
-        }
-      }
-      this.textareaEl.value = '';
-      this.pendingImages = [];
-      this.pendingCaptureOverride = null;
-      this.renderAttachmentList();
-      this.refreshSubmitState();
-      this.autoResizeTextarea();
-      new Notice(
-        audioPaths.length > 0
-          ? `🧹 已清空，${trashed}/${audioPaths.length} 个录音文件移入回收站`
-          : '🧹 已清空',
-      );
-    });
-    window.setTimeout(() => cancelBtn.focus(), 0);
-    modal.open();
   }
 
   private autoResizeTextarea() {
@@ -2535,11 +2538,14 @@ export class JournalCaptureView extends ItemView {
 
   private async handleSubmit(): Promise<void> {
     const text = this.textareaEl.value;
-    if (text.trim().length === 0 && this.pendingImages.length === 0) return;
+    if (text.trim().length === 0 && this.pendingImages.length === 0 && this.pendingAudio.length === 0) return;
 
-    const imageEmbeds = this.pendingImages.map(file => `![[${file.path}]]`).join(' ');
-    const raw = imageEmbeds
-      ? (text.trim().length > 0 ? `${text}\n${imageEmbeds}` : imageEmbeds)
+    const embeds = [
+      ...this.pendingImages.map(file => `![[${file.path}]]`),
+      ...this.pendingAudio.map(a => `![[${a.file.path}]]`),
+    ].join(' ');
+    const raw = embeds
+      ? (text.trim().length > 0 ? `${text}\n${embeds}` : embeds)
       : text;
 
     if (!appHasDailyNotesPluginLoaded()) {
@@ -2549,8 +2555,8 @@ export class JournalCaptureView extends ItemView {
 
     this.submitBtn.disabled = true;
     this.submitBtn.addClass('jp-capture-submit--disabled');
-    const originalText = this.submitBtn.textContent;
-    this.submitBtn.setText('写入中…');
+    this.submitBtn.addClass('jp-capture-submit--loading');
+    setIcon(this.submitBtn, 'loader-2');
 
     try {
       const targetDate = this.pendingCaptureOverride?.date;
@@ -2566,8 +2572,10 @@ export class JournalCaptureView extends ItemView {
 
       this.textareaEl.value = '';
       this.pendingImages = [];
+      this.pendingAudio = [];
       this.pendingCaptureOverride = null;
       this.renderAttachmentList();
+      this.renderCaptureTimePill();
       this.autoResizeTextarea();
 
       // vault.modify will catch-up an already-loaded day's section
@@ -2591,7 +2599,8 @@ export class JournalCaptureView extends ItemView {
       console.error('[Spark Memo] submit failed', err);
       new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      this.submitBtn.setText(originalText ?? 'NOTE');
+      this.submitBtn.removeClass('jp-capture-submit--loading');
+      setIcon(this.submitBtn, 'arrow-up');
       this.refreshSubmitState();
     }
   }
@@ -2664,6 +2673,7 @@ class ImageTimeConfirmModal extends Modal {
   onOpen(): void {
     const { contentEl, titleEl } = this;
     titleEl.setText('图片时间与当前时间不符');
+    titleEl.addClass('jp-modal-title-flush');
     contentEl.addClass('jp-image-time-confirm');
 
     contentEl.createEl('p', {
@@ -2729,6 +2739,7 @@ class DeleteConfirmModal extends Modal {
   onOpen(): void {
     const { contentEl, titleEl } = this;
     titleEl.setText(this.opts.title);
+    titleEl.addClass('jp-modal-title-flush');
 
     contentEl.addClass('jp-delete-confirm');
 
@@ -2785,6 +2796,28 @@ class DeleteConfirmModal extends Modal {
     });
     // Initial focus on cancel — safer default for a destructive dialog.
     window.setTimeout(() => cancelBtn.focus(), 0);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+// ── Image preview modal ──────────────────────────────────────────────────
+
+/** Full-size, chrome-free preview of a pending image thumbnail. */
+class ImagePreviewModal extends Modal {
+  constructor(app: import('obsidian').App, private src: string, private alt: string) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass('jp-image-preview-modal');
+    const img = this.contentEl.createEl('img', {
+      cls: 'jp-image-preview-img',
+      attr: { src: this.src, alt: this.alt },
+    });
+    img.addEventListener('click', () => this.close());
   }
 
   onClose(): void {

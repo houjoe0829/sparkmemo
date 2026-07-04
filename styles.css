@@ -167,23 +167,26 @@
   display: inline-flex;
   flex-direction: row;
   align-items: center;
+  justify-content: center;
   gap: 0;
+  width: 30px;
+  height: 30px;
   background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary));
   border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
-  border-radius: 999px;
-  padding: 0 4px;
+  border-radius: 50%;
+  padding: 0;
 }
-.jp-capture-image-btn,
-.jp-capture-mic-btn,
-.jp-capture-clear-btn {
+.jp-capture-plus-btn {
   background: transparent !important;
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
   color: color-mix(in srgb, var(--jp-tl-dot) 70%, var(--text-muted)) !important;
   cursor: pointer;
-  padding: 3px 6px !important;
-  border-radius: 999px;
+  width: 100%;
+  height: 100%;
+  padding: 0 !important;
+  border-radius: 50%;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -193,15 +196,11 @@
   -webkit-appearance: none !important;
   appearance: none !important;
 }
-.jp-capture-image-btn:hover,
-.jp-capture-mic-btn:hover,
-.jp-capture-clear-btn:hover {
+.jp-capture-plus-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
-.jp-capture-image-btn svg,
-.jp-capture-mic-btn svg,
-.jp-capture-clear-btn svg {
+.jp-capture-plus-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -210,35 +209,37 @@
   stroke: currentColor;
   stroke-width: 2;
 }
-.jp-capture-mic-btn.is-recording {
-  color: var(--text-error);
-  animation: jp-recording-pulse 1s ease-in-out infinite;
-}
 .jp-capture-left-group {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
+/* Pending-image strip sits above the textarea, pushing it down — thumbnails
+   read like attachment previews rather than inline icon badges. */
 .jp-capture-attachments {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 .jp-capture-attachments--empty {
   display: none;
+  margin-bottom: 0;
 }
 .jp-capture-attachment-thumb {
   position: relative;
-  width: 24px;
-  height: 24px;
+  width: 56px;
+  height: 56px;
   flex-shrink: 0;
 }
 .jp-capture-attachment-thumb-img {
   width: 100%;
   height: 100%;
-  border-radius: 6px;
+  border-radius: 10px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
+  cursor: zoom-in;
 }
 .jp-capture-attachment-thumb img {
   width: 100%;
@@ -248,15 +249,15 @@
 }
 .jp-capture-attachment-remove {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 14px;
-  height: 14px;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
   padding: 0 !important;
   border: none !important;
   outline: none !important;
   border-radius: 50%;
-  background: var(--text-error) !important;
+  background: rgba(0, 0, 0, 0.65) !important;
   color: white !important;
   display: flex !important;
   align-items: center;
@@ -264,14 +265,93 @@
   cursor: pointer;
   box-shadow: 0 0 0 1px var(--background-primary);
 }
+.jp-capture-attachment-remove:hover {
+  background: rgba(0, 0, 0, 0.85) !important;
+}
 .jp-capture-attachment-remove svg {
-  width: 9px !important;
-  height: 9px !important;
+  width: 11px !important;
+  height: 11px !important;
   stroke: currentColor;
   stroke-width: 3;
 }
-.jp-capture-mic-btn {
-  transition: color 0.25s ease, background-color 0.25s ease;
+
+/* Pending-recording card: mirrors the image thumbnail slot but shows a mic
+   icon + duration instead of a preview, since audio has no visual frame. */
+.jp-capture-attachment-audio {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 56px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--jp-tl-dot) 10%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
+  color: var(--jp-tl-dot);
+  flex-shrink: 0;
+}
+.jp-capture-attachment-audio-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.jp-capture-attachment-audio-icon svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+.jp-capture-attachment-audio-duration {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Capture-time override pill: shown next to the image/mic buttons once the
+   user opts into an image's capture time instead of "now". */
+.jp-capture-time-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--jp-tl-dot) 12%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 26%, transparent);
+  color: var(--jp-tl-dot);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.jp-capture-time-pill--hidden {
+  display: none;
+}
+.jp-capture-time-pill-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.jp-capture-time-pill-icon svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+.jp-capture-time-pill-clear {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0 !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: inherit !important;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.jp-capture-time-pill-clear:hover {
+  opacity: 1;
+}
+.jp-capture-time-pill-clear svg {
+  width: 10px !important;
+  height: 10px !important;
+  stroke-width: 3;
 }
 @keyframes jp-recording-pulse {
   0%, 100% { opacity: 1; }
@@ -323,9 +403,16 @@
   font-weight: 600;
   color: var(--text-normal);
 }
+/* Hidden while actively recording — the timer + waveform already say
+   enough. Only shown once transcription starts, where it's the sole cue
+   that something is still happening (the timer freezes at that point). */
 .jp-recording-status {
+  display: none;
   font-size: 11px;
   color: var(--text-muted);
+}
+.jp-recording-bar.is-transcribing .jp-recording-status {
+  display: block;
 }
 /* Waveform + meta live in a flex row; stop button sits centered below. */
 .jp-recording-bar .jp-recording-waveform,
@@ -401,29 +488,51 @@
   justify-content: space-between;
   margin-top: 10px;
 }
+/* Circular icon submit button — filled/accent when there's content to send,
+   flat/muted when the input is empty. */
 .jp-capture-submit {
-  padding: 6px 18px;
-  background: color-mix(in srgb, var(--jp-tl-dot) 14%, var(--background-primary));
-  color: var(--jp-tl-dot);
-  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 28%, transparent);
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  width: 34px;
+  height: 34px;
+  padding: 0 !important;
+  flex-shrink: 0;
+  background: var(--jp-tl-dot) !important;
+  color: var(--text-on-accent, #fff) !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 50%;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  transition: background-color 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
-.jp-capture-submit:hover {
-  background: color-mix(in srgb, var(--jp-tl-dot) 22%, var(--background-primary));
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--jp-tl-dot) 25%, transparent);
+.jp-capture-submit svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+.jp-capture-submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--jp-tl-dot) 85%, white) !important;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--jp-tl-dot) 40%, transparent) !important;
 }
 .jp-capture-submit:active {
   transform: translateY(1px);
 }
 .jp-capture-submit--disabled,
 .jp-capture-submit:disabled {
-  opacity: 0.45;
+  background: color-mix(in srgb, var(--text-faint) 25%, var(--background-primary)) !important;
+  color: var(--text-faint) !important;
   cursor: not-allowed;
+  box-shadow: none !important;
+}
+.jp-capture-submit--loading svg {
+  animation: jp-capture-submit-spin 0.8s linear infinite;
+}
+@keyframes jp-capture-submit-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Empty state */
@@ -666,7 +775,8 @@
   margin: 4px 0;
 }
 
-/* Override Obsidian default textarea focus styles for an immersive input */
+/* Override Obsidian default textarea focus/hover styles for an immersive
+   input — the cursor already shows it's active, so no hover highlight. */
 .jp-capture-input:focus,
 .jp-capture-input:focus-visible,
 .jp-capture-input:hover,
@@ -675,6 +785,7 @@
   outline: none !important;
   box-shadow: none !important;
   -webkit-box-shadow: none !important;
+  background: transparent !important;
 }
 
 /* Toolbar layout — spacer pushes date-nav cluster right, hidden state for
@@ -795,9 +906,40 @@
   cursor: pointer;
 }
 
+/* Obsidian's default modal title reserves left padding to visually balance
+   the close (×) button, which makes the title look indented relative to
+   the body text below it. Flush it left for our confirm modals. */
+.jp-modal-title-flush {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+
 /* ── Image-time confirm modal ─────────────────────────────────────────────
    Shown when an added image's capture time (EXIF, or last-modified as a
    fallback) differs from the current time by more than 5 minutes. */
+/* ── Image preview modal ──────────────────────────────────────────────────
+   Chrome-free, dark-backdrop full-size preview of a pending thumbnail. */
+.jp-image-preview-modal {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+}
+.jp-image-preview-modal .modal-content {
+  padding: 0;
+  display: flex;
+}
+.jp-image-preview-img {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  cursor: zoom-out;
+}
+
 .jp-image-time-confirm {
   display: flex;
   flex-direction: column;
@@ -1289,25 +1431,6 @@
 /* Dark theme: bump level-0 contrast so empty days don't disappear. */
 .theme-dark .jp-stats-cell.level-0 {
   background: color-mix(in srgb, var(--text-faint) 18%, transparent);
-}
-
-/* ── Clear-input confirm modal ──────────────────────────────────────────── */
-.jp-clear-confirm .jp-clear-confirm-question {
-  margin: 0 0 10px;
-  color: var(--text-normal);
-  line-height: 1.6;
-}
-.jp-clear-confirm-list {
-  margin: 0 0 14px;
-  padding-left: 20px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  max-height: 160px;
-  overflow: auto;
-}
-.jp-clear-confirm-list li {
-  word-break: break-all;
-  margin: 2px 0;
 }
 
 /* ── Focus-recording mode ───────────────────────────────────────────────── */
