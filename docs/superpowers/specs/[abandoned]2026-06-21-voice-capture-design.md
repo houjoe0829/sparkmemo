@@ -1,7 +1,7 @@
 # 语音快速记录 — 设计文档
 
 **日期**：2026-06-21
-**状态**：设计中
+**状态**：[abandoned] Path B（Action Button / `obsidian://journal-partner` URL 协议）已从代码中移除，不再推进
 **分支**：`feat/voice-capture`
 
 ---
