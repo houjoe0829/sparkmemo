@@ -108,26 +108,33 @@ export default class SparkMemoPlugin extends Plugin {
   // ── Quick-capture write path (shared) ─────────────────────────────────────
 
   /**
-   * Append a single entry to today's `## Journal` section.
+   * Append a single entry to a daily note's `## Journal` section.
    *
-   * Used by the in-app capture textarea. Creates today's daily note and the
-   * journal heading if they don't exist yet.
+   * Used by the in-app capture textarea. Creates the target day's daily note
+   * and the journal heading if they don't exist yet.
    *
-   * @param text     Raw user content (may contain newlines).
-   * @param ts       Timestamp string in `HH:MM` form. Defaults to now.
-   * @param audio    Optional vault-relative path to an audio attachment;
-   *                 when provided, ` ![[path]]` is appended to the entry.
-   * @returns        true on success, false if Daily Notes plugin is missing
-   *                 or the write fails.
+   * @param text       Raw user content (may contain newlines).
+   * @param ts         Timestamp string in `HH:MM` form. Defaults to now.
+   * @param audio      Optional vault-relative path to an audio attachment;
+   *                   when provided, ` ![[path]]` is appended to the entry.
+   * @param targetDate Which day's daily note to write into. Defaults to
+   *                   today — set when the entry is backdated to an image's
+   *                   capture date.
+   * @returns          true on success, false if Daily Notes plugin is
+   *                   missing or the write fails.
    */
-  async writeToTodayJournal(text: string, ts?: string, audio?: string): Promise<boolean> {
+  async writeJournalEntry(
+    text: string,
+    ts?: string,
+    audio?: string,
+    targetDate?: moment.Moment,
+  ): Promise<boolean> {
     if (!appHasDailyNotesPluginLoaded()) {
       new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
       return false;
     }
     const trimmed = text.trim();
     const audioPath = audio?.trim() ?? '';
-    console.log("音频路径:", audioPath)
     // Require at least one of text / audio — an entry with neither is junk.
     if (trimmed.length === 0 && audioPath.length === 0) return false;
 
@@ -140,18 +147,19 @@ export default class SparkMemoPlugin extends Plugin {
       ? `${trimmed}${trimmed.length > 0 ? ' ' : ''}![[${audioPath}]]`
       : trimmed;
     const line = buildEntryLine(body.replace(/\r\n/g, '\n'), stamp);
+    const day = targetDate ?? moment();
 
     try {
-      let file = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+      let file = getDailyNote(day, getAllDailyNotes()) as TFile | null;
       if (!file) {
-        file = (await createDailyNote(moment())) as TFile;
+        file = (await createDailyNote(day)) as TFile;
       }
       await this.app.vault.process(file, content =>
         appendToJournalSection(content, this.settings, line),
       );
       return true;
     } catch (err) {
-      console.error('[Spark Memo] writeToTodayJournal failed', err);
+      console.error('[Spark Memo] writeJournalEntry failed', err);
       new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
@@ -754,6 +762,18 @@ class SparkMemoSettingTab extends PluginSettingTab {
       'Vault 相对路径，用于存放粘贴/上传的图片。留空则使用 Obsidian 附件文件夹。',
       'imageFolder',
     );
+
+    new Setting(containerEl)
+      .setName('图片时间校验')
+      .setDesc('添加图片时，若图片拍摄时间与当前时间相差超过 5 分钟，弹窗询问是否改用图片时间记录')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.imageTimeCheck)
+          .onChange(async value => {
+            this.plugin.settings.imageTimeCheck = value;
+            await this.plugin.saveSettings();
+          }),
+      );
 
     new Setting(containerEl)
       .setName('提交快捷键')
