@@ -1,10 +1,10 @@
 {
-  "id": "journal-partner",
-  "name": "Journal Partner",
-  "version": "2.6.0",
+  "id": "spark-memo",
+  "name": "Spark Memo",
+  "version": "0.0.1",
   "minAppVersion": "1.4.0",
   "description": "Highlight timestamps in your Journal section, capture quick notes, images, and audio from a sidebar, dictate with real-time speech-to-text, and review your year with a heatmap.",
-  "author": "hankzhao",
-  "authorUrl": "https://github.com/zhaohongxuan",
+  "author": "Joe Hou",
+  "authorUrl": "https://github.com/houjoe0829",
   "isDesktopOnly": false
 }

@@ -51,9 +51,9 @@ import {
   formatChineseWordCount,
   getHeatmapLevel,
 } from './stats';
-import type JournalPartnerPlugin from './main';
+import type SparkMemoPlugin from './main';
 
-export const CAPTURE_VIEW_TYPE = 'journal-partner-capture-view';
+export const CAPTURE_VIEW_TYPE = 'spark-memo-capture-view';
 
 /**
  * Which "delete" action the context menu picked. Surfacing this as a type
@@ -76,7 +76,7 @@ interface DaySection {
 }
 
 export class JournalCaptureView extends ItemView {
-  private plugin: JournalPartnerPlugin;
+  private plugin: SparkMemoPlugin;
 
   // Top-level tab state
   private currentTab: 'capture' | 'stats' | 'search' | 'review' = 'capture';
@@ -169,7 +169,7 @@ export class JournalCaptureView extends ItemView {
   /** Min pixel delta between events that counts as a real scroll move. */
   private readonly scrollDeltaThreshold = 6;
 
-  constructor(leaf: WorkspaceLeaf, plugin: JournalPartnerPlugin) {
+  constructor(leaf: WorkspaceLeaf, plugin: SparkMemoPlugin) {
     super(leaf);
     this.plugin = plugin;
   }
@@ -621,7 +621,8 @@ export class JournalCaptureView extends ItemView {
       const matches =
         (shortcut.includes('shift') ? evt.shiftKey : !evt.shiftKey) &&
         (shortcut.includes('ctrl') ? evt.ctrlKey : !evt.ctrlKey) &&
-        (shortcut.includes('alt') ? evt.altKey : !evt.altKey);
+        (shortcut.includes('alt') ? evt.altKey : !evt.altKey) &&
+        (shortcut.includes('cmd') ? evt.metaKey : !evt.metaKey);
       if (matches) {
         evt.preventDefault();
         void this.handleSubmit();
@@ -1469,7 +1470,7 @@ export class JournalCaptureView extends ItemView {
           await this.app.fileManager.trashFile(af);
           trashed++;
         } catch (err) {
-          console.error(`[Journal Partner] trash audio failed: ${path}`, err);
+          console.error(`[Spark Memo] trash audio failed: ${path}`, err);
         }
       }
       this.textareaEl.value = '';
@@ -1595,7 +1596,7 @@ export class JournalCaptureView extends ItemView {
     try {
       file = getDailyNote(date, getAllDailyNotes()) as TFile | null;
     } catch (err) {
-      console.error('[Journal Partner] daily note resolve failed', err);
+      console.error('[Spark Memo] daily note resolve failed', err);
     }
 
     let entries: JournalEntry[] = [];
@@ -1612,7 +1613,7 @@ export class JournalCaptureView extends ItemView {
           entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
         }
       } catch (err) {
-        console.error('[Journal Partner] read failed', err);
+        console.error('[Spark Memo] read failed', err);
       }
     }
 
@@ -1651,7 +1652,7 @@ export class JournalCaptureView extends ItemView {
         }
       }
     } catch (err) {
-      console.error('[Journal Partner] day refresh failed', err);
+      console.error('[Spark Memo] day refresh failed', err);
     }
 
     // Reset the day's lifecycle scope and DOM
@@ -1845,7 +1846,7 @@ export class JournalCaptureView extends ItemView {
         }
       }
     } catch (err) {
-      console.error('[Journal Partner] review read failed', err);
+      console.error('[Spark Memo] review read failed', err);
     }
 
     if (entries.length === 0) {
@@ -1966,7 +1967,7 @@ export class JournalCaptureView extends ItemView {
             sectionText = content.slice(section.from, section.to);
           }
         } catch (err) {
-          console.error('[Journal Partner] stats read failed', file.path, err);
+          console.error('[Spark Memo] stats read failed', file.path, err);
         }
 
         if (!yearMap.has(year)) yearMap.set(year, []);
@@ -1985,7 +1986,7 @@ export class JournalCaptureView extends ItemView {
 
       this.renderStatsContent();
     } catch (err) {
-      console.error('[Journal Partner] stats load failed', err);
+      console.error('[Spark Memo] stats load failed', err);
       this.renderStatsError(`加载失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.statsLoading = false;
@@ -2215,7 +2216,7 @@ export class JournalCaptureView extends ItemView {
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
     } catch (err) {
-      console.error('[Journal Partner] open daily note failed', err);
+      console.error('[Spark Memo] open daily note failed', err);
       new Notice('打开失败');
     }
   }
@@ -2335,7 +2336,7 @@ export class JournalCaptureView extends ItemView {
       await navigator.clipboard.writeText(entry.text);
       new Notice('📋 已复制');
     } catch (err) {
-      console.error('[Journal Partner] copy failed', err);
+      console.error('[Spark Memo] copy failed', err);
       new Notice(`复制失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -2423,7 +2424,7 @@ export class JournalCaptureView extends ItemView {
       }
       await this.app.vault.modify(file, next);
     } catch (err) {
-      console.error('[Journal Partner] delete entry failed', err);
+      console.error('[Spark Memo] delete entry failed', err);
       new Notice(`删除失败：${err instanceof Error ? err.message : String(err)}`);
       return;
     }
@@ -2443,7 +2444,7 @@ export class JournalCaptureView extends ItemView {
           await this.app.fileManager.trashFile(af);
           trashed++;
         } catch (err) {
-          console.error(`[Journal Partner] trash audio failed: ${path}`, err);
+          console.error(`[Spark Memo] trash audio failed: ${path}`, err);
         }
       }
     }
@@ -2508,7 +2509,7 @@ export class JournalCaptureView extends ItemView {
       const scroller = this.containerEl.children[1] as HTMLElement;
       scroller.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      console.error('[Journal Partner] submit failed', err);
+      console.error('[Spark Memo] submit failed', err);
       new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.submitBtn.setText(originalText ?? 'NOTE');

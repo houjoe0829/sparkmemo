@@ -11,7 +11,7 @@ import { Decoration, DecorationSet } from '@codemirror/view';
 
 // ── Types & defaults ────────────────────────────────────────────────────────
 
-export interface JournalPartnerSettings {
+export interface SparkMemoSettings {
   /** The heading text that activates the plugin (without # symbols) */
   targetHeading: string;
   /** Heading level: 1 → #, 2 → ##, … */
@@ -44,8 +44,8 @@ export interface JournalPartnerSettings {
   submitShortcut: string;
 }
 
-export const DEFAULT_SETTINGS: JournalPartnerSettings = {
-  targetHeading: 'Journal',
+export const DEFAULT_SETTINGS: SparkMemoSettings = {
+  targetHeading: 'Memo',
   headingLevel: 2,
   timestampPattern: '\\d{2}:\\d{2}',
   timestampColor: '#7c3aed',
@@ -59,7 +59,7 @@ export const DEFAULT_SETTINGS: JournalPartnerSettings = {
   sttRealtime: true,
   recordingFolder: '',
   imageFolder: '',
-  submitShortcut: 'shift+enter',
+  submitShortcut: 'cmd+enter',
 };
 
 export type Rng = { from: number; to: number };
@@ -118,7 +118,7 @@ export function findSection(
  */
 export function getTimestampRanges(
   doc: string,
-  settings: JournalPartnerSettings,
+  settings: SparkMemoSettings,
 ): Rng[] {
   const section = findSection(
     doc,
@@ -163,7 +163,7 @@ export function generateTimestamp(): string {
 /** Build a CM6 DecorationSet that marks every timestamp in the target section. */
 export function buildDecorations(
   doc: string,
-  settings: JournalPartnerSettings,
+  settings: SparkMemoSettings,
 ): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const mark = Decoration.mark({
@@ -286,7 +286,7 @@ export function buildEntryLine(text: string, ts: string): string {
  */
 export function appendToJournalSection(
   content: string,
-  settings: JournalPartnerSettings,
+  settings: SparkMemoSettings,
   line: string,
 ): string {
   const section = findSection(
@@ -363,7 +363,7 @@ export function extractAudioEmbeds(text: string): string[] {
  */
 export function deleteEntryFromSection(
   content: string,
-  settings: JournalPartnerSettings,
+  settings: SparkMemoSettings,
   lineIndex: number,
 ): string {
   const section = findSection(
@@ -430,7 +430,7 @@ export function deleteEntryFromSection(
  */
 export function removeAudioEmbedsFromEntry(
   content: string,
-  settings: JournalPartnerSettings,
+  settings: SparkMemoSettings,
   lineIndex: number,
 ): string {
   const section = findSection(

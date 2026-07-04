@@ -1,7 +1,7 @@
 {
-  "name": "journal-partner",
-  "version": "2.6.0",
-  "description": "Obsidian plugin – Journal timestamp highlighter",
+  "name": "spark-memo",
+  "version": "0.0.1",
+  "description": "Obsidian plugin – Spark Memo journal timestamp highlighter",
   "main": "dist/main.js",
   "scripts": {
     "dev": "esbuild src/main.ts --bundle --external:obsidian --external:electron --external:@codemirror/* --external:@lezer/* --external:builtin-modules --format=cjs --target=es2018 --sourcemap=inline --log-level:info --watch --outfile:dist/main.js",
@@ -13,7 +13,7 @@
     "journal",
     "timestamp"
   ],
-  "author": "hankzhao",
+  "author": "Joe Hou",
   "license": "MIT",
   "devDependencies": {
     "@codemirror/state": "^6.4.1",

@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# Journal Partner - Deploy Script
+# Spark Memo - Deploy Script
 # 构建项目并部署到 Obsidian 插件目录
 
 set -e  # Exit on error
 
-VAULT_PATH="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/xuan"
-PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/journal-partner"
+VAULT_PATH="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/MindCraft"
+PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/spark-memo"
 
-echo "📦 Building Journal Partner..."
+echo "📦 Building Spark Memo..."
 npm run build
 
 echo ""
