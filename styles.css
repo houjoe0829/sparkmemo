@@ -174,8 +174,7 @@
   padding: 0 4px;
 }
 .jp-capture-image-btn,
-.jp-capture-mic-btn,
-.jp-capture-clear-btn {
+.jp-capture-mic-btn {
   background: transparent !important;
   border: none !important;
   outline: none !important;
@@ -194,14 +193,12 @@
   appearance: none !important;
 }
 .jp-capture-image-btn:hover,
-.jp-capture-mic-btn:hover,
-.jp-capture-clear-btn:hover {
+.jp-capture-mic-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
 .jp-capture-image-btn svg,
-.jp-capture-mic-btn svg,
-.jp-capture-clear-btn svg {
+.jp-capture-mic-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -1289,25 +1286,6 @@
 /* Dark theme: bump level-0 contrast so empty days don't disappear. */
 .theme-dark .jp-stats-cell.level-0 {
   background: color-mix(in srgb, var(--text-faint) 18%, transparent);
-}
-
-/* ── Clear-input confirm modal ──────────────────────────────────────────── */
-.jp-clear-confirm .jp-clear-confirm-question {
-  margin: 0 0 10px;
-  color: var(--text-normal);
-  line-height: 1.6;
-}
-.jp-clear-confirm-list {
-  margin: 0 0 14px;
-  padding-left: 20px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  max-height: 160px;
-  overflow: auto;
-}
-.jp-clear-confirm-list li {
-  word-break: break-all;
-  margin: 2px 0;
 }
 
 /* ── Focus-recording mode ───────────────────────────────────────────────── */

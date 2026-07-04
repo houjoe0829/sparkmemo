@@ -1221,18 +1221,6 @@ export class JournalCaptureView extends ItemView {
     // Stop button centered under the waveform.
     recStopBtn.addEventListener('click', () => void doStop());
 
-    // Clear button — wipes the textarea and trashes any embedded audio files.
-    const clearBtn = buttonRow.createEl('button', {
-      cls: 'jp-capture-clear-btn',
-      attr: { 'aria-label': '清空' },
-    });
-    setIcon(clearBtn, 'delete');
-    clearBtn.addEventListener('click', () => {
-      const value = this.textareaEl.value;
-      if (value.trim().length === 0 && this.pendingImages.length === 0) return; // nothing to clear
-      void this.confirmClearInput(value);
-    });
-
     // Pending-image thumbnail strip, shown to the right of the icon-button
     // pill (as a sibling, not nested inside it) so the remove badge isn't
     // clipped by the pill's rounded border.
@@ -1484,65 +1472,6 @@ export class JournalCaptureView extends ItemView {
     const hasContent = this.textareaEl.value.trim().length > 0 || this.pendingImages.length > 0;
     this.submitBtn.toggleClass('jp-capture-submit--disabled', !hasContent);
     this.submitBtn.disabled = !hasContent;
-  }
-
-  /**
-   * Confirm-then-clear the capture textarea. Any `![[*.m4a]]` audio embeds
-   * in the text are extracted and their files moved to Obsidian's trash
-   * (recoverable), matching the timeline's delete-with-audio behaviour.
-   * Image embeds are text-only cleared (no file deletion) — clearing is for
-   * discarding a draft, not housekeeping attachments.
-   */
-  private async confirmClearInput(value: string): Promise<void> {
-    const audioPaths = extractAudioEmbeds(value);
-    const modal = new Modal(this.app);
-    modal.titleEl.setText('清空输入框');
-    modal.contentEl.addClass('jp-clear-confirm');
-    modal.contentEl.createEl('p', {
-      cls: 'jp-clear-confirm-question',
-      text: audioPaths.length > 0
-        ? `确定清空输入框吗？将同时删除 ${audioPaths.length} 个录音文件（移入回收站，可恢复）。`
-        : '确定清空输入框吗？',
-    });
-    if (audioPaths.length > 0) {
-      const list = modal.contentEl.createEl('ul', { cls: 'jp-clear-confirm-list' });
-      for (const p of audioPaths) list.createEl('li', { text: p });
-    }
-    const actions = modal.contentEl.createDiv({ cls: 'jp-delete-confirm-actions' });
-    const cancelBtn = actions.createEl('button', { cls: 'jp-delete-confirm-cancel', text: '取消' });
-    cancelBtn.addEventListener('click', () => modal.close());
-    const confirmBtn = actions.createEl('button', {
-      cls: 'mod-warning jp-delete-confirm-confirm',
-      text: '清空',
-    });
-    confirmBtn.addEventListener('click', async () => {
-      modal.close();
-      // Trash embedded audio files (recoverable via Obsidian trash).
-      let trashed = 0;
-      for (const path of audioPaths) {
-        const af = this.app.vault.getAbstractFileByPath(path);
-        if (!(af instanceof TFile)) continue;
-        try {
-          await this.app.fileManager.trashFile(af);
-          trashed++;
-        } catch (err) {
-          console.error(`[Spark Memo] trash audio failed: ${path}`, err);
-        }
-      }
-      this.textareaEl.value = '';
-      this.pendingImages = [];
-      this.pendingCaptureOverride = null;
-      this.renderAttachmentList();
-      this.refreshSubmitState();
-      this.autoResizeTextarea();
-      new Notice(
-        audioPaths.length > 0
-          ? `🧹 已清空，${trashed}/${audioPaths.length} 个录音文件移入回收站`
-          : '🧹 已清空',
-      );
-    });
-    window.setTimeout(() => cancelBtn.focus(), 0);
-    modal.open();
   }
 
   private autoResizeTextarea() {
