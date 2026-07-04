@@ -113,12 +113,13 @@ export class JournalCaptureView extends ItemView {
   /** Images picked but not yet appended to the note text; flushed on submit. */
   private pendingImages: TFile[] = [];
   /**
-   * HH:MM chosen from a photo's capture time, overriding "now" for the next
-   * submit. Set when the user opts into a captured-time mismatch prompt
-   * (see `maybeCheckImageTime`); cleared once the pending images are empty
-   * or the entry is submitted.
+   * Date + HH:MM taken from a photo's capture time, overriding "today, now"
+   * for the next submit — the entry is written into `date`'s daily note
+   * instead of today's. Set when the user opts into a captured-time
+   * mismatch prompt (see `maybeCheckImageTime`); cleared once the pending
+   * images are empty or the entry is submitted.
    */
-  private pendingTimestampOverride: string | null = null;
+  private pendingCaptureOverride: { date: moment.Moment; time: string } | null = null;
 
   // DOM references (stats pane)
   private statsToolbarEl!: HTMLElement;
@@ -1347,7 +1348,7 @@ export class JournalCaptureView extends ItemView {
         this.pendingImages = this.pendingImages.filter(f => f !== file);
         this.renderAttachmentList();
         this.refreshSubmitState();
-        if (this.pendingImages.length === 0) this.pendingTimestampOverride = null;
+        if (this.pendingImages.length === 0) this.pendingCaptureOverride = null;
       });
     }
   }
@@ -1369,14 +1370,15 @@ export class JournalCaptureView extends ItemView {
   /**
    * If the image carries a capture time (EXIF for JPEGs, otherwise the
    * file's last-modified time) that differs from "now" by more than 5
-   * minutes, ask the user whether to anchor this entry's timestamp to the
-   * image's time instead. Only asks once per pending-image batch — once an
-   * override is set, later images in the same batch are assumed to belong
-   * to the same moment.
+   * minutes, ask the user whether to anchor this entry to the image's time
+   * instead — including its calendar date, so a photo from an earlier day
+   * lands in that day's daily note rather than today's. Only asks once per
+   * pending-image batch — once an override is set, later images in the same
+   * batch are assumed to belong to the same moment.
    */
   private async maybeCheckImageTime(file: File): Promise<void> {
     if (!this.plugin.settings.imageTimeCheck) return;
-    if (this.pendingTimestampOverride) return;
+    if (this.pendingCaptureOverride) return;
 
     const capturedAt = await getImageCaptureTime(file);
     if (!capturedAt) return;
@@ -1386,8 +1388,13 @@ export class JournalCaptureView extends ItemView {
 
     const useImageTime = await confirmUseImageTime(this.app, capturedAt, diffMinutes);
     if (useImageTime) {
-      this.pendingTimestampOverride = formatTimeHHMM(capturedAt);
-      new Notice(`✅ 已改用图片时间 ${this.pendingTimestampOverride} 记录`);
+      const capturedDate = moment(capturedAt);
+      this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(capturedAt) };
+      new Notice(
+        capturedDate.isSame(moment(), 'day')
+          ? `✅ 已改用图片时间 ${this.pendingCaptureOverride.time} 记录`
+          : `✅ 已改用图片时间记录，将写入 ${capturedDate.format('YYYY-MM-DD')} 的日记`,
+      );
     }
   }
 
@@ -1524,6 +1531,7 @@ export class JournalCaptureView extends ItemView {
       }
       this.textareaEl.value = '';
       this.pendingImages = [];
+      this.pendingCaptureOverride = null;
       this.renderAttachmentList();
       this.refreshSubmitState();
       this.autoResizeTextarea();
@@ -2545,28 +2553,40 @@ export class JournalCaptureView extends ItemView {
     this.submitBtn.setText('写入中…');
 
     try {
-      const ok = await this.plugin.writeToTodayJournal(raw, this.pendingTimestampOverride ?? undefined);
+      const targetDate = this.pendingCaptureOverride?.date;
+      const ok = await this.plugin.writeJournalEntry(
+        raw,
+        this.pendingCaptureOverride?.time,
+        undefined,
+        targetDate,
+      );
       if (!ok) return;
+
+      const writtenDay = (targetDate ?? moment()).clone().startOf('day');
 
       this.textareaEl.value = '';
       this.pendingImages = [];
-      this.pendingTimestampOverride = null;
+      this.pendingCaptureOverride = null;
       this.renderAttachmentList();
       this.autoResizeTextarea();
 
-      // vault.modify will catch-up the today section automatically; if
-      // today's section wasn't mounted (e.g. plugin just opened with no
-      // file), trigger a full rebuild so it appears at the top.
-      const todayDay = this.days.find(d =>
-        d.date.isSame(moment().startOf('day'), 'day'),
-      );
-      if (!todayDay) {
+      // vault.modify will catch-up an already-loaded day's section
+      // automatically; if the written day wasn't mounted (e.g. plugin just
+      // opened with no file, or the entry was backdated to an image's
+      // capture date beyond the loaded window), trigger a full rebuild so
+      // it appears.
+      const loadedDay = this.days.find(d => d.date.isSame(writtenDay, 'day'));
+      if (!loadedDay) {
         await this.fullRebuild();
       }
 
-      // Scroll to top so user sees the new entry land
-      const scroller = this.containerEl.children[1] as HTMLElement;
-      scroller.scrollTo({ top: 0, behavior: 'smooth' });
+      if (writtenDay.isSame(moment(), 'day')) {
+        // Scroll to top so user sees the new entry land
+        const scroller = this.containerEl.children[1] as HTMLElement;
+        scroller.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        new Notice(`📅 已记录到 ${writtenDay.format('YYYY-MM-DD')} 的日记`);
+      }
     } catch (err) {
       console.error('[Spark Memo] submit failed', err);
       new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
