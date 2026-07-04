@@ -2648,7 +2648,7 @@ class ImageTimeConfirmModal extends Modal {
 
     contentEl.createEl('p', {
       cls: 'jp-image-time-confirm-question',
-      text: `图片拍摄时间与当前时间相差约 ${Math.round(this.opts.diffMinutes)} 分钟，是否使用图片拍摄时间记录这条 memo？`,
+      text: '是否使用图片拍摄时间记录这条 memo？',
     });
 
     const actions = contentEl.createDiv({ cls: 'jp-image-time-confirm-actions' });
