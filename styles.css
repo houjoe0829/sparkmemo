@@ -882,6 +882,41 @@
   margin: 12px 0;
 }
 
+/* Day nav — prev / calendar / next, above the single-day timeline. */
+.jp-day-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.jp-day-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-day-nav-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.jp-day-nav-btn.is-disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+.jp-day-nav-calendar-btn.is-today {
+  color: var(--jp-tl-dot);
+}
+
 /* End-of-stream marker shown when no more history exists */
 .jp-timeline-end {
   padding: 14px 12px 24px;
@@ -889,6 +924,43 @@
   font-size: 11.5px;
   color: var(--text-faint);
   letter-spacing: 0.05em;
+}
+
+/* Bottom-of-day nudge to the previous day — stands in for the old
+   scroll-to-load-older-days affordance now that only one day shows at once. */
+.jp-timeline-bottom-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-timeline-bottom-nav:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.jp-timeline-bottom-nav-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.jp-timeline-bottom-nav-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-timeline-bottom-nav.is-disabled {
+  cursor: default;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}
+.jp-timeline-bottom-nav.is-disabled:hover {
+  background: transparent;
+  color: var(--text-faint);
 }
 
 /* ── Mobile toolbar auto-hide ─────────────────────────────────────────────
@@ -1000,6 +1072,126 @@
 .jp-image-preview-modal .modal-content {
   padding: 0;
   display: flex;
+}
+
+/* ── Calendar picker modal ────────────────────────────────────────────────
+   Month grid used to jump the capture timeline to any day. */
+.jp-calendar-modal {
+  /* The modal mounts outside .jp-capture-root (Obsidian appends it to
+     <body>), so it can't inherit that scope's --jp-tl-dot — redeclare it
+     here from the same underlying setting. */
+  --jp-tl-dot: var(--jp-ts-color, #7c3aed);
+  max-width: 320px;
+}
+/* Obsidian's own × close button sits top-right of the modal; push the
+   whole grid down clear of it rather than skewing the content sideways. */
+.jp-calendar-modal .modal-content {
+  padding-top: 34px;
+}
+.jp-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.jp-cal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.jp-cal-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.jp-cal-nav-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.jp-cal-weekdays,
+.jp-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  justify-items: center;
+}
+.jp-cal-weekday {
+  width: 100%;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  padding: 4px 0;
+}
+.jp-cal-loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 20px 0;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.jp-cal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-normal);
+}
+.jp-cal-cell:hover {
+  background: var(--background-modifier-hover);
+}
+.jp-cal-cell.is-empty {
+  cursor: default;
+  pointer-events: none;
+}
+.jp-cal-cell.is-future {
+  color: var(--text-faint);
+  cursor: default;
+}
+/* Today: circular outline around the number itself (not the whole cell). */
+.jp-cal-cell.is-today .jp-cal-cell-num {
+  background: color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
+  box-shadow: 0 0 0 1.5px var(--jp-tl-dot) inset;
+  color: var(--jp-tl-dot);
+  font-weight: 700;
+}
+.jp-cal-cell.is-selected {
+  background: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent);
+}
+/* Has-entries: filled pill behind the day number, high-contrast against
+   both empty and selected cells. */
+.jp-cal-cell.has-entries .jp-cal-cell-num {
+  color: var(--text-on-accent, #fff);
+  background: var(--jp-tl-dot);
+  font-weight: 600;
+}
+/* Today + has entries: swap the outline colour so it still reads against
+   the now-solid accent fill. */
+.jp-cal-cell.is-today.has-entries .jp-cal-cell-num {
+  box-shadow: 0 0 0 1.5px var(--text-on-accent, #fff) inset;
+}
+.jp-cal-cell-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 .jp-image-preview-img {
   display: block;

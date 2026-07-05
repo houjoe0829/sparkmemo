@@ -106,6 +106,10 @@ export class JournalCaptureView extends ItemView {
 
   // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
+  private dayNavEl!: HTMLElement;
+  private prevDayBtn!: HTMLButtonElement;
+  private nextDayBtn!: HTMLButtonElement;
+  private calendarBtn!: HTMLButtonElement;
   private timelineEl!: HTMLElement;
   private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
@@ -142,6 +146,8 @@ export class JournalCaptureView extends ItemView {
 
   // Cached state
   private days: DaySection[] = [];
+  /** The single day currently shown in the capture timeline. Changed via the prev/next/calendar nav. */
+  private currentDate: moment.Moment = moment().startOf('day');
   /** Day immediately older than the oldest loaded day; next `loadMore` starts here. */
   private nextProbeDate: moment.Moment = moment().startOf('day').subtract(1, 'day');
   /** True once we've scanned far enough back that nothing earlier exists. */
@@ -1739,6 +1745,97 @@ export class JournalCaptureView extends ItemView {
     this.sentinelEl = root.createDiv({ cls: 'jp-timeline-sentinel' });
   }
 
+  /** Build the prev/calendar/next controls, inline with the day header title. */
+  private buildDayNavControls(parent: HTMLElement) {
+    this.dayNavEl = parent.createDiv({ cls: 'jp-day-nav' });
+
+    this.prevDayBtn = this.dayNavEl.createEl('button', {
+      cls: 'jp-day-nav-btn',
+      attr: { 'aria-label': '前一天' },
+    });
+    setIcon(this.prevDayBtn, 'chevron-left');
+    this.prevDayBtn.addEventListener('click', () => this.navigateDay(-1));
+
+    this.calendarBtn = this.dayNavEl.createEl('button', {
+      cls: 'jp-day-nav-btn jp-day-nav-calendar-btn',
+      attr: { 'aria-label': '选择日期' },
+    });
+    setIcon(this.calendarBtn, 'calendar');
+    this.calendarBtn.addEventListener('click', () => this.openCalendarPicker());
+
+    this.nextDayBtn = this.dayNavEl.createEl('button', {
+      cls: 'jp-day-nav-btn',
+      attr: { 'aria-label': '后一天' },
+    });
+    setIcon(this.nextDayBtn, 'chevron-right');
+    this.nextDayBtn.addEventListener('click', () => this.navigateDay(1));
+  }
+
+  /** Move the capture timeline to the previous/next day (delta = ±1). No-op past today or the lookback floor. */
+  private navigateDay(delta: number) {
+    const today = moment().startOf('day');
+    const next = this.currentDate.clone().add(delta, 'day');
+    if (delta > 0 && next.isAfter(today, 'day')) return;
+    if (delta < 0 && today.diff(next, 'days') > this.maxLookbackDays) return;
+    this.currentDate = next;
+    void this.fullRebuild();
+  }
+
+  /** Enable/disable the prev/next buttons at the today / lookback boundaries, and mark the calendar button when on today. */
+  private updateDayNavState() {
+    if (!this.prevDayBtn) return; // no day header rendered yet (e.g. daily-notes plugin disabled)
+    const today = moment().startOf('day');
+    const isToday = this.currentDate.isSame(today, 'day');
+    const atLookbackFloor = today.diff(this.currentDate, 'days') >= this.maxLookbackDays;
+
+    this.nextDayBtn.disabled = isToday;
+    this.nextDayBtn.toggleClass('is-disabled', isToday);
+    this.prevDayBtn.disabled = atLookbackFloor;
+    this.prevDayBtn.toggleClass('is-disabled', atLookbackFloor);
+    this.calendarBtn.toggleClass('is-today', isToday);
+  }
+
+  /** Open the date-picker modal; jumps the capture timeline to the chosen day. */
+  private openCalendarPicker() {
+    new CalendarPickerModal(
+      this.app,
+      this.currentDate,
+      monthStart => this.getMonthEntryDays(monthStart),
+      date => {
+        this.currentDate = date.clone().startOf('day');
+        void this.fullRebuild();
+      },
+    ).open();
+  }
+
+  /** Which days in `monthStart`'s month have a non-empty journal section — used to mark the calendar grid. */
+  private async getMonthEntryDays(monthStart: moment.Moment): Promise<Set<string>> {
+    const result = new Set<string>();
+    if (!appHasDailyNotesPluginLoaded()) return result;
+
+    const daysInMonth = monthStart.daysInMonth();
+    const allNotes = getAllDailyNotes() as Record<string, TFile>;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = monthStart.clone().date(d);
+      try {
+        const file = getDailyNote(date, allNotes) as TFile | null;
+        if (!file) continue;
+        const content = await this.app.vault.cachedRead(file);
+        const section = findSection(
+          content,
+          this.plugin.settings.targetHeading,
+          this.plugin.settings.headingLevel,
+        );
+        if (section && content.slice(section.from, section.to).trim().length > 0) {
+          result.add(date.format('YYYY-MM-DD'));
+        }
+      } catch (err) {
+        console.error('[Spark Memo] calendar day probe failed', err);
+      }
+    }
+    return result;
+  }
+
   // ── Behaviour ───────────────────────────────────────────────────────────
 
   private refreshSubmitState() {
@@ -1783,25 +1880,49 @@ export class JournalCaptureView extends ItemView {
     if (!appHasDailyNotesPluginLoaded()) {
       this.renderTopLevelMessage('请先启用 Obsidian 自带的「Daily Notes」核心插件');
       this.exhausted = true;
+      this.updateDayNavState();
       return;
     }
 
-    // Reset scroll-window state
-    this.nextProbeDate = moment().startOf('day').subtract(1, 'day');
-    this.exhausted = false;
+    // Single-day mode: no backward infinite-scroll in the capture pane.
+    this.exhausted = true;
     this.loadingMore = false;
 
-    // Always render today first (non-empty or not — gives users a stable
-    // anchor and shows the "no entries yet" hint).
-    const today = moment().startOf('day');
-    const todayDay = await this.buildDaySection(today, /* allowEmpty */ true);
-    if (todayDay) {
-      this.timelineEl.appendChild(todayDay.el);
-      this.days.push(todayDay);
+    const day = await this.buildDaySection(this.currentDate, /* allowEmpty */ true);
+    if (day) {
+      this.timelineEl.appendChild(day.el);
+      this.days.push(day);
     }
 
-    // Then load the first batch of historical non-empty days.
-    await this.loadMore();
+    this.renderBottomDayNav();
+    this.updateDayNavState();
+
+    // Land on the top of the day (its date header) rather than wherever the
+    // previous day happened to leave the scroll position.
+    const scroller = this.containerEl.children[1] as HTMLElement | undefined;
+    if (scroller) scroller.scrollTop = 0;
+  }
+
+  /**
+   * Bottom-of-timeline nudge to the previous day — stands in for the old
+   * infinite-scroll-loads-older-days behaviour, now that only one day is
+   * shown at a time.
+   */
+  private renderBottomDayNav() {
+    const today = moment().startOf('day');
+    const atLookbackFloor = today.diff(this.currentDate, 'days') >= this.maxLookbackDays;
+
+    const el = this.timelineEl.createDiv({
+      cls: 'jp-timeline-bottom-nav' + (atLookbackFloor ? ' is-disabled' : ''),
+    });
+    if (atLookbackFloor) {
+      el.setText('— 已到最早可查看的日期 —');
+      return;
+    }
+    const icon = el.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
+    setIcon(icon, 'chevron-down');
+    el.createSpan({ text: '查看前一天' });
+    el.addEventListener('click', () => this.navigateDay(-1));
   }
 
   /**
@@ -1940,11 +2061,17 @@ export class JournalCaptureView extends ItemView {
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
     headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
     headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
-    this.addOpenNoteBtn(headerCard, day);
+    this.buildDayNavControls(headerCard);
+    this.updateDayNavState();
 
     if (entries.length === 0) {
-      // Today with no entries — soft hint only
-      day.el.createDiv({ cls: 'jp-capture-empty', text: '还没有 memo，写点什么吧 →' });
+      // The input box always writes to today, so the "写点什么吧" nudge only
+      // makes sense when today's own section is the one being viewed.
+      const isToday = day.date.isSame(moment().startOf('day'), 'day');
+      day.el.createDiv({
+        cls: 'jp-capture-empty',
+        text: isToday ? '还没有 memo，写点什么吧 →' : '这一天没有 memo',
+      });
       return;
     }
 
@@ -2001,15 +2128,13 @@ export class JournalCaptureView extends ItemView {
   /** Build a human-readable date label. */
   private formatDateHeader(d: moment.Moment, count: number): { title: string; subtitle: string } {
     const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.day()];
-    const dateLabel = d.format('YYYY年M月D日') + ` · ${weekdayZh}`;
+    const isCurrentYear = d.year() === moment().year();
+    const dateLabel = d.format(isCurrentYear ? 'M/D' : 'YYYY/M/D') + ` · ${weekdayZh}`;
     const today = moment().startOf('day');
     const diff = d.diff(today, 'days');
     let relative = '';
     if (diff === 0) relative = ' · 今天';
     else if (diff === -1) relative = ' · 昨天';
-    else if (diff === 1) relative = ' · 明天';
-    else if (diff < 0) relative = ` · ${-diff} 天前`;
-    else relative = ` · ${diff} 天后`;
     const title = dateLabel + relative;
     const subtitle = count === 0 ? '还没有 memo' : `${count} 个 memo`;
     return { title, subtitle };
@@ -3016,6 +3141,98 @@ class DeleteConfirmModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+// ── Calendar picker modal ────────────────────────────────────────────────
+
+/**
+ * Month-grid date picker for the capture timeline's day nav. Shows a dot
+ * under any day that has journal content, highlights today, and disables
+ * days in the future. Picking a day calls `onPick` and closes.
+ */
+class CalendarPickerModal extends Modal {
+  private viewMonth: moment.Moment;
+
+  constructor(
+    app: import('obsidian').App,
+    private selected: moment.Moment,
+    private getMonthEntryDays: (monthStart: moment.Moment) => Promise<Set<string>>,
+    private onPick: (date: moment.Moment) => void,
+  ) {
+    super(app);
+    this.viewMonth = selected.clone().startOf('month');
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass('jp-calendar-modal');
+    void this.renderMonth();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private async renderMonth(): Promise<void> {
+    const { contentEl } = this;
+    const requestedMonth = this.viewMonth;
+    contentEl.empty();
+
+    const header = contentEl.createDiv({ cls: 'jp-cal-header' });
+    const prevBtn = header.createEl('button', { cls: 'jp-cal-nav-btn', attr: { 'aria-label': '上个月' } });
+    setIcon(prevBtn, 'chevron-left');
+    prevBtn.addEventListener('click', () => {
+      this.viewMonth = this.viewMonth.clone().subtract(1, 'month');
+      void this.renderMonth();
+    });
+
+    header.createDiv({ cls: 'jp-cal-title', text: this.viewMonth.format('YYYY年M月') });
+
+    const nextBtn = header.createEl('button', { cls: 'jp-cal-nav-btn', attr: { 'aria-label': '下个月' } });
+    setIcon(nextBtn, 'chevron-right');
+    nextBtn.addEventListener('click', () => {
+      this.viewMonth = this.viewMonth.clone().add(1, 'month');
+      void this.renderMonth();
+    });
+
+    const weekRow = contentEl.createDiv({ cls: 'jp-cal-weekdays' });
+    for (const w of ['日', '一', '二', '三', '四', '五', '六']) {
+      weekRow.createDiv({ cls: 'jp-cal-weekday', text: w });
+    }
+
+    const grid = contentEl.createDiv({ cls: 'jp-cal-grid' });
+    grid.createDiv({ cls: 'jp-cal-loading', text: '加载中…' });
+
+    const entryDays = await this.getMonthEntryDays(this.viewMonth);
+    // A newer render may have started (user flipped months again) — bail.
+    if (this.viewMonth !== requestedMonth) return;
+    grid.empty();
+
+    const today = moment().startOf('day');
+    const firstDow = this.viewMonth.clone().startOf('month').day();
+    for (let i = 0; i < firstDow; i++) {
+      grid.createDiv({ cls: 'jp-cal-cell is-empty' });
+    }
+
+    const daysInMonth = this.viewMonth.daysInMonth();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = this.viewMonth.clone().date(d);
+      const isFuture = date.isAfter(today, 'day');
+      const cell = grid.createDiv({ cls: 'jp-cal-cell' });
+      if (date.isSame(today, 'day')) cell.addClass('is-today');
+      if (date.isSame(this.selected, 'day')) cell.addClass('is-selected');
+      if (isFuture) cell.addClass('is-future');
+
+      if (entryDays.has(date.format('YYYY-MM-DD'))) cell.addClass('has-entries');
+      cell.createSpan({ cls: 'jp-cal-cell-num', text: String(d) });
+
+      if (!isFuture) {
+        cell.addEventListener('click', () => {
+          this.onPick(date);
+          this.close();
+        });
+      }
+    }
   }
 }
 
