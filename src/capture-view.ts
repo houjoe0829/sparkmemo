@@ -1911,18 +1911,32 @@ export class JournalCaptureView extends ItemView {
   private renderBottomDayNav() {
     const today = moment().startOf('day');
     const atLookbackFloor = today.diff(this.currentDate, 'days') >= this.maxLookbackDays;
+    const isToday = this.currentDate.isSame(today, 'day');
 
-    const el = this.timelineEl.createDiv({
+    const row = this.timelineEl.createDiv({ cls: 'jp-timeline-bottom-nav-row' });
+
+    const prevEl = row.createDiv({
       cls: 'jp-timeline-bottom-nav' + (atLookbackFloor ? ' is-disabled' : ''),
     });
     if (atLookbackFloor) {
-      el.setText('— 已到最早可查看的日期 —');
-      return;
+      prevEl.setText('— 已到最早可查看的日期 —');
+    } else {
+      const icon = prevEl.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
+      setIcon(icon, 'chevron-down');
+      prevEl.createSpan({ text: '查看前一天' });
+      prevEl.addEventListener('click', () => this.navigateDay(-1));
     }
-    const icon = el.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
-    setIcon(icon, 'chevron-down');
-    el.createSpan({ text: '查看前一天' });
-    el.addEventListener('click', () => this.navigateDay(-1));
+
+    if (!isToday) {
+      const todayEl = row.createDiv({ cls: 'jp-timeline-bottom-nav jp-timeline-bottom-nav-today' });
+      const icon = todayEl.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
+      setIcon(icon, 'calendar-check');
+      todayEl.createSpan({ text: '返回今天' });
+      todayEl.addEventListener('click', () => {
+        this.currentDate = moment().startOf('day');
+        void this.fullRebuild();
+      });
+    }
   }
 
   /**

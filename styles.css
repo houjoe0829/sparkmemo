@@ -927,13 +927,23 @@
 }
 
 /* Bottom-of-day nudge to the previous day — stands in for the old
-   scroll-to-load-older-days affordance now that only one day shows at once. */
+   scroll-to-load-older-days affordance now that only one day shows at once.
+   The row also hosts a "back to today" affordance on the right when the
+   displayed day isn't today. */
+.jp-timeline-bottom-nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 18px;
+}
+.jp-timeline-bottom-nav-row:has(.jp-timeline-bottom-nav-today) {
+  justify-content: space-between;
+}
 .jp-timeline-bottom-nav {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 18px;
   padding: 12px;
   border-radius: 8px;
   font-size: 12.5px;
@@ -961,6 +971,12 @@
 .jp-timeline-bottom-nav.is-disabled:hover {
   background: transparent;
   color: var(--text-faint);
+}
+.jp-timeline-bottom-nav-today {
+  color: var(--interactive-accent);
+}
+.jp-timeline-bottom-nav-today:hover {
+  color: var(--interactive-accent-hover);
 }
 
 /* ── Mobile toolbar auto-hide ─────────────────────────────────────────────
