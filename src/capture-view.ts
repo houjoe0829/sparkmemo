@@ -82,19 +82,18 @@ export class JournalCaptureView extends ItemView {
   private plugin: SparkMemoPlugin;
 
   // Top-level tab state
-  private currentTab: 'capture' | 'stats' | 'search' | 'review' = 'capture';
+  private currentTab: 'capture' | 'stats' | 'search' = 'capture';
   private tabBarEl!: HTMLElement;
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
-  private reviewPaneEl!: HTMLElement;
   private captureTabBtn!: HTMLButtonElement;
   private statsTabBtn!: HTMLButtonElement;
   private searchTabBtn!: HTMLButtonElement;
-  private reviewTabBtn!: HTMLButtonElement;
 
   // Search state
   private searchBarEl!: HTMLElement;
   private searchInputEl!: HTMLInputElement;
+  private randomMemoBtn!: HTMLButtonElement;
   private searchActive = false;
   private searchDebounceTimer: number | null = null;
   private searchQuery = '';
@@ -139,9 +138,9 @@ export class JournalCaptureView extends ItemView {
   // Stats state
   private statsLoading = false;
   private statsRefreshTimer: number | null = null;
-  /** All years' stats for all-time aggregation. */
+  /** Current year's stats (only one entry — kept as a map for renderer reuse). */
   private allYearStats: Map<number, YearStats> = new Map();
-  /** All-time aggregated stats. */
+  /** Current-year aggregated stats. */
   private allTimeStats: AllTimeStats | null = null;
 
   // Cached state
@@ -228,9 +227,6 @@ export class JournalCaptureView extends ItemView {
     this.statsPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-stats' });
     this.statsPaneEl.style.display = 'none';
 
-    // Review pane (hidden initially)
-    this.reviewPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-review' });
-    this.reviewPaneEl.style.display = 'none';
 
     // ── Vault listeners ──
     // modify: refresh the affected day's section in place (no full rebuild)
@@ -309,9 +305,6 @@ export class JournalCaptureView extends ItemView {
     this.captureTabBtn = this.makeTabBtn('feather', true, '快速记录');
     this.captureTabBtn.addEventListener('click', () => this.switchTab('capture'));
 
-    this.reviewTabBtn = this.makeTabBtn('calendar', false, '随机回顾');
-    this.reviewTabBtn.addEventListener('click', () => this.switchTab('review'));
-
     this.searchTabBtn = this.makeTabBtn('search', false, '搜索日记');
     this.searchTabBtn.addEventListener('click', () => this.switchTab('search'));
 
@@ -338,6 +331,13 @@ export class JournalCaptureView extends ItemView {
         void this.runSearch(q.trim());
       }, 300);
     });
+
+    this.randomMemoBtn = this.searchBarEl.createEl('button', {
+      cls: 'jp-search-bar-random-btn',
+      attr: { 'aria-label': '随机看一篇 Memo', title: '随机看一篇 Memo' },
+    });
+    setIcon(this.randomMemoBtn, 'dice');
+    this.randomMemoBtn.addEventListener('click', () => void this.showRandomMemo());
   }
 
   /** Build one icon-only tab button. */
@@ -351,20 +351,18 @@ export class JournalCaptureView extends ItemView {
     return btn;
   }
 
-  private switchTab(tab: 'capture' | 'stats' | 'search' | 'review') {
+  private switchTab(tab: 'capture' | 'stats' | 'search') {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
 
     this.captureTabBtn.toggleClass('is-active', tab === 'capture');
-    this.reviewTabBtn.toggleClass('is-active', tab === 'review');
     this.searchTabBtn.toggleClass('is-active', tab === 'search');
     this.statsTabBtn.toggleClass('is-active', tab === 'stats');
 
     if (tab === 'search') {
       this.capturePaneEl.style.display = '';
       this.statsPaneEl.style.display = 'none';
-      this.reviewPaneEl.style.display = 'none';
       this.inputCardEl.style.display = 'none';
       this.searchBarEl.style.display = '';
       this.searchActive = true;
@@ -376,7 +374,7 @@ export class JournalCaptureView extends ItemView {
           this.exhausted = false;
           this.searchFileQueue = [];
           this.searchCursor = 0;
-          this.renderTopLevelMessage('输入关键词开始搜索');
+          void this.showRandomMemo();
         }
         this.searchInputEl.value = this.searchQuery;
         window.setTimeout(() => this.searchInputEl.focus(), 50);
@@ -384,7 +382,6 @@ export class JournalCaptureView extends ItemView {
     } else if (tab === 'capture') {
       this.capturePaneEl.style.display = '';
       this.statsPaneEl.style.display = 'none';
-      this.reviewPaneEl.style.display = 'none';
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
 
@@ -397,21 +394,14 @@ export class JournalCaptureView extends ItemView {
         }
       }
       // Rebuild if coming from any non-capture tab, or if timeline looks stale
-      // (e.g. capture → search → review → capture leaves search content in timelineEl)
+      // (e.g. capture → search → capture leaves search content in timelineEl)
       if (prevTab !== 'capture') {
         void this.fullRebuild();
       }
-    } else if (tab === 'review') {
-      this.capturePaneEl.style.display = 'none';
-      this.statsPaneEl.style.display = 'none';
-      this.reviewPaneEl.style.display = '';
-      this.searchBarEl.style.display = 'none';
-      void this.loadReview();
     } else {
       // stats tab
       this.capturePaneEl.style.display = 'none';
       this.statsPaneEl.style.display = '';
-      this.reviewPaneEl.style.display = 'none';
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
 
@@ -693,6 +683,24 @@ export class JournalCaptureView extends ItemView {
   }
 
 
+  private static readonly INPUT_PLACEHOLDERS = [
+    "What's happening?",
+    "What's on your mind?",
+    "What's going on?",
+    'Got something to jot down?',
+    'What just happened?',
+    'Anything worth remembering?',
+    'What are you up to?',
+    'Say something.',
+    "What's new?",
+    "Write it down before it slips away.",
+  ];
+
+  private pickRandomPlaceholder(): string {
+    const pool = JournalCaptureView.INPUT_PLACEHOLDERS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
@@ -706,7 +714,7 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl = inputWrapper.createEl('textarea', {
       cls: 'jp-capture-input',
       attr: {
-        placeholder: "What's happening?",
+        placeholder: this.pickRandomPlaceholder(),
         rows: '3',
       },
     });
@@ -2187,103 +2195,119 @@ export class JournalCaptureView extends ItemView {
     this.days = [];
   }
 
-  // ── Review pane ─────────────────────────────────────────────────────────
+  // ── Random memo (search tab) ────────────────────────────────────────────
 
-  /** Load a random past daily note and render its entries as a timeline. */
-  private async loadReview(): Promise<void> {
-    this.reviewPaneEl.empty();
-
+  /** Pick a random entry from a random past daily note and render it in the search timeline. */
+  private async showRandomMemo(): Promise<void> {
     if (!appHasDailyNotesPluginLoaded()) {
-      this.reviewPaneEl.createDiv({ cls: 'jp-capture-empty', text: '请先启用 Obsidian 自带的「Daily Notes」核心插件' });
+      this.disposeDays();
+      this.timelineEl.empty();
+      this.renderTopLevelMessage('请先启用 Obsidian 自带的「Daily Notes」核心插件');
       return;
     }
 
     const allNotes = getAllDailyNotes() as Record<string, TFile>;
     const today = moment().startOf('day');
-    const files = Object.values(allNotes).filter((f): f is TFile => {
+    const pool = Object.values(allNotes).filter((f): f is TFile => {
       if (!(f instanceof TFile)) return false;
       const d = getDateFromFile(f, 'day');
       return !!d && d.isBefore(today, 'day');
     });
 
-    if (files.length === 0) {
-      this.reviewPaneEl.createDiv({ cls: 'jp-capture-empty', text: '还没有过去的日记可以回顾' });
+    if (pool.length === 0) {
+      this.disposeDays();
+      this.timelineEl.empty();
+      this.renderTopLevelMessage('还没有过去的日记可以随机查看');
       return;
     }
 
-    // Pick a random file
-    const file = files[Math.floor(Math.random() * files.length)];
-    const date = getDateFromFile(file, 'day')!.clone().startOf('day');
+    // Leave normal search mode — clear query/input and switch into random mode
+    this.searchQuery = '';
+    this.searchInputEl.value = '';
+    this.exhausted = true;
+    this.searchFileQueue = [];
+    this.searchCursor = 0;
 
-    // Header with date + re-roll button
-    const header = this.reviewPaneEl.createDiv({ cls: 'jp-review-header' });
-    const dateEl = header.createDiv({ cls: 'jp-review-date' });
-    const weekdayZh = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.day()];
-    dateEl.setText(date.format('YYYY年M月D日') + ' · ' + weekdayZh);
+    let entry: JournalEntry | null = null;
+    let pickedFile: TFile | null = null;
+    let pickedDate: moment.Moment | null = null;
 
-    const rerollBtn = header.createEl('button', {
-      cls: 'jp-review-reroll-btn',
-      attr: { 'aria-label': '换一天' },
+    while (pool.length > 0 && !entry) {
+      const idx = Math.floor(Math.random() * pool.length);
+      const file = pool.splice(idx, 1)[0];
+      try {
+        const content = await this.app.vault.cachedRead(file);
+        const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
+        if (!section) continue;
+        const text = content.slice(section.from, section.to);
+        let entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+        if (entries.length === 0) entries = this.parseLooseEntries(text);
+        if (entries.length === 0) continue;
+        entry = entries[Math.floor(Math.random() * entries.length)];
+        pickedFile = file;
+        pickedDate = getDateFromFile(file, 'day')!.clone().startOf('day');
+      } catch (err) {
+        console.error('[Spark Memo] random memo read failed', err);
+      }
+    }
+
+    this.disposeDays();
+    this.timelineEl.empty();
+
+    if (!entry || !pickedFile || !pickedDate) {
+      this.renderTopLevelMessage('还没有可以随机查看的 Memo');
+      return;
+    }
+
+    const day: DaySection = {
+      date: pickedDate,
+      el: createDiv({ cls: 'jp-timeline-day' }),
+      scope: new Component(),
+      filePath: pickedFile.path,
+    };
+    day.scope.load();
+    this.renderRandomMemoContent(day, entry);
+    this.timelineEl.appendChild(day.el);
+    this.days.push(day);
+  }
+
+  /** Render a single randomly-picked entry, with a re-roll button in the header. */
+  private renderRandomMemoContent(day: DaySection, entry: JournalEntry) {
+    const headerLabel = this.formatDateHeader(day.date, 1);
+    const headerRow = day.el.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
+    headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+    const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
+    const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
+    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: '随机看到的一篇 Memo' });
+
+    const actions = headerCard.createDiv({ cls: 'jp-timeline-header-actions' });
+    this.addOpenNoteBtn(actions, day);
+
+    const rerollBtn = actions.createEl('button', {
+      cls: 'jp-timeline-open-btn',
+      attr: { 'aria-label': '换一篇' },
     });
     setIcon(rerollBtn, 'dice');
-    rerollBtn.addEventListener('click', () => void this.loadReview());
+    rerollBtn.addEventListener('click', () => void this.showRandomMemo());
 
-    const openBtn = header.createEl('button', {
-      cls: 'jp-review-reroll-btn',
-      attr: { 'aria-label': '打开日记' },
+    const sourcePath = day.filePath ?? '';
+    const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
+    row.createDiv({ cls: 'jp-timeline-dot' });
+    const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
+    head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+    const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
+    void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope).then(() => {
+      this.applyImageGrid(bubble);
+      this.attachImagePreviews(bubble);
     });
-    setIcon(openBtn, 'crosshair');
-    openBtn.addEventListener('click', () => void this.openDailyNoteByDate(date));
 
-    // Parse entries
-    let entries: Array<{ timestamp: string; text: string; lineIndex: number }> = [];
-    try {
-      const content = await this.app.vault.cachedRead(file);
-      const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
-      if (section) {
-        const text = content.slice(section.from, section.to);
-        // First try normal timestamped entries
-        const parsed = parseJournalEntries(text, this.plugin.settings.timestampPattern);
-        if (parsed.length > 0) {
-          entries = parsed;
-        } else {
-          // Fallback: treat every non-empty list item as an entry with 00:00
-          entries = this.parseLooseEntries(text);
-        }
-      }
-    } catch (err) {
-      console.error('[Spark Memo] review read failed', err);
-    }
-
-    if (entries.length === 0) {
-      this.reviewPaneEl.createDiv({ cls: 'jp-capture-empty', text: '这天没有日记内容' });
-      return;
-    }
-
-    // Sort descending by timestamp
-    const sorted = [...entries].sort((a, b) =>
-      a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : b.lineIndex - a.lineIndex,
-    );
-
-    const scope = new Component();
-    scope.load();
-    this.register(() => scope.unload());
-
-    const timeline = this.reviewPaneEl.createDiv({ cls: 'jp-timeline' });
-    const sourcePath = file.path;
-
-    for (const entry of sorted) {
-      const row = timeline.createDiv({ cls: 'jp-timeline-entry' });
-      row.createDiv({ cls: 'jp-timeline-dot' });
-      const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
-      head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
-      const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, scope)
-        .then(() => {
-          this.applyImageGrid(bubble);
-          this.attachImagePreviews(bubble);
-        });
-    }
+    const openMenu = (evt: MouseEvent) => {
+      evt.preventDefault();
+      this.openEntryMenu(evt, day, entry);
+    };
+    head.addEventListener('contextmenu', openMenu);
+    bubble.addEventListener('contextmenu', openMenu);
   }
 
   /**
@@ -2319,7 +2343,7 @@ export class JournalCaptureView extends ItemView {
 
     this.statsYearLabelEl = this.statsToolbarEl.createDiv({
       cls: 'jp-stats-year-label',
-      text: '全量数据',
+      text: `${moment().year()} 年`,
     });
 
     // Body container
@@ -2340,12 +2364,13 @@ export class JournalCaptureView extends ItemView {
     }, 300);
   }
 
-  /** Load + render stats for all available years. */
+  /** Load + render stats for the current year only. */
   private async loadAllStats(): Promise<void> {
     if (this.statsLoading) return;
     this.statsLoading = true;
 
-    this.statsYearLabelEl.setText('全量数据');
+    const currentYear = moment().year();
+    this.statsYearLabelEl.setText(`${currentYear} 年`);
     this.renderStatsLoading();
 
     try {
@@ -2357,11 +2382,11 @@ export class JournalCaptureView extends ItemView {
       const all = getAllDailyNotes() as Record<string, TFile>;
       const yearMap = new Map<number, Array<{ key: string; sectionText: string }>>();
 
-      // Group all daily notes by year
+      // Group current year's daily notes only
       for (const file of Object.values(all)) {
         if (!(file instanceof TFile)) continue;
         const d = getDateFromFile(file as TFile, 'day');
-        if (!d) continue;
+        if (!d || d.year() !== currentYear) continue;
         const year = d.year();
         const key = d.format('YYYY-MM-DD');
 
@@ -2919,6 +2944,7 @@ export class JournalCaptureView extends ItemView {
       const writtenDay = (targetDate ?? moment()).clone().startOf('day');
 
       this.textareaEl.value = '';
+      this.textareaEl.placeholder = this.pickRandomPlaceholder();
       this.pendingImages = [];
       this.pendingAudio = [];
       this.pendingCaptureOverride = null;
