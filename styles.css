@@ -784,11 +784,16 @@
 .jp-timeline-bubble li p {
   margin: 0 !important;
 }
-/* Embedded images shouldn't blow the bubble out */
+/* Embedded images render as a small square thumbnail — same footprint as
+   a grid cell — instead of at full width. A tall portrait shot would
+   otherwise dominate the timeline entry; full detail is one click away
+   via the zoom-in preview. */
 .jp-timeline-bubble img,
 .jp-timeline-bubble .internal-embed img {
-  max-width: 100%;
-  height: auto;
+  width: 96px;
+  height: 96px;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
   border-radius: 6px;
   margin-top: 6px;
 }
@@ -826,13 +831,6 @@
   aspect-ratio: 1 / 1;
   object-fit: cover;
   margin: 0 !important;
-}
-/* A lone image keeps its natural aspect ratio instead of being cropped
-   into a square — the square crop only makes sense once there's a grid
-   to keep visually even. */
-.jp-timeline-image-grid[data-count="1"] .internal-embed img {
-  aspect-ratio: auto;
-  height: auto;
 }
 /* Non-grid embeds (single images that never went through applyImageGrid,
    e.g. inserted by hand rather than via the capture panel) are still
