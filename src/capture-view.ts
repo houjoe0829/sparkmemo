@@ -119,6 +119,7 @@ export class JournalCaptureView extends ItemView {
   private pendingImages: TFile[] = [];
   /** Hard cap on pending images per entry — keeps the preview grid to a single row/2×2 square. */
   private static readonly MAX_PENDING_IMAGES = 9;
+  private static readonly MAX_PENDING_AUDIO = 1;
   /** Recordings made but not yet appended to the note text; flushed on submit. */
   private pendingAudio: { file: TFile; duration: string }[] = [];
   /**
@@ -1122,6 +1123,10 @@ export class JournalCaptureView extends ItemView {
         new Notice('已添加图片，无法同时录音');
         return;
       }
+      if (this.pendingAudio.length >= JournalCaptureView.MAX_PENDING_AUDIO) {
+        new Notice('最多添加 1 段录音');
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
@@ -1300,8 +1305,9 @@ export class JournalCaptureView extends ItemView {
       const hasAudio = this.pendingAudio.length > 0;
       const hasImages = this.pendingImages.length > 0;
       const imageMaxedOut = this.pendingImages.length >= JournalCaptureView.MAX_PENDING_IMAGES;
+      const audioMaxedOut = this.pendingAudio.length >= JournalCaptureView.MAX_PENDING_AUDIO;
       const imageDisabled = hasAudio || imageMaxedOut;
-      const micDisabled = hasImages;
+      const micDisabled = hasImages || audioMaxedOut;
 
       const menu = new Menu();
       menu.addItem(item => item
@@ -1313,7 +1319,7 @@ export class JournalCaptureView extends ItemView {
           fileInput.click();
         }));
       menu.addItem(item => item
-        .setTitle('录音')
+        .setTitle(`录音（最多 ${JournalCaptureView.MAX_PENDING_AUDIO} 段）`)
         .setIcon('mic')
         .setDisabled(micDisabled)
         .onClick(async () => {
