@@ -891,18 +891,31 @@
   margin-left: auto;
 }
 .jp-day-nav-btn {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  max-width: 26px !important;
+  max-height: 26px !important;
+  padding: 0 !important;
+  margin: 0;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 6px !important;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+.jp-day-nav-btn svg {
+  display: inline-block !important;
+  width: 15px !important;
+  height: 15px !important;
 }
 .jp-day-nav-btn:hover {
   background: var(--background-modifier-hover);
@@ -1299,29 +1312,38 @@
   font-weight: 600;
 }
 .jp-tab-btn {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  max-width: 30px !important;
+  max-height: 30px !important;
+  padding: 0 !important;
+  margin: 0;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 50%;
+  border-radius: 50% !important;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .jp-tab-btn-icon {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 15px !important;
+  height: 15px !important;
 }
 .jp-tab-btn-icon svg {
-  width: 15px;
-  height: 15px;
+  display: inline-block !important;
+  width: 15px !important;
+  height: 15px !important;
 }
 /* Text label is no longer used, hidden if accidentally present */
 .jp-tab-btn-text {
