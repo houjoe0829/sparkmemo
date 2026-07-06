@@ -508,3 +508,55 @@ export function removeAudioEmbedsFromEntry(
   const newSection = lines.join('\n');
   return content.slice(0, section.from) + newSection + content.slice(section.to);
 }
+
+/**
+ * Replaces the display name inside an entry's `[名字](geo:lat,lon)` location
+ * tag — used by the timeline's "重试" button when the name was left as the
+ * "位置" placeholder because reverse geocoding failed at submit time.
+ *
+ * Matches by exact coordinate (formatted the same way `handleSubmit` writes
+ * it, 6 decimal places) rather than by the old name, since the old name is
+ * whatever placeholder text was showing. Returns the original content
+ * unchanged if `lineIndex` isn't a valid entry head, or no tag with that
+ * exact coordinate is found in the entry (e.g. the note was edited since).
+ */
+export function updateEntryLocationName(
+  content: string,
+  settings: SparkMemoSettings,
+  lineIndex: number,
+  latitude: number,
+  longitude: number,
+  newName: string,
+): string {
+  const section = findSection(
+    content,
+    settings.targetHeading,
+    settings.headingLevel,
+  );
+  if (!section) return content;
+
+  const sectionText = content.slice(section.from, section.to);
+  const lines = sectionText.split('\n');
+  if (lineIndex < 0 || lineIndex >= lines.length) return content;
+
+  const tsRe = new RegExp(`^[-*+]\\s+(${settings.timestampPattern})(?=\\s|$)`);
+  if (!tsRe.test(lines[lineIndex])) return content;
+
+  let end = lineIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+    end++;
+  }
+
+  const marker = `](geo:${latitude.toFixed(6)},${longitude.toFixed(6)})`;
+  for (let i = lineIndex; i < end; i++) {
+    const idx = lines[i].indexOf(marker);
+    if (idx === -1) continue;
+    const openIdx = lines[i].lastIndexOf('[', idx);
+    if (openIdx === -1) continue;
+    lines[i] = lines[i].slice(0, openIdx) + `[${newName}` + lines[i].slice(idx);
+
+    const newSection = lines.join('\n');
+    return content.slice(0, section.from) + newSection + content.slice(section.to);
+  }
+  return content;
+}

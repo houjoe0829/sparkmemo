@@ -804,8 +804,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('图片时间校验')
-      .setDesc('添加图片时，若图片拍摄时间与当前时间相差超过 5 分钟，弹窗询问是否改用图片时间记录')
+      .setName('图片时间/位置校验')
+      .setDesc('添加图片时，若识别到拍摄时间（与当前时间相差超过 5 分钟）或 GPS 位置，弹窗询问是否使用图片里的信息记录')
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.imageTimeCheck)

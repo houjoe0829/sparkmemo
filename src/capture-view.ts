@@ -43,8 +43,10 @@ import {
   formatTimeHHMM,
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
+  updateEntryLocationName,
 } from './section';
-import { readExifCaptureDate } from './exif';
+import { readExifCaptureDate, readExifGpsLocation } from './exif';
+import { reverseGeocodeCity } from './geocode';
 import { encodeWebp } from './webp-encoder';
 import {
   YearStats,
@@ -115,6 +117,7 @@ export class JournalCaptureView extends ItemView {
   private submitBtn!: HTMLButtonElement;
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
+  private locationPillEl!: HTMLElement;
   /** Images picked but not yet appended to the note text; flushed on submit. */
   private pendingImages: TFile[] = [];
   /** Hard cap on pending images per entry — keeps the preview grid to a single row/2×2 square. */
@@ -130,6 +133,13 @@ export class JournalCaptureView extends ItemView {
    * images are empty or the entry is submitted.
    */
   private pendingCaptureOverride: { date: moment.Moment; time: string } | null = null;
+  /**
+   * GPS coordinate read from a photo's EXIF, plus its (async-resolved)
+   * coarse place name. Set as soon as GPS is found — `name` starts `null`
+   * while reverse geocoding is in flight. Cleared once the pending images
+   * are empty or the entry is submitted.
+   */
+  private pendingLocation: { latitude: number; longitude: number; name: string | null } | null = null;
 
   // DOM references (stats pane)
   private statsToolbarEl!: HTMLElement;
@@ -566,10 +576,12 @@ export class JournalCaptureView extends ItemView {
 
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
       head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+      const { text: bodyText, location } = extractLocationTag(entry.text);
+      if (location) this.renderLocationChip(head, day, entry, location);
 
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
       // Render markdown first, then highlight keywords in the resulting DOM text nodes
-      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope).then(() => {
+      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
         this.highlightKeyword(bubble, query);
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
@@ -1341,6 +1353,11 @@ export class JournalCaptureView extends ItemView {
     // "now". Removable, since the user may change their mind before submit.
     this.captureTimePillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-capture-time-pill--hidden' });
 
+    // Location override pill — shown to the right of the capture-time pill
+    // once a photo's EXIF GPS coordinate has been detected. Removable, same
+    // as the capture-time pill.
+    this.locationPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
+
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
       attr: { 'aria-label': '记录' },
@@ -1352,6 +1369,7 @@ export class JournalCaptureView extends ItemView {
 
     this.refreshSubmitState();
     this.renderCaptureTimePill();
+    this.renderLocationPill();
   }
 
   /**
@@ -1465,7 +1483,9 @@ export class JournalCaptureView extends ItemView {
           this.refreshSubmitState();
           if (this.pendingImages.length === 0) {
             this.pendingCaptureOverride = null;
+            this.pendingLocation = null;
             this.renderCaptureTimePill();
+            this.renderLocationPill();
           }
         });
       }
@@ -1525,6 +1545,137 @@ export class JournalCaptureView extends ItemView {
   }
 
   /**
+   * Shows/hides the location override pill next to the capture-time pill.
+   * Visible only while `pendingLocation` is set; shows "定位中…" while the
+   * reverse-geocode request is still in flight. Clicking × removes it.
+   */
+  private renderLocationPill() {
+    this.locationPillEl.empty();
+    const loc = this.pendingLocation;
+    this.locationPillEl.toggleClass('jp-location-pill--hidden', !loc);
+    if (!loc) return;
+
+    const iconEl = this.locationPillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
+    setIcon(iconEl, 'map-pin');
+    const label = loc.name ?? `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`;
+    this.locationPillEl.createSpan({ cls: 'jp-capture-time-pill-text', text: label });
+
+    // Reverse geocoding failed (network error, etc.) — show the raw
+    // coordinate and let the user retry without having to remove/re-add
+    // the photo.
+    if (loc.name === null) {
+      const retryBtn = this.locationPillEl.createEl('button', {
+        cls: 'jp-capture-time-pill-clear',
+        attr: { 'aria-label': '重新获取地名' },
+      });
+      setIcon(retryBtn, 'refresh-cw');
+      retryBtn.addEventListener('click', () => void this.retryLocationName());
+    }
+
+    const clearBtn = this.locationPillEl.createEl('button', {
+      cls: 'jp-capture-time-pill-clear',
+      attr: { 'aria-label': '移除位置' },
+    });
+    setIcon(clearBtn, 'x');
+    clearBtn.addEventListener('click', () => {
+      this.pendingLocation = null;
+      this.renderLocationPill();
+    });
+  }
+
+  /** Re-runs reverse geocoding for the pending location's coordinate. */
+  private async retryLocationName(): Promise<void> {
+    const loc = this.pendingLocation;
+    if (!loc) return;
+    const name = await reverseGeocodeCity(loc.latitude, loc.longitude);
+    // The pill may have been cleared, or replaced by a different photo's
+    // coordinate, while this request was in flight.
+    if (
+      this.pendingLocation &&
+      this.pendingLocation.latitude === loc.latitude &&
+      this.pendingLocation.longitude === loc.longitude
+    ) {
+      this.pendingLocation.name = name;
+      this.renderLocationPill();
+      if (name === null) new Notice('获取地名失败，仍将只记录坐标');
+    }
+  }
+
+  /**
+   * Renders a location pill next to an already-submitted entry's timestamp
+   * — same visual style as the composer's pending-location pill. Clicking
+   * it opens the coordinate in Apple Maps (`maps://`), matching sparkflow's
+   * location-chip behaviour.
+   *
+   * If the name is still the "位置" placeholder (reverse geocoding failed
+   * at submit time), also shows a "重试" button that re-geocodes and
+   * rewrites the note's `[位置](geo:...)` tag in place on success.
+   */
+  private renderLocationChip(container: HTMLElement, day: DaySection, entry: JournalEntry, location: EntryLocation) {
+    const chip = container.createEl('a', {
+      cls: 'jp-capture-time-pill jp-location-chip',
+      attr: { href: `maps://?ll=${location.latitude},${location.longitude}&q=${encodeURIComponent(location.name)}` },
+    });
+    const iconEl = chip.createSpan({ cls: 'jp-capture-time-pill-icon' });
+    setIcon(iconEl, 'map-pin');
+    chip.createSpan({ cls: 'jp-capture-time-pill-text', text: location.name });
+
+    if (location.name !== '位置') return;
+
+    const retryBtn = container.createEl('button', {
+      cls: 'jp-capture-time-pill-clear',
+      attr: { 'aria-label': '重新获取地名' },
+    });
+    setIcon(retryBtn, 'refresh-cw');
+    retryBtn.addEventListener('click', (evt: MouseEvent) => {
+      evt.stopPropagation();
+      void this.retryTimelineLocationName(day, entry, location, retryBtn);
+    });
+  }
+
+  /**
+   * Re-geocodes a submitted entry's location and, on success, rewrites its
+   * `[位置](geo:lat,lon)` tag in place with the resolved name. `vault.modify`
+   * triggers the plugin's own file-change handler, which re-renders the
+   * affected day's section — so the pill updates without a manual refresh.
+   */
+  private async retryTimelineLocationName(
+    day: DaySection,
+    entry: JournalEntry,
+    location: EntryLocation,
+    retryBtn: HTMLButtonElement,
+  ): Promise<void> {
+    if (!day.filePath) return;
+    const file = this.app.vault.getAbstractFileByPath(day.filePath);
+    if (!(file instanceof TFile)) return;
+
+    retryBtn.disabled = true;
+    const name = await reverseGeocodeCity(location.latitude, location.longitude);
+    if (!name) {
+      retryBtn.disabled = false;
+      new Notice('获取地名失败，请稍后再试');
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const next = updateEntryLocationName(
+      content,
+      this.plugin.settings,
+      entry.lineIndex,
+      location.latitude,
+      location.longitude,
+      name,
+    );
+    if (next === content) {
+      retryBtn.disabled = false;
+      new Notice('未找到对应的位置标记，笔记可能已被修改');
+      return;
+    }
+    await this.app.vault.modify(file, next);
+    new Notice(`✅ 已更新地名为 ${name}`);
+  }
+
+  /**
    * Saves the picked/pasted/dropped image(s), adds them to the pending
    * strip (capped at `MAX_PENDING_IMAGES`), and — if enabled — checks the
    * *earliest* capture time across this batch against now.
@@ -1564,9 +1715,10 @@ export class JournalCaptureView extends ItemView {
           `🗜️ 已压缩 ${compressedCount} 张图片：${formatBytes(originalTotal)} → ${formatBytes(compressedTotal)}（节省 ${savedPct}%）`,
         );
       }
-      // Capture-time check reads the *original* files — compression can
-      // strip EXIF, but the original still carries it in memory here.
-      await this.maybeCheckImageTimes(accepted);
+      // Capture-time/location check reads the *original* files —
+      // compression can strip EXIF, but the original still carries it in
+      // memory here.
+      await this.maybeCheckImageMetadata(accepted);
     } catch (err) {
       new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
     }
@@ -1640,37 +1792,75 @@ export class JournalCaptureView extends ItemView {
   }
 
   /**
-   * If any image in this batch carries a capture time (EXIF for JPEGs,
-   * otherwise the file's last-modified time) that differs from "now" by
-   * more than 5 minutes, ask the user whether to anchor this entry to the
-   * *earliest* of those capture times instead — including its calendar
-   * date, so a photo from an earlier day lands in that day's daily note
-   * rather than today's. Only asks once per pending-image batch — once an
-   * override is set, later images are assumed to belong to the same moment.
+   * Checks a freshly-added image batch for EXIF capture time and/or GPS
+   * location, and — if either is found — asks the user once whether to use
+   * it. Only asks once per pending-image batch (guarded by the two
+   * `pending*` fields already being set); a "yes" applies whichever of the
+   * two pieces of information was actually found:
+   *   - time: anchors this entry to the *earliest* capture time across the
+   *     batch (including its calendar date), but only when it differs from
+   *     "now" by more than 5 minutes — otherwise there's nothing to ask
+   *     about time.
+   *   - location: taken from the first JPEG in the batch that carries GPS,
+   *     reverse-geocoded to a place name on a best-effort basis (a network
+   *     failure just means the pill/tag falls back to raw coordinates).
    */
-  private async maybeCheckImageTimes(files: File[]): Promise<void> {
+  private async maybeCheckImageMetadata(files: File[]): Promise<void> {
     if (!this.plugin.settings.imageTimeCheck) return;
-    if (this.pendingCaptureOverride) return;
+    if (this.pendingCaptureOverride || this.pendingLocation) return;
 
     const capturedTimes = (await Promise.all(files.map(f => getImageCaptureTime(f))))
       .filter((d): d is Date => d !== null);
-    if (capturedTimes.length === 0) return;
+    const earliest = capturedTimes.length > 0 ? capturedTimes.reduce((a, b) => (a < b ? a : b)) : null;
+    const diffMinutes = earliest ? Math.abs(Date.now() - earliest.getTime()) / 60000 : 0;
+    const timeFound = earliest !== null && diffMinutes > 5;
 
-    const earliest = capturedTimes.reduce((a, b) => (a < b ? a : b));
-    const diffMinutes = Math.abs(Date.now() - earliest.getTime()) / 60000;
-    if (diffMinutes <= 5) return;
+    let gpsCoord: { latitude: number; longitude: number } | null = null;
+    for (const file of files) {
+      if (file.type !== 'image/jpeg' && file.type !== 'image/jpg') continue;
+      try {
+        gpsCoord = readExifGpsLocation(await file.arrayBuffer());
+      } catch {
+        gpsCoord = null;
+      }
+      if (gpsCoord) break;
+    }
 
-    const useImageTime = await confirmUseImageTime(this.app, earliest, diffMinutes);
-    if (useImageTime) {
+    if (!timeFound && !gpsCoord) return;
+
+    // Resolve the place name before showing the modal, so the user sees
+    // what they're agreeing to rather than a placeholder. If this fails
+    // (e.g. offline), the modal falls back to showing raw coordinates with
+    // its own "重试" button.
+    const locationName = gpsCoord ? await reverseGeocodeCity(gpsCoord.latitude, gpsCoord.longitude) : null;
+
+    const result = await confirmUseImageMetadata(this.app, {
+      capturedAt: timeFound ? earliest : null,
+      diffMinutes,
+      location: gpsCoord ? { name: locationName, latitude: gpsCoord.latitude, longitude: gpsCoord.longitude } : null,
+    });
+    if (!result.useImageInfo) return;
+
+    const appliedParts: string[] = [];
+    if (timeFound && earliest) {
       const capturedDate = moment(earliest);
       this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(earliest) };
       this.renderCaptureTimePill();
-      new Notice(
+      appliedParts.push(
         capturedDate.isSame(moment(), 'day')
-          ? `✅ 已改用图片时间 ${this.pendingCaptureOverride.time} 记录`
-          : `✅ 已改用图片时间记录，将写入 ${capturedDate.format('YYYY-MM-DD')} 的日记`,
+          ? `时间 ${this.pendingCaptureOverride.time}`
+          : `时间（将写入 ${capturedDate.format('YYYY-MM-DD')} 的日记）`,
       );
     }
+    if (gpsCoord) {
+      // Use `result.location.name`, not the outer `locationName` — the user
+      // may have hit "重试" in the modal and gotten a name after all.
+      const finalName = result.location?.name ?? null;
+      this.pendingLocation = { latitude: gpsCoord.latitude, longitude: gpsCoord.longitude, name: finalName };
+      this.renderLocationPill();
+      appliedParts.push(`位置 ${finalName ?? '(坐标)'}`);
+    }
+    new Notice(`✅ 已使用图片${appliedParts.join('、')}记录`);
   }
 
   private async saveAudioToVault(blob: Blob): Promise<TFile> {
@@ -2132,10 +2322,12 @@ export class JournalCaptureView extends ItemView {
       // Header: timestamp pill anchored to the dot via a short connector line.
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
       head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+      const { text: bodyText, location } = extractLocationTag(entry.text);
+      if (location) this.renderLocationChip(head, day, entry, location);
 
       // Body bubble: chat-style rounded card holding the rendered markdown.
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-      void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope)
+      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope)
         .then(() => {
           this.applyImageGrid(bubble);
           this.attachImagePreviews(bubble);
@@ -2302,8 +2494,10 @@ export class JournalCaptureView extends ItemView {
     row.createDiv({ cls: 'jp-timeline-dot' });
     const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
     head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+    const { text: bodyText, location } = extractLocationTag(entry.text);
+    if (location) this.renderLocationChip(head, day, entry, location);
     const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-    void MarkdownRenderer.render(this.app, entry.text, bubble, sourcePath, day.scope).then(() => {
+    void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
       this.applyImageGrid(bubble);
       this.attachImagePreviews(bubble);
     });
@@ -2919,13 +3113,18 @@ export class JournalCaptureView extends ItemView {
     const text = this.textareaEl.value;
     if (text.trim().length === 0 && this.pendingImages.length === 0 && this.pendingAudio.length === 0) return;
 
+    const locationTag = this.pendingLocation
+      ? ` [${this.pendingLocation.name ?? '位置'}](geo:${this.pendingLocation.latitude.toFixed(6)},${this.pendingLocation.longitude.toFixed(6)})`
+      : '';
+    const bodyText = locationTag ? `${text}${locationTag}` : text;
+
     const embeds = [
       ...this.pendingImages.map(file => `![[${file.path}]]`),
       ...this.pendingAudio.map(a => `![[${a.file.path}]]`),
     ].join(' ');
     const raw = embeds
-      ? (text.trim().length > 0 ? `${text}\n${embeds}` : embeds)
-      : text;
+      ? (bodyText.trim().length > 0 ? `${bodyText}\n${embeds}` : embeds)
+      : bodyText;
 
     if (!appHasDailyNotesPluginLoaded()) {
       new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
@@ -2954,8 +3153,10 @@ export class JournalCaptureView extends ItemView {
       this.pendingImages = [];
       this.pendingAudio = [];
       this.pendingCaptureOverride = null;
+      this.pendingLocation = null;
       this.renderAttachmentList();
       this.renderCaptureTimePill();
+      this.renderLocationPill();
       this.autoResizeTextarea();
 
       // vault.modify will catch-up an already-loaded day's section
@@ -2993,6 +3194,30 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// ── Location tag helpers ────────────────────────────────────────────────────
+
+/** A `[城市名](geo:lat,lon)` tag extracted out of an entry's stored text. */
+interface EntryLocation {
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+const LOCATION_TAG_RE = /\s*\[([^\]]*)\]\(geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\)/;
+
+/**
+ * Pulls the trailing `[城市名](geo:lat,lon)` tag (written by `handleSubmit`)
+ * out of an entry's raw text, so it can be rendered as its own pill next to
+ * the timestamp instead of as an inline Markdown link inside the body.
+ */
+function extractLocationTag(text: string): { text: string; location: EntryLocation | null } {
+  const m = LOCATION_TAG_RE.exec(text);
+  if (!m) return { text, location: null };
+  const location: EntryLocation = { name: m[1], latitude: Number(m[2]), longitude: Number(m[3]) };
+  return { text: text.slice(0, m.index) + text.slice(m.index + m[0].length), location };
+}
+
+
 // ── Image capture-time helpers ──────────────────────────────────────────────
 
 /**
@@ -3015,78 +3240,146 @@ async function getImageCaptureTime(file: File): Promise<Date | null> {
 }
 
 /**
- * Asks whether to anchor the entry's timestamp to a photo's capture time
- * instead of "now". Resolves `true` only on an explicit "使用图片时间"
- * click — dismissing (Esc / click-outside / "使用当前时间") resolves `false`
- * and leaves the default "now" timestamp untouched.
+ * Asks whether to use whichever of {capture time, GPS location} was found
+ * on the picked photo(s). Resolves `true` only on an explicit "使用图片
+ * 信息" click — dismissing (Esc / click-outside / "不使用") resolves
+ * `false` and leaves both "now" and "no location" untouched.
  */
-function confirmUseImageTime(
+interface ImageMetadataLocation {
+  /** `null` while reverse geocoding hasn't produced a name yet, or has failed. */
+  name: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+interface ImageMetadataConfirmResult {
+  useImageInfo: boolean;
+  /** The location as last left in the modal — reflects any successful "重试" click. */
+  location: ImageMetadataLocation | null;
+}
+
+function confirmUseImageMetadata(
   app: import('obsidian').App,
-  capturedAt: Date,
-  diffMinutes: number,
-): Promise<boolean> {
+  opts: ImageMetadataConfirmOptions,
+): Promise<ImageMetadataConfirmResult> {
   return new Promise(resolve => {
-    new ImageTimeConfirmModal(app, { capturedAt, diffMinutes }, resolve).open();
+    new ImageMetadataConfirmModal(app, opts, resolve).open();
   });
 }
 
-interface ImageTimeConfirmOptions {
-  capturedAt: Date;
+interface ImageMetadataConfirmOptions {
+  /** `null` when no capture time was found, or it didn't differ from "now" by more than 5 minutes. */
+  capturedAt: Date | null;
   diffMinutes: number;
+  /** `null` when no GPS coordinate was found on any picked photo. */
+  location: ImageMetadataLocation | null;
 }
 
-class ImageTimeConfirmModal extends Modal {
-  private opts: ImageTimeConfirmOptions;
-  private resolve: (useImageTime: boolean) => void;
+class ImageMetadataConfirmModal extends Modal {
+  private opts: ImageMetadataConfirmOptions;
+  private resolve: (result: ImageMetadataConfirmResult) => void;
   private decided = false;
+  /** Mutable copy of `opts.location` — "重试" updates `.name` in place. */
+  private location: ImageMetadataLocation | null;
+  private locationLi: HTMLElement | null = null;
+  private retrying = false;
 
   constructor(
     app: import('obsidian').App,
-    opts: ImageTimeConfirmOptions,
-    resolve: (useImageTime: boolean) => void,
+    opts: ImageMetadataConfirmOptions,
+    resolve: (result: ImageMetadataConfirmResult) => void,
   ) {
     super(app);
     this.opts = opts;
     this.resolve = resolve;
+    this.location = opts.location;
   }
 
-  private decide(useImageTime: boolean): void {
+  private decide(useImageInfo: boolean): void {
     if (this.decided) return;
     this.decided = true;
-    this.resolve(useImageTime);
+    this.resolve({ useImageInfo, location: this.location });
     this.close();
   }
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
-    titleEl.setText('图片时间与当前时间不符');
+    const { capturedAt, location } = this.opts;
+    const hasBoth = capturedAt !== null && location !== null;
+    titleEl.setText(
+      hasBoth ? '图片自带时间与位置信息'
+        : capturedAt !== null ? '图片时间与当前时间不符'
+          : '图片自带位置信息',
+    );
     titleEl.addClass('jp-modal-title-flush');
     contentEl.addClass('jp-image-time-confirm');
 
     contentEl.createEl('p', {
       cls: 'jp-image-time-confirm-question',
-      text: '是否使用图片拍摄时间记录这条 memo？',
+      text: '是否使用图片里的信息记录这条 memo？',
     });
+
+    const list = contentEl.createEl('ul', { cls: 'jp-image-metadata-confirm-list' });
+    if (capturedAt !== null) {
+      const capturedDate = moment(capturedAt);
+      const label = capturedDate.isSame(moment(), 'day')
+        ? `时间：${formatTimeHHMM(capturedAt)}`
+        : `时间：${capturedDate.format('YYYY-MM-DD HH:mm')}（不同日）`;
+      list.createEl('li', { text: label });
+    }
+    if (this.location !== null) {
+      this.locationLi = list.createEl('li', { cls: 'jp-image-metadata-confirm-location' });
+      this.renderLocationLine();
+    }
 
     const actions = contentEl.createDiv({ cls: 'jp-image-time-confirm-actions' });
     const useNowBtn = actions.createEl('button', {
       cls: 'jp-image-time-confirm-cancel',
-      text: '使用当前时间',
+      text: '不使用',
     });
     useNowBtn.addEventListener('click', () => this.decide(false));
 
     const useImageBtn = actions.createEl('button', {
       cls: 'mod-cta jp-image-time-confirm-confirm',
-      text: '使用图片时间',
+      text: '使用图片信息',
     });
     useImageBtn.addEventListener('click', () => this.decide(true));
 
     window.setTimeout(() => useNowBtn.focus(), 0);
   }
 
+  /** Re-renders the location `<li>` — text plus, on failure, a "重试" button. */
+  private renderLocationLine(): void {
+    const loc = this.location;
+    if (!this.locationLi || !loc) return;
+    this.locationLi.empty();
+
+    const label = loc.name ?? `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}（获取地名失败）`;
+    this.locationLi.createSpan({ text: `位置：${label}` });
+
+    if (loc.name === null) {
+      const retryBtn = this.locationLi.createEl('button', {
+        cls: 'jp-image-metadata-retry-btn',
+        text: this.retrying ? '获取中…' : '重试',
+      });
+      retryBtn.disabled = this.retrying;
+      retryBtn.addEventListener('click', () => void this.retryLocationName());
+    }
+  }
+
+  private async retryLocationName(): Promise<void> {
+    if (this.retrying || !this.location) return;
+    this.retrying = true;
+    this.renderLocationLine();
+    const name = await reverseGeocodeCity(this.location.latitude, this.location.longitude);
+    this.retrying = false;
+    if (this.location) this.location.name = name;
+    this.renderLocationLine();
+  }
+
   onClose(): void {
     this.contentEl.empty();
-    this.decide(false); // dismissed → keep the default "now" timestamp
+    this.decide(false); // dismissed → keep the default "now" timestamp and no location
   }
 }
 

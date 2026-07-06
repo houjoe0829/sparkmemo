@@ -11,6 +11,18 @@ const TAG_DATE_TIME = 0x0132;
 const TAG_DATE_TIME_ORIGINAL = 0x9003;
 const TAG_DATE_TIME_DIGITIZED = 0x9004;
 const TAG_EXIF_IFD_POINTER = 0x8769;
+const TAG_GPS_IFD_POINTER = 0x8825;
+
+const TAG_GPS_LATITUDE_REF = 0x0001;
+const TAG_GPS_LATITUDE = 0x0002;
+const TAG_GPS_LONGITUDE_REF = 0x0003;
+const TAG_GPS_LONGITUDE = 0x0004;
+
+/** Decimal-degree GPS coordinate read from a photo's EXIF GPS IFD. */
+export interface ExifGpsCoordinate {
+  latitude: number;
+  longitude: number;
+}
 
 interface IfdEntry {
   tag: number;
@@ -61,6 +73,58 @@ function readLong(view: DataView, entry: IfdEntry, little: boolean): number | nu
   return view.getUint32(entry.valueOffset, little);
 }
 
+/** Reads a RATIONAL (type 5) IFD entry's values as numerator/denominator pairs. */
+function readRationals(
+  view: DataView,
+  entry: IfdEntry,
+  tiffStart: number,
+  little: boolean,
+): number[] | null {
+  if (entry.type !== 5 || entry.count < 1) return null;
+  const offset = tiffStart + view.getUint32(entry.valueOffset, little);
+  if (offset < 0 || offset + entry.count * 8 > view.byteLength) return null;
+  const values: number[] = [];
+  for (let i = 0; i < entry.count; i++) {
+    const numerator = view.getUint32(offset + i * 8, little);
+    const denominator = view.getUint32(offset + i * 8 + 4, little);
+    values.push(denominator === 0 ? 0 : numerator / denominator);
+  }
+  return values;
+}
+
+/** Converts EXIF GPS [degrees, minutes, seconds] rationals into decimal degrees. */
+function toDecimalDegrees(dms: number[], ref: string): number | null {
+  if (dms.length !== 3) return null;
+  const [degrees, minutes, seconds] = dms;
+  const decimal = degrees + minutes / 60 + seconds / 3600;
+  return ref === 'S' || ref === 'W' ? -decimal : decimal;
+}
+
+function readGpsCoordinate(
+  view: DataView,
+  gpsIfd: IfdEntry[],
+  tiffStart: number,
+  little: boolean,
+): ExifGpsCoordinate | null {
+  const latRefEntry = gpsIfd.find(e => e.tag === TAG_GPS_LATITUDE_REF);
+  const latEntry = gpsIfd.find(e => e.tag === TAG_GPS_LATITUDE);
+  const lonRefEntry = gpsIfd.find(e => e.tag === TAG_GPS_LONGITUDE_REF);
+  const lonEntry = gpsIfd.find(e => e.tag === TAG_GPS_LONGITUDE);
+  if (!latRefEntry || !latEntry || !lonRefEntry || !lonEntry) return null;
+
+  const latRef = readAscii(view, latRefEntry, tiffStart, little);
+  const lonRef = readAscii(view, lonRefEntry, tiffStart, little);
+  const latDms = readRationals(view, latEntry, tiffStart, little);
+  const lonDms = readRationals(view, lonEntry, tiffStart, little);
+  if (!latRef || !lonRef || !latDms || !lonDms) return null;
+
+  const latitude = toDecimalDegrees(latDms, latRef);
+  const longitude = toDecimalDegrees(lonDms, lonRef);
+  if (latitude === null || longitude === null) return null;
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) return null;
+  return { latitude, longitude };
+}
+
 /** Parses EXIF's "YYYY:MM:DD HH:MM:SS" ASCII datetime as a local `Date`. */
 function parseExifDateTime(raw: string): Date | null {
   const m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(raw.trim());
@@ -101,14 +165,30 @@ function readTiffCaptureDate(view: DataView, tiffStart: number): Date | null {
   return raw ? parseExifDateTime(raw) : null;
 }
 
+function readTiffGpsLocation(view: DataView, tiffStart: number): ExifGpsCoordinate | null {
+  const byteOrder = view.getUint16(tiffStart);
+  const little = byteOrder === 0x4949; // "II"
+  if (!little && byteOrder !== 0x4d4d /* "MM" */) return null;
+
+  const ifd0Offset = tiffStart + view.getUint32(tiffStart + 4, little);
+  const ifd0 = readIfd(view, ifd0Offset, little);
+  const gpsPointerEntry = ifd0.find(e => e.tag === TAG_GPS_IFD_POINTER);
+  if (!gpsPointerEntry) return null;
+
+  const gpsIfdOffset = readLong(view, gpsPointerEntry, little);
+  if (gpsIfdOffset === null) return null;
+  const gpsIfd = readIfd(view, tiffStart + gpsIfdOffset, little);
+  return readGpsCoordinate(view, gpsIfd, tiffStart, little);
+}
+
 /**
- * Reads the EXIF capture time from a JPEG's raw bytes.
+ * Finds a JPEG's EXIF APP1/TIFF segment start and hands it to `parse`.
  *
  * Returns `null` for non-JPEG images, JPEGs without an EXIF APP1 segment, or
- * any structure this couldn't confidently parse — callers should treat that
- * as "no EXIF timestamp available", not an error.
+ * any structure that couldn't be confidently parsed — callers should treat
+ * that as "no EXIF data available", not an error.
  */
-export function readExifCaptureDate(buffer: ArrayBuffer): Date | null {
+function withTiffStart<T>(buffer: ArrayBuffer, parse: (view: DataView, tiffStart: number) => T | null): T | null {
   try {
     const view = new DataView(buffer);
     if (view.byteLength < 4 || view.getUint16(0) !== 0xffd8) return null; // not a JPEG (SOI marker)
@@ -126,8 +206,7 @@ export function readExifCaptureDate(buffer: ArrayBuffer): Date | null {
           segStart + 6 <= view.byteLength &&
           view.getUint32(segStart) === 0x45786966 && // "Exif"
           view.getUint16(segStart + 4) === 0x0000;
-        if (isExif) return readTiffCaptureDate(view, segStart + 6);
-        return null;
+        return isExif ? parse(view, segStart + 6) : null;
       }
 
       offset += 2 + segmentLength;
@@ -136,4 +215,14 @@ export function readExifCaptureDate(buffer: ArrayBuffer): Date | null {
   } catch {
     return null; // malformed/truncated segment — treat as "no EXIF"
   }
+}
+
+/** Reads the EXIF capture time from a JPEG's raw bytes. */
+export function readExifCaptureDate(buffer: ArrayBuffer): Date | null {
+  return withTiffStart(buffer, readTiffCaptureDate);
+}
+
+/** Reads the EXIF GPS coordinate (decimal degrees) from a JPEG's raw bytes. */
+export function readExifGpsLocation(buffer: ArrayBuffer): ExifGpsCoordinate | null {
+  return withTiffStart(buffer, readTiffGpsLocation);
 }
