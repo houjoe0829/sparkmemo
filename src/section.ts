@@ -337,6 +337,12 @@ export function appendToJournalSection(
 /** Recognized audio file extensions for the "delete-with-audio" feature. */
 const AUDIO_EXT_RE = /\.(m4a|mp3|wav|ogg|flac|opus|aac|webm)$/i;
 
+/** Recognized image file extensions — mirrors what the capture box can attach. */
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|tiff?)$/i;
+
+/** Shared wiki-embed matcher: `![[path]]`, `![[path#heading]]`, `![[path|alias]]`. */
+const EMBED_RE = /!\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+
 /**
  * Extract the vault-relative paths of all audio attachments wiki-embedded in
  * an entry's body text. Picks up `![[Assets/audio/x.m4a]]`, optional
@@ -347,15 +353,50 @@ const AUDIO_EXT_RE = /\.(m4a|mp3|wav|ogg|flac|opus|aac|webm)$/i;
  */
 export function extractAudioEmbeds(text: string): string[] {
   const out: string[] = [];
-  const re = /!\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  EMBED_RE.lastIndex = 0;
+  while ((m = EMBED_RE.exec(text)) !== null) {
     const path = m[1].trim();
     if (path.length > 0 && AUDIO_EXT_RE.test(path)) {
       out.push(path);
     }
   }
   return out;
+}
+
+/**
+ * Same as `extractAudioEmbeds`, but for image attachments — used to rebuild
+ * the "编辑" pending-attachment previews instead of showing raw embed text.
+ */
+export function extractImageEmbeds(text: string): string[] {
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  EMBED_RE.lastIndex = 0;
+  while ((m = EMBED_RE.exec(text)) !== null) {
+    const path = m[1].trim();
+    if (path.length > 0 && IMAGE_EXT_RE.test(path)) {
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+/**
+ * Strip all audio/image wiki-embed tokens out of a standalone piece of entry
+ * text (not the whole document), collapsing whitespace left behind. Used to
+ * populate the input box for "编辑" — the embeds themselves are restored as
+ * pending attachment previews instead, so the raw `![[...]]` text shouldn't
+ * also show up for editing.
+ */
+export function stripAttachmentEmbeds(text: string): string {
+  const stripped = text.replace(EMBED_RE, (full, path: string) =>
+    AUDIO_EXT_RE.test(path.trim()) || IMAGE_EXT_RE.test(path.trim()) ? '' : full,
+  );
+  return stripped
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .join('\n');
 }
 
 /**
@@ -501,6 +542,53 @@ export function removeAudioEmbedsFromEntry(
   // still a valid (empty) entry — leave it. parseJournalEntries will show
   // it with an empty bubble, which matches the user's expectation: they
   // explicitly asked to keep the memo.
+
+  const newSection = lines.join('\n');
+  return content.slice(0, section.from) + newSection + content.slice(section.to);
+}
+
+/**
+ * Replace one entry's body text in place, preserving its original timestamp
+ * and list marker. Used by the "编辑" context-menu action.
+ *
+ * Rebuilds the head + continuation lines via `buildEntryLine` (so multi-line
+ * input still gets proper soft-breaks) and splices them in at the entry's
+ * original location, replacing the old head + continuation-line range.
+ *
+ * Returns the original content unchanged if the section is missing or
+ * `lineIndex` isn't a valid entry head (e.g. the file changed under us since
+ * the menu was opened).
+ */
+export function replaceEntryTextInSection(
+  content: string,
+  settings: SparkMemoSettings,
+  lineIndex: number,
+  timestamp: string,
+  newText: string,
+): string {
+  const section = findSection(
+    content,
+    settings.targetHeading,
+    settings.headingLevel,
+  );
+  if (!section) return content;
+
+  const sectionText = content.slice(section.from, section.to);
+  const lines = sectionText.split('\n');
+  if (lineIndex < 0 || lineIndex >= lines.length) return content;
+
+  const tsRe = new RegExp(`^[-*+]\\s+(${settings.timestampPattern})(?=\\s|$)`);
+  if (!tsRe.test(lines[lineIndex])) return content;
+
+  let end = lineIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+    end++;
+  }
+
+  const marker = lines[lineIndex].match(/^([-*+])\s+/)?.[1] ?? '-';
+  const newLine = buildEntryLine(newText, timestamp).replace(/^-/, marker);
+
+  lines.splice(lineIndex, end - lineIndex, ...newLine.split('\n'));
 
   const newSection = lines.join('\n');
   return content.slice(0, section.from) + newSection + content.slice(section.to);

@@ -130,7 +130,7 @@ export default class SparkMemoPlugin extends Plugin {
     targetDate?: moment.Moment,
   ): Promise<boolean> {
     if (!appHasDailyNotesPluginLoaded()) {
-      new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      new Notice('⚠️ 请先启用 Obsidian 自带的「Daily Notes」核心插件');
       return false;
     }
     const trimmed = text.trim();
@@ -160,7 +160,7 @@ export default class SparkMemoPlugin extends Plugin {
       return true;
     } catch (err) {
       console.error('[Spark Memo] writeJournalEntry failed', err);
-      new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`❌ 写入失败：${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }

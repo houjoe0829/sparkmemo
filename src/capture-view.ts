@@ -39,10 +39,13 @@ import {
   JournalEntry,
   deleteEntryFromSection,
   extractAudioEmbeds,
+  extractImageEmbeds,
   findSection,
   formatTimeHHMM,
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
+  replaceEntryTextInSection,
+  stripAttachmentEmbeds,
   updateEntryLocationName,
 } from './section';
 import { readExifCaptureDate, readExifGpsLocation } from './exif';
@@ -140,6 +143,14 @@ export class JournalCaptureView extends ItemView {
    * are empty or the entry is submitted.
    */
   private pendingLocation: { latitude: number; longitude: number; name: string | null } | null = null;
+  /**
+   * Set while the input box holds an existing entry's text for editing
+   * (triggered from the entry's context menu). While set, submit rewrites
+   * this entry in place instead of appending a new one. Cleared on submit
+   * or cancel.
+   */
+  private editingEntry: { day: DaySection; entry: JournalEntry } | null = null;
+  private editingPillEl!: HTMLElement;
 
   // DOM references (stats pane)
   private statsToolbarEl!: HTMLElement;
@@ -1118,11 +1129,11 @@ export class JournalCaptureView extends ItemView {
 
     const startRecording = async () => {
       if (this.pendingImages.length > 0) {
-        new Notice('已添加图片，无法同时录音');
+        new Notice('⚠️ 已添加图片，无法同时录音');
         return;
       }
       if (this.pendingAudio.length >= JournalCaptureView.MAX_PENDING_AUDIO) {
-        new Notice('最多添加 1 段录音');
+        new Notice('⚠️ 最多添加 1 段录音');
         return;
       }
       try {
@@ -1175,7 +1186,7 @@ export class JournalCaptureView extends ItemView {
               try {
                 text = (await this.transcribeAudio(audioBlob)).trim();
               } catch (err) {
-                new Notice(`转写失败：${err instanceof Error ? err.message : String(err)}`);
+                new Notice(`❌ 转写失败：${err instanceof Error ? err.message : String(err)}`);
               }
             }
             // Drain any still-in-flight live segments before we touch the
@@ -1187,7 +1198,7 @@ export class JournalCaptureView extends ItemView {
             }
             this.addPendingAudio(audioFile, duration);
           } catch (err) {
-            new Notice(`录音保存失败：${err instanceof Error ? err.message : String(err)}`);
+            new Notice(`❌ 录音保存失败：${err instanceof Error ? err.message : String(err)}`);
           } finally {
             // RecBar fades out and the action bar (icon group + NOTE button)
             // comes back together — the user sees the result and the controls
@@ -1257,10 +1268,10 @@ export class JournalCaptureView extends ItemView {
 
         recordingTimeout = window.setTimeout(() => {
           void stopRecording();
-          new Notice('录音已自动停止（最长5分钟）');
+          new Notice('⏱️ 录音已自动停止（最长5分钟）');
         }, 5 * 60 * 1000);
       } catch (err) {
-        new Notice(`无法访问麦克风：${err instanceof Error ? err.message : String(err)}`);
+        new Notice(`❌ 无法访问麦克风：${err instanceof Error ? err.message : String(err)}`);
       }
     };
 
@@ -1344,6 +1355,10 @@ export class JournalCaptureView extends ItemView {
     // as the capture-time pill.
     this.locationPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
 
+    // Editing-mode pill — shown once an existing entry is loaded into the
+    // input box for editing. Clicking × cancels the edit.
+    this.editingPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
+
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
       attr: { 'aria-label': '记录' },
@@ -1356,6 +1371,7 @@ export class JournalCaptureView extends ItemView {
     this.refreshSubmitState();
     this.renderCaptureTimePill();
     this.renderLocationPill();
+    this.renderEditingPill();
   }
 
   /**
@@ -1526,7 +1542,7 @@ export class JournalCaptureView extends ItemView {
     clearBtn.addEventListener('click', () => {
       this.pendingCaptureOverride = null;
       this.renderCaptureTimePill();
-      new Notice('已改回使用当前时间记录');
+      new Notice('🕒 已改回使用当前时间记录');
     });
   }
 
@@ -1583,8 +1599,101 @@ export class JournalCaptureView extends ItemView {
     ) {
       this.pendingLocation.name = name;
       this.renderLocationPill();
-      if (name === null) new Notice('获取地名失败，仍将只记录坐标');
+      if (name === null) new Notice('⚠️ 获取地名失败，仍将只记录坐标');
     }
+  }
+
+  /** Shows/hides the "编辑中" pill next to the location pill. */
+  private renderEditingPill() {
+    this.editingPillEl.empty();
+    const editing = !!this.editingEntry;
+    this.editingPillEl.toggleClass('jp-location-pill--hidden', !editing);
+    if (!editing) return;
+
+    const iconEl = this.editingPillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
+    setIcon(iconEl, 'pencil');
+    this.editingPillEl.createSpan({ cls: 'jp-capture-time-pill-text', text: '编辑中' });
+
+    const clearBtn = this.editingPillEl.createEl('button', {
+      cls: 'jp-capture-time-pill-clear',
+      attr: { 'aria-label': '取消编辑' },
+    });
+    setIcon(clearBtn, 'x');
+    clearBtn.addEventListener('click', () => this.cancelEdit());
+  }
+
+  /**
+   * Loads an existing entry's text back into the input box for editing —
+   * triggered from the entry's context menu "编辑" item. Submitting while in
+   * this state rewrites the entry in place (see `handleSubmit`) instead of
+   * appending a new one.
+   *
+   * Embedded images/audio and the location tag aren't dumped into the
+   * textarea as raw `![[...]]`/`[name](geo:...)` text — they're pulled back
+   * out into `pendingImages` / `pendingAudio` / `pendingLocation` so they
+   * render as the same attachment previews / pills used when composing a
+   * new entry. `handleSubmit` already rebuilds the raw body from those on
+   * save, so this round-trips cleanly.
+   */
+  private async startEdit(day: DaySection, entry: JournalEntry): Promise<void> {
+    this.editingEntry = { day, entry };
+
+    const { text: textWithoutLocation, location } = extractLocationTag(entry.text);
+    const audioPaths = extractAudioEmbeds(textWithoutLocation);
+    const imagePaths = extractImageEmbeds(textWithoutLocation);
+
+    this.textareaEl.value = stripAttachmentEmbeds(textWithoutLocation);
+    this.pendingLocation = location
+      ? { latitude: location.latitude, longitude: location.longitude, name: location.name }
+      : null;
+
+    const imageFiles = imagePaths
+      .map(p => this.app.vault.getAbstractFileByPath(p))
+      .filter((f): f is TFile => f instanceof TFile);
+    this.pendingImages = imageFiles;
+
+    this.pendingAudio = [];
+    const audioFile = audioPaths
+      .map(p => this.app.vault.getAbstractFileByPath(p))
+      .find((f): f is TFile => f instanceof TFile);
+    if (audioFile) {
+      const duration = await this.readAudioDuration(audioFile);
+      // Bail if the edit was cancelled (or moved to a different entry)
+      // while we were probing the audio file's duration.
+      if (this.editingEntry?.entry !== entry) return;
+      this.pendingAudio = [{ file: audioFile, duration }];
+    }
+
+    const missingCount = (audioPaths.length - (audioFile ? 1 : 0)) + (imagePaths.length - imageFiles.length);
+    if (missingCount > 0) {
+      new Notice(`⚠️ ${missingCount} 个附件文件已找不到，编辑后保存会丢失`);
+    }
+
+    this.textareaEl.focus();
+    this.autoResizeTextarea();
+    this.renderAttachmentList();
+    this.renderLocationPill();
+    this.renderEditingPill();
+    this.refreshSubmitState();
+    // Input card sits at the top of the scroller, timeline below it — scroll
+    // up so the user lands on the input box, not down into old entries.
+    const scroller = this.containerEl.children[1] as HTMLElement;
+    scroller.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /** Discards the in-progress edit and clears the input box + attachments. */
+  private cancelEdit() {
+    this.editingEntry = null;
+    this.textareaEl.value = '';
+    this.textareaEl.placeholder = this.pickRandomPlaceholder();
+    this.pendingImages = [];
+    this.pendingAudio = [];
+    this.pendingLocation = null;
+    this.autoResizeTextarea();
+    this.renderAttachmentList();
+    this.renderLocationPill();
+    this.renderEditingPill();
+    this.refreshSubmitState();
   }
 
   /**
@@ -1639,7 +1748,7 @@ export class JournalCaptureView extends ItemView {
     const name = await reverseGeocodeCity(location.latitude, location.longitude);
     if (!name) {
       retryBtn.disabled = false;
-      new Notice('获取地名失败，请稍后再试');
+      new Notice('⚠️ 获取地名失败，请稍后再试');
       return;
     }
 
@@ -1654,7 +1763,7 @@ export class JournalCaptureView extends ItemView {
     );
     if (next === content) {
       retryBtn.disabled = false;
-      new Notice('未找到对应的位置标记，笔记可能已被修改');
+      new Notice('⚠️ 未找到对应的位置标记，笔记可能已被修改');
       return;
     }
     await this.app.vault.modify(file, next);
@@ -1668,17 +1777,17 @@ export class JournalCaptureView extends ItemView {
    */
   private async addImageFiles(files: File[]): Promise<void> {
     if (this.pendingAudio.length > 0) {
-      new Notice('已添加录音，无法同时添加图片');
+      new Notice('⚠️ 已添加录音，无法同时添加图片');
       return;
     }
     const room = JournalCaptureView.MAX_PENDING_IMAGES - this.pendingImages.length;
     if (room <= 0) {
-      new Notice(`最多添加 ${JournalCaptureView.MAX_PENDING_IMAGES} 张图片`);
+      new Notice(`⚠️ 最多添加 ${JournalCaptureView.MAX_PENDING_IMAGES} 张图片`);
       return;
     }
     const accepted = files.slice(0, room);
     if (files.length > accepted.length) {
-      new Notice(`最多添加 ${JournalCaptureView.MAX_PENDING_IMAGES} 张图片，已忽略多余的 ${files.length - accepted.length} 张`);
+      new Notice(`⚠️ 最多添加 ${JournalCaptureView.MAX_PENDING_IMAGES} 张图片，已忽略多余的 ${files.length - accepted.length} 张`);
     }
 
     try {
@@ -1706,7 +1815,7 @@ export class JournalCaptureView extends ItemView {
       // memory here.
       await this.maybeCheckImageMetadata(accepted);
     } catch (err) {
-      new Notice(`图片保存失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`❌ 图片保存失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -1864,6 +1973,34 @@ export class JournalCaptureView extends ItemView {
     this.pendingAudio.push({ file, duration });
     this.renderAttachmentList();
     this.refreshSubmitState();
+  }
+
+  /**
+   * Reads an existing audio file's actual duration (formatted `mm:ss`) for
+   * re-populating the attachment strip on "编辑" — unlike a fresh recording,
+   * we don't have an elapsed-time timer to read the duration from.
+   * Resolves `'--:--'` if the file can't be probed (e.g. unsupported codec).
+   */
+  private async readAudioDuration(file: TFile): Promise<string> {
+    return new Promise(resolve => {
+      const audio = new Audio(this.app.vault.getResourcePath(file));
+      const finish = (seconds: number | null) => {
+        audio.removeEventListener('loadedmetadata', onLoaded);
+        audio.removeEventListener('error', onError);
+        if (seconds === null || !isFinite(seconds)) {
+          resolve('--:--');
+          return;
+        }
+        const total = Math.floor(seconds);
+        const m = String(Math.floor(total / 60)).padStart(2, '0');
+        const s = String(total % 60).padStart(2, '0');
+        resolve(`${m}:${s}`);
+      };
+      const onLoaded = () => finish(audio.duration);
+      const onError = () => finish(null);
+      audio.addEventListener('loadedmetadata', onLoaded);
+      audio.addEventListener('error', onError);
+    });
   }
 
   /**
@@ -2831,14 +2968,14 @@ export class JournalCaptureView extends ItemView {
     try {
       const file = getDailyNote(date, getAllDailyNotes()) as TFile | null;
       if (!file) {
-        new Notice(`${date.format('YYYY年M月D日')} 没有日记文件`);
+        new Notice(`⚠️ ${date.format('YYYY年M月D日')} 没有日记文件`);
         return;
       }
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
     } catch (err) {
       console.error('[Spark Memo] open daily note failed', err);
-      new Notice('打开失败');
+      new Notice('❌ 打开失败');
     }
   }
 
@@ -2896,12 +3033,13 @@ export class JournalCaptureView extends ItemView {
     document.body.toggleClass('jp-hide-mobile-toolbar', hidden);
   }
 
-  // ── Entry context menu (copy / delete) ──────────────────────────────────
+  // ── Entry context menu (copy / edit / delete) ────────────────────────────
 
   /**
    * Build and show the right-click / long-press context menu for one entry.
    * Items shown:
    *   - 复制                — copies the raw markdown body to clipboard
+   *   - 编辑                — loads the entry's text back into the input box
    *   - 删除 memo           — deletes only the entry line(s) from the daily note
    *   - 仅删除录音文件       — keeps the memo text, trashes audio + strips ![[..]]
    *
@@ -2918,6 +3056,15 @@ export class JournalCaptureView extends ItemView {
         .setIcon('copy')
         .onClick(() => {
           void this.copyEntry(entry);
+        }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle('编辑')
+        .setIcon('pencil')
+        .onClick(() => {
+          void this.startEdit(day, entry);
         }),
     );
 
@@ -2958,7 +3105,7 @@ export class JournalCaptureView extends ItemView {
       new Notice('📋 已复制');
     } catch (err) {
       console.error('[Spark Memo] copy failed', err);
-      new Notice(`复制失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`❌ 复制失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -3021,12 +3168,12 @@ export class JournalCaptureView extends ItemView {
     audioPaths: string[],
   ): Promise<void> {
     if (!day.filePath) {
-      new Notice('找不到对应的日记文件');
+      new Notice('⚠️ 找不到对应的日记文件');
       return;
     }
     const file = this.app.vault.getAbstractFileByPath(day.filePath);
     if (!(file instanceof TFile)) {
-      new Notice('找不到对应的日记文件');
+      new Notice('⚠️ 找不到对应的日记文件');
       return;
     }
 
@@ -3039,14 +3186,14 @@ export class JournalCaptureView extends ItemView {
       if (next === content) {
         // No-op means our lineIndex no longer matches a head line — the file
         // changed under us. Refresh and bail rather than mangling content.
-        new Notice('日记内容已变化，请刷新后重试');
+        new Notice('⚠️ 日记内容已变化，请刷新后重试');
         await this.refreshDay(day);
         return;
       }
       await this.app.vault.modify(file, next);
     } catch (err) {
       console.error('[Spark Memo] delete entry failed', err);
-      new Notice(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`❌ 删除失败：${err instanceof Error ? err.message : String(err)}`);
       return;
     }
 
@@ -3113,7 +3260,7 @@ export class JournalCaptureView extends ItemView {
       : bodyText;
 
     if (!appHasDailyNotesPluginLoaded()) {
-      new Notice('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      new Notice('⚠️ 请先启用 Obsidian 自带的「Daily Notes」核心插件');
       return;
     }
 
@@ -3123,6 +3270,24 @@ export class JournalCaptureView extends ItemView {
     setIcon(this.submitBtn, 'loader-2');
 
     try {
+      if (this.editingEntry) {
+        const ok = await this.updateEditedEntry(raw);
+        if (!ok) return;
+
+        this.editingEntry = null;
+        this.textareaEl.value = '';
+        this.textareaEl.placeholder = this.pickRandomPlaceholder();
+        this.pendingImages = [];
+        this.pendingAudio = [];
+        this.pendingLocation = null;
+        this.renderAttachmentList();
+        this.renderLocationPill();
+        this.renderEditingPill();
+        this.autoResizeTextarea();
+        new Notice('✏️ 已更新');
+        return;
+      }
+
       const targetDate = this.pendingCaptureOverride?.date;
       const ok = await this.plugin.writeJournalEntry(
         raw,
@@ -3164,11 +3329,52 @@ export class JournalCaptureView extends ItemView {
       }
     } catch (err) {
       console.error('[Spark Memo] submit failed', err);
-      new Notice(`写入失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`❌ 写入失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.submitBtn.removeClass('jp-capture-submit--loading');
       setIcon(this.submitBtn, 'arrow-up');
       this.refreshSubmitState();
+    }
+  }
+
+  /**
+   * Rewrites the entry currently being edited (see `startEdit`) in place,
+   * preserving its original timestamp. Returns false (with a Notice already
+   * shown) on failure or if the underlying file changed under us since the
+   * menu was opened.
+   */
+  private async updateEditedEntry(raw: string): Promise<boolean> {
+    const { day, entry } = this.editingEntry!;
+    if (!day.filePath) {
+      new Notice('⚠️ 找不到对应的日记文件');
+      return false;
+    }
+    const file = this.app.vault.getAbstractFileByPath(day.filePath);
+    if (!(file instanceof TFile)) {
+      new Notice('⚠️ 找不到对应的日记文件');
+      return false;
+    }
+
+    try {
+      const content = await this.app.vault.read(file);
+      const next = replaceEntryTextInSection(
+        content,
+        this.plugin.settings,
+        entry.lineIndex,
+        entry.timestamp,
+        raw,
+      );
+      if (next === content) {
+        new Notice('⚠️ 日记内容已变化，请刷新后重试');
+        await this.refreshDay(day);
+        return false;
+      }
+      await this.app.vault.modify(file, next);
+      return true;
+    } catch (err) {
+      console.error('[Spark Memo] update entry failed', err);
+      new Notice(`❌ 更新失败：${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }
 }

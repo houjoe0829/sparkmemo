@@ -630,20 +630,17 @@
   position: relative;
   margin-right: 0;
 }
-/* Smooth curved tail dropping from the bottom-center of the timestamp
-   pill and landing on the bubble's top edge. The box's left edge sits
-   at the pill's horizontal center, with border-left going straight
-   down then curving rightward into a short horizontal segment. */
+/* Straight vertical tail dropping from the bottom-center of the timestamp
+   pill down to the bubble's top edge. */
 .jp-timeline-entry-head .jp-timestamp::after {
   content: '';
   position: absolute;
   left: 50%;
   top: 100%;
-  width: 14px;
+  width: 2px;
   height: 10px;
-  border-left: 2px solid var(--jp-tl-line);
-  border-bottom: 2px solid var(--jp-tl-line);
-  border-bottom-left-radius: 12px;
+  background: var(--jp-tl-line);
+  transform: translateX(-50%);
   pointer-events: none;
 }
 
