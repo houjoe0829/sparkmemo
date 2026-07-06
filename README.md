@@ -6,6 +6,8 @@
 ![Version](https://img.shields.io/github/manifest-json/v/houjoe0829/sparkmemo?style=flat-square&color=7c3aed&label=version)
 ![License](https://img.shields.io/github/license/houjoe0829/sparkmemo?style=flat-square&color=7c3aed)
 
+> 本项目 fork 自 [zhaohongxuan/journal-partner](https://github.com/zhaohongxuan/journal-partner)，在其时间戳高亮能力的基础上扩展了快速记录侧边栏、地点聚合、年度统计、多语言等功能。感谢原作者的开源工作。
+
 ---
 
 ## 效果预览
@@ -37,7 +39,6 @@
 - **回车自动插入时间戳**：在 Memo 区块内按回车时，新行自动以当前 `HH:MM` 起头
 - **Tab 缩进保留时间戳**：在条目首部按 Tab 时，时间戳与内容一起缩进，光标停在新位置
 - **自定义正则**：默认匹配 `HH:MM` 格式，可修改为任意正则表达式以适配其他时间格式
-- **圆形复选框**：可选地将 Memo 区域内的复选框渲染为圆形而非方形
 
 ### 🌐 多语言
 
@@ -63,7 +64,7 @@
 - **实时同步**：在主编辑器里改动当天日记，侧边栏对应日的时间线会就地刷新
 - **Markdown 渲染**：支持双向链接、嵌入图片、加粗斜体等，所有原生 Obsidian 渲染特性均可用
 - **日期栏排序按钮**：每个日期标题卡片的右上角都有排序切换按钮，按当日时间正序 / 倒序展示
-- **右键管理 memo**：右键（或移动端长按）任意气泡，可复制原文、删除当前 memo；若该条 memo 附带录音，还会出现「删除 memo 和录音文件」与「仅删除录音文件」两个选项，录音走 Obsidian 回收站可恢复。可在设置中关闭「删除前确认」跳过对话框
+- **右键管理 memo**：右键（或移动端长按）任意气泡，可复制原文、删除当前 memo；若该条 memo 附带录音，还会出现「删除 memo 和录音文件」与「仅删除录音文件」两个选项，删除前会弹出确认对话框，录音走 Obsidian 回收站可恢复
 
 > 截图待补充（界面近期改动较多，旧截图已移除）。
 
@@ -140,8 +141,6 @@ npm run deploy   # 需先在 deploy.sh 里配置好你自己的 VAULT_PATH
 |---|---|---|
 | 时间戳只读 | 防止在编辑器中修改已有时间戳 | 开启 |
 | 回车自动插入时间戳 | 在 Memo 区块内按回车时自动插入当前时间 | 开启 |
-| 圆形复选框 | 在日记区域内将 checkbox 渲染为圆形而非方形 | 关闭 |
-| 删除前确认 | 右键删除 memo / 录音前弹出确认对话框 | 开启 |
 
 ### 🖼️ 图片压缩
 

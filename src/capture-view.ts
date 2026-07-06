@@ -3506,9 +3506,8 @@ export class JournalCaptureView extends ItemView {
   }
 
   /**
-   * Show a confirmation modal (when `settings.confirmDelete` is on) listing
-   * what will be deleted, then execute the deletion on confirm. When the
-   * setting is off, the action executes immediately.
+   * Show a confirmation modal listing what will be deleted, then execute
+   * the deletion on confirm.
    *
    * Audio files are moved to Obsidian's configured trash via
    * `fileManager.trashFile` so they remain recoverable regardless of which
