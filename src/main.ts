@@ -560,10 +560,10 @@ class SparkMemoSettingTab extends PluginSettingTab {
       .setDesc(t('settings.targetHeading.desc'))
       .addText(text =>
         text
-          .setPlaceholder('Journal')
+          .setPlaceholder('Memo')
           .setValue(this.plugin.settings.targetHeading)
           .onChange(async value => {
-            this.plugin.settings.targetHeading = value.trim() || 'Journal';
+            this.plugin.settings.targetHeading = value.trim() || 'Memo';
             await this.plugin.saveSettings();
           }),
       );
