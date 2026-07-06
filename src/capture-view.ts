@@ -177,8 +177,21 @@ export class JournalCaptureView extends ItemView {
   private statsRefreshTimer: number | null = null;
   /** Current year's stats (only one entry — kept as a map for renderer reuse). */
   private allYearStats: Map<number, YearStats> = new Map();
-  /** Current-year aggregated stats. */
+  /** Aggregated stats across every year found in the vault. */
   private allTimeStats: AllTimeStats | null = null;
+  /** Distinct cities visited (location tags), cached per year alongside `allYearStats`. */
+  private yearCities: Map<number, Set<string>> = new Map();
+  /** Distinct cities across every cached year — merged from `yearCities`. */
+  private statsLocationCount = 0;
+  /**
+   * Years that need re-scanning on the next `loadAllStats` pass. `null` means
+   * "rescan everything" (initial load, or after a rename/delete we can't
+   * attribute to a single year) — otherwise only these years' daily notes are
+   * re-read; every other year keeps its previously cached `YearStats`. Keeps
+   * the cost of a single memo save independent of how many years of journal
+   * history the vault holds.
+   */
+  private dirtyYears: Set<number> | null = null;
 
   // Cached state
   private days: DaySection[] = [];
@@ -275,6 +288,7 @@ export class JournalCaptureView extends ItemView {
           this.scheduleDayRefresh(day);
         }
         if (file.extension === 'md') {
+          this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
         }
@@ -285,6 +299,7 @@ export class JournalCaptureView extends ItemView {
       this.app.vault.on('create', file => {
         if (file instanceof TFile && file.extension === 'md') {
           this.scheduleFullRebuild();
+          this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
         }
@@ -297,14 +312,20 @@ export class JournalCaptureView extends ItemView {
           this.scheduleFullRebuild();
         }
         if (file instanceof TFile && file.extension === 'md') {
+          this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
         }
       }),
     );
+    // rename: the year encoded in a daily note's filename could change, and
+    // we can't cheaply re-derive the *old* year from a bare path string —
+    // fall back to a full rescan on the next stats pass rather than risk a
+    // stale cached year.
     this.registerEvent(
       this.app.vault.on('rename', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
+          this.dirtyYears = null;
           this.scheduleStatsRefresh();
         }
       }),
@@ -2991,13 +3012,29 @@ export class JournalCaptureView extends ItemView {
     }, 300);
   }
 
-  /** Load + render stats for the current year only. */
+  /**
+   * Marks the year a daily-note file belongs to as needing a rescan on the
+   * next `loadAllStats` pass. A no-op once a full rescan (`dirtyYears ===
+   * null`) is already pending — no point tracking individual years then.
+   */
+  private markStatsDirtyForFile(file: TFile): void {
+    if (this.dirtyYears === null) return;
+    const d = getDateFromFile(file, 'day');
+    if (d) this.dirtyYears.add(d.year());
+  }
+
+  /**
+   * Load + render stats across every year of journal history in the vault.
+   *
+   * Only years listed in `dirtyYears` are actually re-read from disk; every
+   * other year reuses its cached `YearStats` / city set from the previous
+   * pass. `dirtyYears === null` forces a full rescan (first load, or after a
+   * rename we can't attribute to one year).
+   */
   private async loadAllStats(): Promise<void> {
     if (this.statsLoading) return;
     this.statsLoading = true;
 
-    const currentYear = moment().year();
-    this.statsYearLabelEl.setText(`${currentYear} 年`);
     this.renderStatsLoading();
 
     try {
@@ -3006,15 +3043,21 @@ export class JournalCaptureView extends ItemView {
         return;
       }
 
+      const fullRescan = this.dirtyYears === null;
+      const yearsToScan = this.dirtyYears;
+
       const all = getAllDailyNotes() as Record<string, TFile>;
       const yearMap = new Map<number, Array<{ key: string; sectionText: string }>>();
+      const yearCitiesUpdate = new Map<number, Set<string>>();
 
-      // Group current year's daily notes only
       for (const file of Object.values(all)) {
         if (!(file instanceof TFile)) continue;
         const d = getDateFromFile(file as TFile, 'day');
-        if (!d || d.year() !== currentYear) continue;
+        if (!d) continue;
         const year = d.year();
+        // Cheap to determine (no disk read) — only years actually touched
+        // since the last pass get the expensive cachedRead below.
+        if (!fullRescan && !yearsToScan!.has(year)) continue;
         const key = d.format('YYYY-MM-DD');
 
         let sectionText = '';
@@ -3034,14 +3077,36 @@ export class JournalCaptureView extends ItemView {
 
         if (!yearMap.has(year)) yearMap.set(year, []);
         yearMap.get(year)!.push({ key, sectionText });
+
+        if (!yearCitiesUpdate.has(year)) yearCitiesUpdate.set(year, new Set());
+        const citySet = yearCitiesUpdate.get(year)!;
+        for (const m of sectionText.matchAll(LOCATION_TAG_RE_GLOBAL)) citySet.add(m[1]);
       }
 
-      // Compute stats for each year
-      this.allYearStats.clear();
-      for (const [year, dayInputs] of yearMap) {
+      // Years we actually rescanned this pass — full rescan means every year
+      // present in the vault; otherwise just the previously-dirty ones.
+      const rescannedYears = fullRescan ? [...yearMap.keys()] : [...yearsToScan!];
+      for (const year of rescannedYears) {
+        const dayInputs = yearMap.get(year);
+        if (!dayInputs || dayInputs.length === 0) {
+          // Last daily note for this year is gone — drop it from the cache
+          // rather than leaving stale (or zeroed) stats behind.
+          this.allYearStats.delete(year);
+          this.yearCities.delete(year);
+          continue;
+        }
         const ys = computeYearStats(year, dayInputs, this.plugin.settings.timestampPattern);
         this.allYearStats.set(year, ys);
+        this.yearCities.set(year, yearCitiesUpdate.get(year) ?? new Set());
       }
+      this.dirtyYears = new Set();
+
+      // Merge distinct cities across every cached year.
+      const allCities = new Set<string>();
+      for (const set of this.yearCities.values()) {
+        for (const name of set) allCities.add(name);
+      }
+      this.statsLocationCount = allCities.size;
 
       // Compute all-time stats
       this.allTimeStats = computeAllTimeStats([...this.allYearStats.values()]);
@@ -3100,19 +3165,31 @@ export class JournalCaptureView extends ItemView {
     }
 
     const sub = top.createDiv({ cls: 'jp-stats-hero-sub' });
-    const yearsStr = allTime.yearsWithData.length > 0
-      ? `${allTime.yearsWithData[0]}–${allTime.yearsWithData[allTime.yearsWithData.length - 1]} 年`
-      : '暂无数据';
+    const firstYear = allTime.yearsWithData[0];
+    const lastYear = allTime.yearsWithData[allTime.yearsWithData.length - 1];
+    const yearsStr = allTime.yearsWithData.length === 0
+      ? '暂无数据'
+      : firstYear === lastYear
+        ? `全部记录 ${firstYear}`
+        : `全部记录 ${firstYear}–${lastYear}`;
     sub.createSpan({ text: yearsStr });
 
     const grid = hero.createDiv({ cls: 'jp-stats-hero-kpis' });
     this.makeStatsKPI(grid, 'file-text', `${allTime.writingDays}`, '天', '写作天数');
     this.makeStatsKPI(grid, 'pencil', `${allTime.totalEntries}`, '条', '总条数');
-    this.makeStatsKPI(grid, 'mic', `${allTime.totalAudios}`, '段', '录音数');
     this.makeStatsKPI(grid, 'flame', `${allTime.longestStreak}`, '天', '最长连续');
+    this.makeStatsKPI(grid, 'map-pin', `${this.statsLocationCount}`, '处', '到访地点');
 
     // ── Per-year heatmaps ─────────────────────────────────────────────────
-    const years = [...this.allYearStats.keys()].sort((a, b) => b - a);
+    // `allYearStats` includes any year with at least one daily-note *file*
+    // (even one whose journal section is empty — e.g. an auto-created blank
+    // note). Only years with actual writing belong here, so filter down to
+    // `yearsWithData` — the same "has content" check `computeAllTimeStats`
+    // already applied.
+    const yearsWithData = new Set(allTime.yearsWithData);
+    const years = [...this.allYearStats.keys()]
+      .filter(year => yearsWithData.has(year))
+      .sort((a, b) => b - a);
     for (const year of years) {
       const ys = this.allYearStats.get(year)!;
       this.renderStatsHeatmapSection(year, ys);
@@ -3700,6 +3777,8 @@ interface EntryLocation {
 }
 
 const LOCATION_TAG_RE = /\s*\[([^\]]*)\]\(geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\)/;
+/** Global variant of {@link LOCATION_TAG_RE}, used to tally distinct cities across a section. */
+const LOCATION_TAG_RE_GLOBAL = /\[([^\]]*)\]\(geo:-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?\)/g;
 
 /**
  * Pulls the trailing `[城市名](geo:lat,lon)` tag (written by `handleSubmit`)
