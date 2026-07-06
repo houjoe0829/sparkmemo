@@ -90,6 +90,13 @@
   height: 100%;
   overflow-y: auto;
   background: var(--background-secondary);
+
+  /* Scroll still works via trackpad/wheel — just hide the visible scrollbar. */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.jp-capture-root::-webkit-scrollbar {
+  display: none; /* Chromium (Obsidian's Electron shell) */
 }
 
 /* Toolbar */
@@ -1339,6 +1346,99 @@
   width: 14px;
   height: 14px;
 }
+
+/* Location aggregation tab */
+.jp-location-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 10px;
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+.jp-location-back-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.jp-location-back-btn:hover {
+  color: var(--jp-tl-dot);
+  background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
+}
+.jp-location-back-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-location-bar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.jp-location-list {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+}
+.jp-location-item {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.jp-location-item:hover {
+  background: var(--background-modifier-hover);
+  border-color: color-mix(in srgb, var(--jp-tl-dot) 30%, var(--background-modifier-border));
+}
+.jp-location-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--jp-tl-dot);
+}
+.jp-location-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-location-item-name {
+  font-size: 13px;
+  color: var(--text-normal);
+  white-space: nowrap;
+}
+.jp-location-item-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.jp-location-jump {
+  cursor: pointer;
+}
+.jp-location-jump:hover {
+  text-decoration: underline;
+}
+
 /* Keyword highlight in search results */
 .jp-search-highlight {
   background: color-mix(in srgb, var(--jp-tl-dot) 22%, transparent);

@@ -18,6 +18,7 @@ import {
   Component,
   ItemView,
   MarkdownRenderer,
+  MarkdownView,
   Menu,
   Modal,
   Notice,
@@ -87,13 +88,14 @@ export class JournalCaptureView extends ItemView {
   private plugin: SparkMemoPlugin;
 
   // Top-level tab state
-  private currentTab: 'capture' | 'stats' | 'search' = 'capture';
+  private currentTab: 'capture' | 'stats' | 'search' | 'location' = 'capture';
   private tabBarEl!: HTMLElement;
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
   private captureTabBtn!: HTMLButtonElement;
   private statsTabBtn!: HTMLButtonElement;
   private searchTabBtn!: HTMLButtonElement;
+  private locationTabBtn!: HTMLButtonElement;
 
   // Search state
   private searchBarEl!: HTMLElement;
@@ -107,6 +109,19 @@ export class JournalCaptureView extends ItemView {
   private searchFileQueue: TFile[] = [];
   /** Index into searchFileQueue: next file to scan in loadMoreSearchResults. */
   private searchCursor = 0;
+
+  // Location-aggregation tab state
+  private locationBarEl!: HTMLElement;
+  private locationBackBtn!: HTMLButtonElement;
+  private locationTitleEl!: HTMLElement;
+  /** City name → aggregated memo data, built by a one-time full scan. Invalidated on any md file change. */
+  private locationIndex: Map<
+    string,
+    { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+  > | null = null;
+  private locationLoading = false;
+  /** Non-null while viewing a single city's memo list; null while viewing the city list. */
+  private selectedLocationCity: string | null = null;
 
   // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
@@ -261,6 +276,7 @@ export class JournalCaptureView extends ItemView {
         }
         if (file.extension === 'md') {
           this.scheduleStatsRefresh();
+          this.locationIndex = null;
         }
       }),
     );
@@ -270,6 +286,7 @@ export class JournalCaptureView extends ItemView {
         if (file instanceof TFile && file.extension === 'md') {
           this.scheduleFullRebuild();
           this.scheduleStatsRefresh();
+          this.locationIndex = null;
         }
       }),
     );
@@ -281,6 +298,7 @@ export class JournalCaptureView extends ItemView {
         }
         if (file instanceof TFile && file.extension === 'md') {
           this.scheduleStatsRefresh();
+          this.locationIndex = null;
         }
       }),
     );
@@ -330,6 +348,9 @@ export class JournalCaptureView extends ItemView {
     this.searchTabBtn = this.makeTabBtn('search', false, '搜索日记');
     this.searchTabBtn.addEventListener('click', () => this.switchTab('search'));
 
+    this.locationTabBtn = this.makeTabBtn('map-pin', false, '地点聚合');
+    this.locationTabBtn.addEventListener('click', () => this.switchTab('location'));
+
     this.statsTabBtn = this.makeTabBtn('bar-chart-2', false, '年度统计');
     this.statsTabBtn.addEventListener('click', () => this.switchTab('stats'));
 
@@ -360,6 +381,20 @@ export class JournalCaptureView extends ItemView {
     });
     setIcon(this.randomMemoBtn, 'dice');
     this.randomMemoBtn.addEventListener('click', () => void this.showRandomMemo());
+
+    // Location bar — collapsed by default, shown when location tab is active
+    this.locationBarEl = root.createDiv({ cls: 'jp-location-bar' });
+    this.locationBarEl.style.display = 'none';
+
+    this.locationBackBtn = this.locationBarEl.createEl('button', {
+      cls: 'jp-location-back-btn',
+      attr: { 'aria-label': '返回地点列表', title: '返回地点列表' },
+    });
+    setIcon(this.locationBackBtn, 'arrow-left');
+    this.locationBackBtn.style.display = 'none';
+    this.locationBackBtn.addEventListener('click', () => this.backToLocationList());
+
+    this.locationTitleEl = this.locationBarEl.createDiv({ cls: 'jp-location-bar-title', text: '全部地点' });
   }
 
   /** Build one icon-only tab button. */
@@ -373,7 +408,7 @@ export class JournalCaptureView extends ItemView {
     return btn;
   }
 
-  private switchTab(tab: 'capture' | 'stats' | 'search') {
+  private switchTab(tab: 'capture' | 'stats' | 'search' | 'location') {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
@@ -381,12 +416,14 @@ export class JournalCaptureView extends ItemView {
     this.captureTabBtn.toggleClass('is-active', tab === 'capture');
     this.searchTabBtn.toggleClass('is-active', tab === 'search');
     this.statsTabBtn.toggleClass('is-active', tab === 'stats');
+    this.locationTabBtn.toggleClass('is-active', tab === 'location');
 
     if (tab === 'search') {
       this.capturePaneEl.style.display = '';
       this.statsPaneEl.style.display = 'none';
       this.inputCardEl.style.display = 'none';
       this.searchBarEl.style.display = '';
+      this.locationBarEl.style.display = 'none';
       this.searchActive = true;
 
       if (prevTab !== 'search') {
@@ -406,6 +443,7 @@ export class JournalCaptureView extends ItemView {
       this.statsPaneEl.style.display = 'none';
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
+      this.locationBarEl.style.display = 'none';
 
       // Always clean up search state when returning to capture
       if (this.searchActive || prevTab === 'search') {
@@ -420,12 +458,33 @@ export class JournalCaptureView extends ItemView {
       if (prevTab !== 'capture') {
         void this.fullRebuild();
       }
+    } else if (tab === 'location') {
+      this.capturePaneEl.style.display = '';
+      this.statsPaneEl.style.display = 'none';
+      this.inputCardEl.style.display = 'none';
+      this.searchBarEl.style.display = 'none';
+      this.locationBarEl.style.display = '';
+
+      if (prevTab !== 'location') {
+        this.disposeDays();
+        this.timelineEl.empty();
+        this.selectedLocationCity = null;
+        this.locationBackBtn.style.display = 'none';
+        this.locationTitleEl.setText('全部地点');
+        void this.loadLocationIndex().then(() => {
+          // Bail if the user already navigated away or picked a city while scanning
+          if (this.currentTab === 'location' && this.selectedLocationCity === null) {
+            this.renderLocationList();
+          }
+        });
+      }
     } else {
       // stats tab
       this.capturePaneEl.style.display = 'none';
       this.statsPaneEl.style.display = '';
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
+      this.locationBarEl.style.display = 'none';
 
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
@@ -722,6 +781,22 @@ export class JournalCaptureView extends ItemView {
 
   private pickRandomPlaceholder(): string {
     const pool = JournalCaptureView.INPUT_PLACEHOLDERS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  private static readonly LOCATION_EMPTY_PLACEHOLDERS = [
+    'No footprints on the map yet.',
+    'Not a single place has found you yet.',
+    'The map is still blank — for now.',
+    'Somewhere, someday. Just not yet.',
+    'Your atlas is waiting to be written.',
+    'No dots on the map. No stories to tell.',
+    "The world hasn't left a mark here yet.",
+    'Still waiting for your first coordinate.',
+  ];
+
+  private pickRandomLocationEmptyPlaceholder(): string {
+    const pool = JournalCaptureView.LOCATION_EMPTY_PLACEHOLDERS;
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
@@ -2272,6 +2347,7 @@ export class JournalCaptureView extends ItemView {
    * `nextProbeDate` and may flip `exhausted`.
    */
   private async loadMore(): Promise<void> {
+    if (this.currentTab === 'location') return;
     if (this.searchActive) {
       await this.loadMoreSearchResults();
       return;
@@ -2465,6 +2541,234 @@ export class JournalCaptureView extends ItemView {
       };
       head.addEventListener('contextmenu', openMenu);
       bubble.addEventListener('contextmenu', openMenu);
+    }
+  }
+
+  // ── Location aggregation (location tab) ─────────────────────────────────
+
+  /**
+   * Full scan of every daily note, grouping entries by their location tag's
+   * city name. Cached in `locationIndex` until any md file changes (see the
+   * vault 'modify'/'create'/'delete' listeners in onOpen, which null it out).
+   */
+  private async loadLocationIndex(): Promise<void> {
+    if (this.locationIndex || this.locationLoading) return;
+    this.locationLoading = true;
+    this.renderTopLevelMessage('正在扫描地点…');
+
+    try {
+      if (!appHasDailyNotesPluginLoaded()) {
+        this.renderTopLevelMessage('请先启用 Obsidian 自带的「Daily Notes」核心插件');
+        return;
+      }
+
+      const all = getAllDailyNotes() as Record<string, TFile>;
+      const index = new Map<
+        string,
+        { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+      >();
+
+      for (const file of Object.values(all)) {
+        if (!(file instanceof TFile)) continue;
+        const date = getDateFromFile(file, 'day');
+        if (!date) continue;
+        const day = date.clone().startOf('day');
+
+        let content: string;
+        try {
+          content = await this.app.vault.cachedRead(file);
+        } catch {
+          continue;
+        }
+        const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
+        if (!section) continue;
+        const text = content.slice(section.from, section.to);
+        const entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+
+        for (const entry of entries) {
+          const { location } = extractLocationTag(entry.text);
+          if (!location) continue;
+
+          const [hh, mm] = entry.timestamp.split(':').map(Number);
+          const ts = day
+            .clone()
+            .add(hh || 0, 'hours')
+            .add(mm || 0, 'minutes')
+            .valueOf();
+
+          let data = index.get(location.name);
+          if (!data) {
+            data = { count: 0, lastTs: 0, entries: [] };
+            index.set(location.name, data);
+          }
+          data.count++;
+          if (ts > data.lastTs) data.lastTs = ts;
+          data.entries.push({ file, date: day, entry });
+        }
+      }
+
+      this.locationIndex = index;
+    } catch (err) {
+      console.error('[Spark Memo] location index build failed', err);
+      this.renderTopLevelMessage('❌ 扫描地点失败');
+    } finally {
+      this.locationLoading = false;
+    }
+  }
+
+  /** Render the top-level "all locations" list, sorted by most-recently-visited first. */
+  private renderLocationList() {
+    this.disposeDays();
+    this.timelineEl.empty();
+
+    if (!this.locationIndex || this.locationIndex.size === 0) {
+      this.locationTitleEl.setText('');
+      this.renderTopLevelMessage(this.pickRandomLocationEmptyPlaceholder());
+      return;
+    }
+
+    this.locationTitleEl.setText(`全部 ${this.locationIndex.size} 个地点`);
+
+    const cities = [...this.locationIndex.entries()].sort((a, b) => b[1].lastTs - a[1].lastTs);
+    const listEl = this.timelineEl.createDiv({ cls: 'jp-location-list' });
+    for (const [city, data] of cities) {
+      const item = listEl.createDiv({ cls: 'jp-location-item' });
+      const iconEl = item.createSpan({ cls: 'jp-location-item-icon' });
+      setIcon(iconEl, 'map-pin');
+      item.createDiv({ cls: 'jp-location-item-name', text: city });
+      item.createDiv({ cls: 'jp-location-item-count', text: `${data.count}` });
+      item.addEventListener('click', () => this.selectLocationCity(city));
+    }
+
+    this.exhausted = true;
+  }
+
+  /** Drill into a single city: render its memos as day-grouped timeline entries, newest first. */
+  private selectLocationCity(city: string) {
+    const data = this.locationIndex?.get(city);
+    if (!data) return;
+
+    this.selectedLocationCity = city;
+    this.locationBackBtn.style.display = '';
+    this.locationTitleEl.setText(city);
+
+    this.disposeDays();
+    this.timelineEl.empty();
+
+    const byDate = new Map<string, { date: moment.Moment; file: TFile; entries: JournalEntry[] }>();
+    for (const e of data.entries) {
+      const key = e.date.format('YYYY-MM-DD');
+      let bucket = byDate.get(key);
+      if (!bucket) {
+        bucket = { date: e.date, file: e.file, entries: [] };
+        byDate.set(key, bucket);
+      }
+      bucket.entries.push(e.entry);
+    }
+    const sortedDays = [...byDate.values()].sort((a, b) => (a.date.isBefore(b.date) ? 1 : -1));
+
+    if (sortedDays.length === 0) {
+      this.renderTopLevelMessage(`没有找到「${city}」的 memo`);
+      return;
+    }
+
+    for (const d of sortedDays) {
+      const day: DaySection = {
+        date: d.date,
+        el: createDiv({ cls: 'jp-timeline-day' }),
+        scope: new Component(),
+        filePath: d.file.path,
+      };
+      day.scope.load();
+      this.renderLocationDayContent(day, d.entries);
+      this.timelineEl.appendChild(day.el);
+      this.days.push(day);
+    }
+
+    this.exhausted = true;
+    this.markEndOfTimeline();
+  }
+
+  /** Return from a city's memo list back to the "all locations" list. */
+  private backToLocationList() {
+    this.selectedLocationCity = null;
+    this.locationBackBtn.style.display = 'none';
+    this.locationTitleEl.setText('全部地点');
+    this.renderLocationList();
+  }
+
+  /** Render one day's entries for a selected city — same shape as search results, no keyword highlight. */
+  private renderLocationDayContent(day: DaySection, entries: JournalEntry[]) {
+    const headerLabel = this.formatDateHeader(day.date, entries.length);
+    const headerRow = day.el.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
+    headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+    const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
+    const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
+    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: `${entries.length} 个 memo` });
+    this.addOpenNoteBtn(headerCard, day);
+
+    const sourcePath = day.filePath ?? '';
+    const sorted = [...entries].sort((a, b) =>
+      a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : b.lineIndex - a.lineIndex,
+    );
+
+    for (const entry of sorted) {
+      const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
+      row.createDiv({ cls: 'jp-timeline-dot' });
+
+      const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
+      const tsEl = head.createEl('span', {
+        cls: 'jp-timestamp jp-location-jump',
+        text: entry.timestamp,
+        attr: { 'aria-label': '跳转到原文', title: '跳转到原文' },
+      });
+      tsEl.addEventListener('click', () => void this.openEntryAtLine(sourcePath, entry));
+      const { text: bodyText, location } = extractLocationTag(entry.text);
+      if (location) this.renderLocationChip(head, day, entry, location);
+
+      const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
+      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
+        this.applyImageGrid(bubble);
+        this.attachImagePreviews(bubble);
+      });
+
+      const openMenu = (evt: MouseEvent) => {
+        evt.preventDefault();
+        this.openEntryMenu(evt, day, entry);
+      };
+      head.addEventListener('contextmenu', openMenu);
+      bubble.addEventListener('contextmenu', openMenu);
+    }
+  }
+
+  /** Open `filePath` and place the cursor on `entry`'s source line. */
+  private async openEntryAtLine(filePath: string, entry: JournalEntry): Promise<void> {
+    try {
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (!(file instanceof TFile)) {
+        new Notice('⚠️ 找不到日记文件');
+        return;
+      }
+      const content = await this.app.vault.cachedRead(file);
+      const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
+      if (!section) {
+        new Notice('⚠️ 找不到日记分区');
+        return;
+      }
+      const lineOffset = content.slice(0, section.from).split('\n').length - 1;
+      const targetLine = lineOffset + entry.lineIndex;
+
+      const leaf = this.app.workspace.getLeaf(false);
+      await leaf.openFile(file);
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (view) {
+        view.editor.setCursor({ line: targetLine, ch: 0 });
+        view.editor.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } }, true);
+      }
+    } catch (err) {
+      console.error('[Spark Memo] open entry failed', err);
+      new Notice('❌ 打开失败');
     }
   }
 
