@@ -40,8 +40,6 @@ export interface SparkMemoSettings {
   recordingFolder: string;
   /** Vault-relative folder for saving pasted/uploaded images. Empty uses Obsidian's attachment folder. */
   imageFolder: string;
-  /** Keyboard shortcut to submit entry: 'shift+enter' | 'ctrl+enter' | 'alt+enter' | 'ctrl+shift+enter' */
-  submitShortcut: string;
   /** When true, adding an image whose capture time differs from now by more than 5 minutes prompts to use the image's time instead. */
   imageTimeCheck: boolean;
   /** When true, images are downscaled/re-encoded before saving to the vault. Off by default. */
@@ -67,7 +65,6 @@ export const DEFAULT_SETTINGS: SparkMemoSettings = {
   sttRealtime: true,
   recordingFolder: '',
   imageFolder: '',
-  submitShortcut: 'cmd+enter',
   imageTimeCheck: true,
   imageCompressionEnabled: true,
   imageCompressionQuality: 0.8,

@@ -735,20 +735,6 @@ export class JournalCaptureView extends ItemView {
       this.refreshSubmitState();
       this.autoResizeTextarea();
     });
-    // Configurable shortcut to submit (default Shift+Enter).
-    this.textareaEl.addEventListener('keydown', evt => {
-      if (evt.key !== 'Enter' || evt.isComposing) return;
-      const shortcut = this.plugin.settings.submitShortcut;
-      const matches =
-        (shortcut.includes('shift') ? evt.shiftKey : !evt.shiftKey) &&
-        (shortcut.includes('ctrl') ? evt.ctrlKey : !evt.ctrlKey) &&
-        (shortcut.includes('alt') ? evt.altKey : !evt.altKey) &&
-        (shortcut.includes('cmd') ? evt.metaKey : !evt.metaKey);
-      if (matches) {
-        evt.preventDefault();
-        void this.handleSubmit();
-      }
-    });
     // Image paste: intercept at document level (capture phase) for reliability
     this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;

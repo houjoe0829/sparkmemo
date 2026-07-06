@@ -815,23 +815,6 @@ class SparkMemoSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
-      .setName('提交快捷键')
-      .setDesc('在输入框中提交日记的快捷键组合')
-      .addDropdown(dropdown =>
-        dropdown
-          .addOption('cmd+enter', 'Command + Enter')
-          .addOption('shift+enter', 'Shift + Enter')
-          .addOption('ctrl+enter', 'Ctrl + Enter')
-          .addOption('alt+enter', 'Alt + Enter')
-          .addOption('ctrl+shift+enter', 'Ctrl + Shift + Enter')
-          .setValue(this.plugin.settings.submitShortcut)
-          .onChange(async (value: string) => {
-            this.plugin.settings.submitShortcut = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
     containerEl.createEl('div', {
       cls: 'jp-settings-version',
       text: `Spark Memo v${__PLUGIN_VERSION__} (build ${__BUILD_NUMBER__})`,
