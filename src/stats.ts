@@ -339,14 +339,18 @@ export function computeAllTimeStats(yearStatsList: YearStats[]): AllTimeStats {
 // ── Number formatting ──────────────────────────────────────────────────────
 
 /**
- * Format a large word count as a Chinese-friendly short string:
+ * Format a large word count as a short, locale-appropriate string.
+ * Chinese groups by 万 (10,000):
  *   - <10000   → "1234"
  *   - <100000  → "3.2 万"   (one decimal)
  *   - >=100000 → "12 万"    (no decimal — past five digits the decimal noise distracts)
+ * English uses compact notation (e.g. "12.3K", "1.2M").
  */
-export function formatChineseWordCount(n: number): string {
-  if (n < 10_000) return String(n);
-  const wan = n / 10_000;
-  if (wan < 10) return `${wan.toFixed(1)} 万`;
-  return `${Math.floor(wan)} 万`;
+export function formatWordCount(n: number, locale: 'en' | 'zh'): string {
+  if (locale === 'zh') {
+    if (n < 10_000) return String(n);
+    const wan = n / 10_000;
+    return wan < 10 ? `${wan.toFixed(1)} 万` : `${Math.floor(wan)} 万`;
+  }
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 }

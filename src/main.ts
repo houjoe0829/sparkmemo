@@ -47,6 +47,7 @@ import {
   getTimestampRanges,
 } from './section';
 import { CAPTURE_VIEW_TYPE, JournalCaptureView } from './capture-view';
+import { t } from './i18n';
 
 // ── CM6 utilities ───────────────────────────────────────────────────────────
 
@@ -72,10 +73,10 @@ export default class SparkMemoPlugin extends Plugin {
     );
     this.addCommand({
       id: 'open-capture-view',
-      name: '打开快速记录侧边栏',
+      name: t('command.openCaptureView'),
       callback: () => void this.activateCaptureView(),
     });
-    this.addRibbonIcon('feather', '快速记录', () => void this.activateCaptureView());
+    this.addRibbonIcon('feather', t('ribbon.captureView'), () => void this.activateCaptureView());
   }
 
   onunload() {
@@ -130,7 +131,7 @@ export default class SparkMemoPlugin extends Plugin {
     targetDate?: moment.Moment,
   ): Promise<boolean> {
     if (!appHasDailyNotesPluginLoaded()) {
-      new Notice('⚠️ 请先启用 Obsidian 自带的「Daily Notes」核心插件');
+      new Notice(t('notice.dailyNotesRequired'));
       return false;
     }
     const trimmed = text.trim();
@@ -160,7 +161,7 @@ export default class SparkMemoPlugin extends Plugin {
       return true;
     } catch (err) {
       console.error('[Spark Memo] writeJournalEntry failed', err);
-      new Notice(`❌ 写入失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(t('notice.writeFailed', { error: err instanceof Error ? err.message : String(err) }));
       return false;
     }
   }
@@ -222,7 +223,7 @@ export default class SparkMemoPlugin extends Plugin {
         });
 
         if (blocked) {
-          new Notice('⏰ 时间戳不可修改');
+          new Notice(t('notice.timestampReadonly'));
           return []; // reject the transaction
         }
 
@@ -493,8 +494,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
     const folder = (this.app as any).vault?.config?.attachmentFolderPath as
       | string
       | undefined;
-    if (!folder || folder === '/' || folder === '') return 'Vault 根目录';
-    if (folder === '.') return '与日记同目录';
+    if (!folder || folder === '/' || folder === '') return t('settings.attachmentFolder.vaultRoot');
+    if (folder === '.') return t('settings.attachmentFolder.sameAsNote');
     return folder;
   }
 
@@ -527,7 +528,7 @@ class SparkMemoSettingTab extends PluginSettingTab {
       .addButton(btn => {
         btn
           .setButtonText('📁')
-          .setTooltip('选择目录')
+          .setTooltip(t('settings.folderPicker.tooltip'))
           .onClick(() => {
             const modal = this.createFolderSuggestModal((path: string) => {
               this.plugin.settings[key] = path;
@@ -549,14 +550,14 @@ class SparkMemoSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Spark Memo' });
+    containerEl.createEl('h2', { text: t('settings.title') });
 
     // ── Timestamp Settings ────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '时间戳设置' });
+    containerEl.createEl('h3', { text: t('settings.timestamp.heading') });
 
     new Setting(containerEl)
-      .setName('日记标题')
-      .setDesc('插件生效的标题，如 Journal')
+      .setName(t('settings.targetHeading.name'))
+      .setDesc(t('settings.targetHeading.desc'))
       .addText(text =>
         text
           .setPlaceholder('Journal')
@@ -568,8 +569,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('标题层级')
-      .setDesc('目标标题的层级，H2 对应 ## Journal')
+      .setName(t('settings.headingLevel.name'))
+      .setDesc(t('settings.headingLevel.desc'))
       .addDropdown(dd => {
         for (let i = 1; i <= 6; i++) {
           dd.addOption(String(i), `H${i}  ${'#'.repeat(i)}`);
@@ -582,8 +583,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName('文字颜色')
-      .setDesc('时间戳徽标的前景色')
+      .setName(t('settings.timestampColor.name'))
+      .setDesc(t('settings.timestampColor.desc'))
       .addColorPicker(cp =>
         cp
           .setValue(this.plugin.settings.timestampColor)
@@ -594,8 +595,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('背景颜色')
-      .setDesc('时间戳徽标的背景色')
+      .setName(t('settings.timestampBgColor.name'))
+      .setDesc(t('settings.timestampBgColor.desc'))
       .addColorPicker(cp =>
         cp
           .setValue(this.plugin.settings.timestampBgColor)
@@ -606,8 +607,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('只读保护')
-      .setDesc('开启后，无法在编辑器中修改已存在的时间戳')
+      .setName(t('settings.readonly.name'))
+      .setDesc(t('settings.readonly.desc'))
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.readonlyTimestamps)
@@ -618,8 +619,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('回车自动插入')
-      .setDesc('在 Journal 区块内按回车时，自动在新行插入当前时间')
+      .setName(t('settings.autoTimestamp.name'))
+      .setDesc(t('settings.autoTimestamp.desc'))
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.autoTimestamp)
@@ -630,8 +631,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('匹配正则')
-      .setDesc('识别时间戳的正则表达式，默认 \\d{2}:\\d{2}（HH:MM）')
+      .setName(t('settings.pattern.name'))
+      .setDesc(t('settings.pattern.desc'))
       .addText(text =>
         text
           .setPlaceholder('\\d{2}:\\d{2}')
@@ -642,7 +643,7 @@ class SparkMemoSettingTab extends PluginSettingTab {
               this.plugin.settings.timestampPattern = value;
               await this.plugin.saveSettings();
             } catch {
-              new Notice('❌ 无效的正则表达式');
+              new Notice(t('notice.invalidRegex'));
             }
           }),
       );
@@ -652,21 +653,21 @@ class SparkMemoSettingTab extends PluginSettingTab {
     previewEl.style.cssText =
       'margin-top: 24px; padding: 16px; border-radius: 8px;' +
       'background: var(--background-secondary); display: flex; align-items: center; gap: 10px;';
-    previewEl.createEl('span', { text: '预览：' }).style.color =
+    previewEl.createEl('span', { text: t('settings.preview.label') }).style.color =
       'var(--text-muted)';
     previewEl.createEl('span', {
       cls: 'jp-timestamp',
       text: '07:31',
     });
-    previewEl.createEl('span', { text: '这里是日记内容…' });
+    previewEl.createEl('span', { text: t('settings.preview.sampleText') });
 
     // ── Speech-to-text ────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '语音转文字' });
+    containerEl.createEl('h3', { text: t('settings.stt.heading') });
 
     this.addFolderSetting(
       containerEl,
-      '录音存放位置',
-      'Vault 相对路径，用于存放录音文件。留空则使用 Obsidian 附件文件夹。',
+      t('settings.recordingFolder.name'),
+      t('settings.recordingFolder.desc'),
       'recordingFolder',
     );
 
@@ -754,18 +755,18 @@ class SparkMemoSettingTab extends PluginSettingTab {
     //   );
 
     // ── Shortcut ──────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: '其他' });
+    containerEl.createEl('h3', { text: t('settings.other.heading') });
 
     this.addFolderSetting(
       containerEl,
-      '图片存放位置',
-      'Vault 相对路径，用于存放粘贴/上传的图片。留空则使用 Obsidian 附件文件夹。',
+      t('settings.imageFolder.name'),
+      t('settings.imageFolder.desc'),
       'imageFolder',
     );
 
     new Setting(containerEl)
-      .setName('图片压缩')
-      .setDesc('添加图片时自动按下方设置压缩后再存入 Vault，可节省空间。GIF 不会被压缩（保留动画）')
+      .setName(t('settings.imageCompression.name'))
+      .setDesc(t('settings.imageCompression.desc'))
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.imageCompressionEnabled)
@@ -776,8 +777,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('压缩质量')
-      .setDesc('数值越低文件越小、画质越差（0.1–1.0）。所有图片（含 PNG）压缩后都会转为 WebP')
+      .setName(t('settings.compressionQuality.name'))
+      .setDesc(t('settings.compressionQuality.desc'))
       .addSlider(slider =>
         slider
           .setLimits(0.1, 1, 0.05)
@@ -790,8 +791,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('压缩最大边长')
-      .setDesc('图片长边超过该像素值时会被等比缩小，0 表示不限制尺寸')
+      .setName(t('settings.compressionMaxSize.name'))
+      .setDesc(t('settings.compressionMaxSize.desc'))
       .addText(text =>
         text
           .setPlaceholder('1920')
@@ -804,8 +805,8 @@ class SparkMemoSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('图片时间/位置校验')
-      .setDesc('添加图片时，若识别到拍摄时间（与当前时间相差超过 5 分钟）或 GPS 位置，弹窗询问是否使用图片里的信息记录')
+      .setName(t('settings.imageTimeCheck.name'))
+      .setDesc(t('settings.imageTimeCheck.desc'))
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.imageTimeCheck)
@@ -831,7 +832,7 @@ class FolderSuggestModal extends FuzzySuggestModal<string> {
     super(app);
     this.folders = folders;
     this.onSelectFolder = onSelect;
-    this.setPlaceholder('选择或搜索文件夹路径');
+    this.setPlaceholder(t('settings.folderPicker.placeholder'));
   }
 
   getItems(): string[] {
