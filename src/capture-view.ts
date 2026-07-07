@@ -159,6 +159,7 @@ export class JournalCaptureView extends ItemView {
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
   private locationPillEl!: HTMLElement;
+  private metadataHintPillEl!: HTMLElement;
   /** Images picked but not yet appended to the note text; flushed on submit. */
   private pendingImages: TFile[] = [];
   /** Hard cap on pending images per entry — keeps the preview grid to a single row/2×2 square. */
@@ -181,6 +182,32 @@ export class JournalCaptureView extends ItemView {
    * are empty or the entry is submitted.
    */
   private pendingLocation: { latitude: number; longitude: number; name: string | null } | null = null;
+  /**
+   * Detected capture-time/GPS metadata that the user declined or dismissed
+   * (e.g. an accidental click while several photos were still being
+   * processed) — kept around so the "apply photo info?" hint pill can bring
+   * the confirm modal back without re-adding the photo. New-entry
+   * composition only (see `confirmAndApplyMetadata`); never populated while
+   * editing an existing entry. Cleared once applied, dismissed, the pending
+   * images are emptied, or the entry is submitted/edit is cancelled.
+   */
+  private pendingMetadataHint: {
+    capturedAt: Date | null;
+    diffMinutes: number;
+    gpsCoord: { latitude: number; longitude: number } | null;
+  } | null = null;
+  /**
+   * Snapshot of the metadata last *applied* from `confirmAndApplyMetadata`
+   * (i.e. the pill(s) it turned into `pendingCaptureOverride`/`pendingLocation`).
+   * If the user then removes both of those pills, `maybeRestoreMetadataHintAfterClear`
+   * turns this back into a `pendingMetadataHint` instead of silently losing the
+   * offer — same lifecycle/edit-mode rules as the hint itself.
+   */
+  private lastAppliedMetadata: {
+    capturedAt: Date | null;
+    diffMinutes: number;
+    gpsCoord: { latitude: number; longitude: number } | null;
+  } | null = null;
   /**
    * Set while the input box holds an existing entry's text for editing
    * (triggered from the entry's context menu). While set, submit rewrites
@@ -1565,6 +1592,12 @@ export class JournalCaptureView extends ItemView {
     // as the capture-time pill.
     this.locationPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
 
+    // "Apply photo info?" hint pill — shown after the confirm modal was
+    // declined/dismissed but the photo still carries detected time/location,
+    // so an accidental dismiss (misclick while several photos were still
+    // processing) doesn't lose the offer permanently.
+    this.metadataHintPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
+
     // Editing-mode pill — shown once an existing entry is loaded into the
     // input box for editing. Clicking × cancels the edit.
     this.editingPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
@@ -1581,6 +1614,7 @@ export class JournalCaptureView extends ItemView {
     this.refreshSubmitState();
     this.renderCaptureTimePill();
     this.renderLocationPill();
+    this.renderMetadataHintPill();
     this.renderEditingPill();
   }
 
@@ -1696,8 +1730,11 @@ export class JournalCaptureView extends ItemView {
           if (this.pendingImages.length === 0) {
             this.pendingCaptureOverride = null;
             this.pendingLocation = null;
+            this.pendingMetadataHint = null;
+            this.lastAppliedMetadata = null;
             this.renderCaptureTimePill();
             this.renderLocationPill();
+            this.renderMetadataHintPill();
           }
         });
       }
@@ -1753,6 +1790,7 @@ export class JournalCaptureView extends ItemView {
       this.pendingCaptureOverride = null;
       this.renderCaptureTimePill();
       new Notice(t('notice.revertedToNow'));
+      this.maybeRestoreMetadataHintAfterClear();
     });
   }
 
@@ -1792,7 +1830,66 @@ export class JournalCaptureView extends ItemView {
     clearBtn.addEventListener('click', () => {
       this.pendingLocation = null;
       this.renderLocationPill();
+      this.maybeRestoreMetadataHintAfterClear();
     });
+  }
+
+  /**
+   * After clearing an applied capture-time or location pill, brings the
+   * "apply photo info?" hint back if *both* pills are now gone and we still
+   * remember what was applied — otherwise removing them would silently lose
+   * the offer instead of letting the user bring it back. New-entry
+   * composition only, same as the hint pill itself.
+   */
+  private maybeRestoreMetadataHintAfterClear(): void {
+    if (this.editingEntry) return;
+    if (this.pendingCaptureOverride || this.pendingLocation) return;
+    if (!this.lastAppliedMetadata) return;
+    this.pendingMetadataHint = this.lastAppliedMetadata;
+    this.lastAppliedMetadata = null;
+    this.renderMetadataHintPill();
+  }
+
+  /**
+   * Shows/hides the "apply photo info?" hint pill. Visible only while
+   * `pendingMetadataHint` is set — i.e. the confirm modal was declined or
+   * dismissed while metadata was actually detected. Clicking the label
+   * re-opens the same confirm modal; clicking × dismisses the hint for
+   * good (same as declining again).
+   */
+  private renderMetadataHintPill() {
+    this.metadataHintPillEl.empty();
+    const hint = this.pendingMetadataHint;
+    this.metadataHintPillEl.toggleClass('jp-location-pill--hidden', !hint);
+    if (!hint) return;
+
+    const iconEl = this.metadataHintPillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
+    setIcon(iconEl, 'sparkles');
+    const label = this.metadataHintPillEl.createSpan({
+      cls: 'jp-capture-time-pill-text jp-metadata-hint-text',
+      text: t('capture.metadataHintLabel'),
+    });
+    label.addEventListener('click', () => void this.reapplyMetadataHint());
+
+    const clearBtn = this.metadataHintPillEl.createEl('button', {
+      cls: 'jp-capture-time-pill-clear',
+      attr: { 'aria-label': t('capture.metadataHintDismiss') },
+    });
+    setIcon(clearBtn, 'x');
+    clearBtn.addEventListener('click', () => {
+      this.pendingMetadataHint = null;
+      this.lastAppliedMetadata = null;
+      this.renderMetadataHintPill();
+    });
+  }
+
+  /** Re-opens the confirm modal from a dismissed hint, using the metadata already detected — no re-reading the photo files. */
+  private async reapplyMetadataHint(): Promise<void> {
+    const hint = this.pendingMetadataHint;
+    if (!hint) return;
+    this.pendingMetadataHint = null;
+    this.renderMetadataHintPill();
+    await this.confirmAndApplyMetadata(hint.capturedAt, hint.diffMinutes, hint.gpsCoord);
   }
 
   /** Re-runs reverse geocoding for the pending location's coordinate. */
@@ -1847,6 +1944,11 @@ export class JournalCaptureView extends ItemView {
    */
   private async startEdit(day: DaySection, entry: JournalEntry): Promise<void> {
     this.editingEntry = { day, entry };
+    // The metadata hint pill is new-entry-only — an edit shouldn't offer to
+    // apply a *different* photo batch's leftover time/location.
+    this.pendingMetadataHint = null;
+    this.lastAppliedMetadata = null;
+    this.renderMetadataHintPill();
 
     const { text: textWithoutLocation, location } = extractLocationTag(entry.text);
     const audioPaths = extractAudioEmbeds(textWithoutLocation);
@@ -1899,9 +2001,12 @@ export class JournalCaptureView extends ItemView {
     this.pendingImages = [];
     this.pendingAudio = [];
     this.pendingLocation = null;
+    this.pendingMetadataHint = null;
+    this.lastAppliedMetadata = null;
     this.autoResizeTextarea();
     this.renderAttachmentList();
     this.renderLocationPill();
+    this.renderMetadataHintPill();
     this.renderEditingPill();
     this.refreshSubmitState();
   }
@@ -2138,23 +2243,66 @@ export class JournalCaptureView extends ItemView {
 
     if (!timeFound && !gpsCoord) return;
 
-    // Resolve the place name before showing the modal, so the user sees
-    // what they're agreeing to rather than a placeholder. If this fails
-    // (e.g. offline), the modal falls back to showing raw coordinates with
-    // its own "重试" button.
-    const locationName = gpsCoord ? await reverseGeocodeCity(gpsCoord.latitude, gpsCoord.longitude) : null;
+    await this.confirmAndApplyMetadata(timeFound ? earliest : null, diffMinutes, gpsCoord);
+  }
 
-    const result = await confirmUseImageMetadata(this.app, {
-      capturedAt: timeFound ? earliest : null,
-      diffMinutes,
-      location: gpsCoord ? { name: locationName, latitude: gpsCoord.latitude, longitude: gpsCoord.longitude } : null,
+  /**
+   * Shows the "use this photo's time/location?" modal for already-detected
+   * metadata and, if accepted, applies whichever of the two was actually
+   * offered. Split out from `maybeCheckImageMetadata` so the hint pill can
+   * re-open the same modal without re-reading the photo files.
+   *
+   * The modal is opened immediately with the raw coordinate (reverse
+   * geocoding is a real network round-trip to Nominatim, and used to be
+   * awaited *before* the modal appeared — with several photos this delayed
+   * the popup by 1-2s, long enough that the user had already clicked
+   * elsewhere and landed an accidental click on it instead). The place name
+   * is filled in afterwards, the same way "重试" already does.
+   */
+  private async confirmAndApplyMetadata(
+    capturedAt: Date | null,
+    diffMinutes: number,
+    gpsCoord: { latitude: number; longitude: number } | null,
+  ): Promise<void> {
+    let modalRef: ImageMetadataConfirmModal | null = null;
+    const resultPromise = new Promise<ImageMetadataConfirmResult>(resolve => {
+      modalRef = new ImageMetadataConfirmModal(
+        this.app,
+        {
+          capturedAt,
+          diffMinutes,
+          location: gpsCoord ? { name: null, latitude: gpsCoord.latitude, longitude: gpsCoord.longitude } : null,
+        },
+        resolve,
+        gpsCoord !== null,
+      );
+      modalRef.open();
     });
-    if (!result.useImageInfo) return;
+
+    if (gpsCoord) {
+      void reverseGeocodeCity(gpsCoord.latitude, gpsCoord.longitude).then(name => modalRef?.setLocationName(name));
+    }
+
+    const result = await resultPromise;
+
+    if (!result.useImageInfo) {
+      // Only outside an active edit — this hint is for composing a new
+      // entry, not for touching up an existing one.
+      if (!this.editingEntry) {
+        this.pendingMetadataHint = { capturedAt, diffMinutes, gpsCoord };
+        this.renderMetadataHintPill();
+      }
+      return;
+    }
+
+    this.pendingMetadataHint = null;
+    this.renderMetadataHintPill();
+    this.lastAppliedMetadata = { capturedAt, diffMinutes, gpsCoord };
 
     const appliedParts: string[] = [];
-    if (timeFound && earliest) {
-      const capturedDate = moment(earliest);
-      this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(earliest) };
+    if (capturedAt) {
+      const capturedDate = moment(capturedAt);
+      this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(capturedAt) };
       this.renderCaptureTimePill();
       appliedParts.push(
         capturedDate.isSame(moment(), 'day')
@@ -2163,7 +2311,7 @@ export class JournalCaptureView extends ItemView {
       );
     }
     if (gpsCoord) {
-      // Use `result.location.name`, not the outer `locationName` — the user
+      // Use `result.location.name`, not any locally-resolved name — the user
       // may have hit "重试" in the modal and gotten a name after all.
       const finalName = result.location?.name ?? null;
       this.pendingLocation = { latitude: gpsCoord.latitude, longitude: gpsCoord.longitude, name: finalName };
@@ -4140,8 +4288,11 @@ export class JournalCaptureView extends ItemView {
         this.pendingImages = [];
         this.pendingAudio = [];
         this.pendingLocation = null;
+        this.pendingMetadataHint = null;
+        this.lastAppliedMetadata = null;
         this.renderAttachmentList();
         this.renderLocationPill();
+        this.renderMetadataHintPill();
         this.renderEditingPill();
         this.autoResizeTextarea();
         new Notice(t('notice.memoUpdated'));
@@ -4165,9 +4316,12 @@ export class JournalCaptureView extends ItemView {
       this.pendingAudio = [];
       this.pendingCaptureOverride = null;
       this.pendingLocation = null;
+      this.pendingMetadataHint = null;
+      this.lastAppliedMetadata = null;
       this.renderAttachmentList();
       this.renderCaptureTimePill();
       this.renderLocationPill();
+      this.renderMetadataHintPill();
       this.autoResizeTextarea();
 
       // vault.modify will catch-up an already-loaded day's section
@@ -4334,20 +4488,11 @@ interface ImageMetadataConfirmResult {
   location: ImageMetadataLocation | null;
 }
 
-function confirmUseImageMetadata(
-  app: import('obsidian').App,
-  opts: ImageMetadataConfirmOptions,
-): Promise<ImageMetadataConfirmResult> {
-  return new Promise(resolve => {
-    new ImageMetadataConfirmModal(app, opts, resolve).open();
-  });
-}
-
 interface ImageMetadataConfirmOptions {
   /** `null` when no capture time was found, or it didn't differ from "now" by more than 5 minutes. */
   capturedAt: Date | null;
   diffMinutes: number;
-  /** `null` when no GPS coordinate was found on any picked photo. */
+  /** `null` when no GPS coordinate was found on any picked photo. `name` starts `null` — filled in later via `setLocationName`. */
   location: ImageMetadataLocation | null;
 }
 
@@ -4355,20 +4500,36 @@ class ImageMetadataConfirmModal extends Modal {
   private opts: ImageMetadataConfirmOptions;
   private resolve: (result: ImageMetadataConfirmResult) => void;
   private decided = false;
-  /** Mutable copy of `opts.location` — "重试" updates `.name` in place. */
+  /** Mutable copy of `opts.location` — "重试" (or the initial background geocode) updates `.name` in place. */
   private location: ImageMetadataLocation | null;
   private locationLi: HTMLElement | null = null;
-  private retrying = false;
+  /** True while a name lookup is in flight — either the initial background geocode or a manual "重试". Suppresses the "查找失败" wording and disables the retry button. */
+  private retrying: boolean;
 
   constructor(
     app: import('obsidian').App,
     opts: ImageMetadataConfirmOptions,
     resolve: (result: ImageMetadataConfirmResult) => void,
+    resolvingLocationName = false,
   ) {
     super(app);
     this.opts = opts;
     this.resolve = resolve;
     this.location = opts.location;
+    this.retrying = resolvingLocationName;
+  }
+
+  /**
+   * Fills in the place name once the background reverse-geocode (kicked off
+   * alongside opening this modal, so the modal itself isn't delayed by the
+   * network round-trip) resolves. No-op if the modal was already decided,
+   * or a manual "重试" has since taken over.
+   */
+  setLocationName(name: string | null): void {
+    if (this.decided || !this.location || !this.retrying) return;
+    this.retrying = false;
+    this.location.name = name;
+    this.renderLocationLine();
   }
 
   private decide(useImageInfo: boolean): void {
@@ -4430,15 +4591,19 @@ class ImageMetadataConfirmModal extends Modal {
     if (!this.locationLi || !loc) return;
     this.locationLi.empty();
 
-    const label = loc.name ?? t('capture.coordGeocodeFailed', { lat: loc.latitude.toFixed(4), lon: loc.longitude.toFixed(4) });
+    const label = loc.name ?? (this.retrying
+      ? t('capture.coordLocating')
+      : t('capture.coordGeocodeFailed', { lat: loc.latitude.toFixed(4), lon: loc.longitude.toFixed(4) }));
     this.locationLi.createSpan({ text: t('capture.metadataModalLocationLabel', { label }) });
 
-    if (loc.name === null) {
+    // Only offer "重试" once a lookup has actually failed — while one is in
+    // flight (the initial background geocode, or a manual retry), the label
+    // above already says so; a second "获取中…" on the button was redundant.
+    if (loc.name === null && !this.retrying) {
       const retryBtn = this.locationLi.createEl('button', {
         cls: 'jp-image-metadata-retry-btn',
-        text: this.retrying ? t('capture.locating') : t('capture.retry'),
+        text: t('capture.retry'),
       });
-      retryBtn.disabled = this.retrying;
       retryBtn.addEventListener('click', () => void this.retryLocationName());
     }
   }

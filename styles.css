@@ -404,6 +404,14 @@
   height: 10px !important;
   stroke-width: 3;
 }
+
+/* "Apply photo info?" hint pill — its label re-opens the confirm modal. */
+.jp-metadata-hint-text {
+  cursor: pointer;
+}
+.jp-metadata-hint-text:hover {
+  text-decoration: underline;
+}
 @keyframes jp-recording-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -838,6 +846,13 @@
 }
 .jp-timeline-bubble .internal-embed {
   display: block;
+}
+/* Embedded audio recording — same top gap as an embedded image, so a memo
+   ending in a voice note doesn't sit noticeably closer to its text than one
+   ending in a photo. */
+.jp-timeline-bubble .internal-embed:has(audio),
+.jp-timeline-bubble audio {
+  margin-top: 6px;
 }
 /* Multi-image memo (2–9 images submitted together): grid instead of a
    vertical stack, "moments"-style. Column count follows the same
