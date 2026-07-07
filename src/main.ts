@@ -76,7 +76,7 @@ export default class SparkMemoPlugin extends Plugin {
       name: t('command.openCaptureView'),
       callback: () => void this.activateCaptureView(),
     });
-    this.addRibbonIcon('feather', t('ribbon.captureView'), () => void this.activateCaptureView());
+    this.addRibbonIcon('sparkle', t('ribbon.captureView'), () => void this.activateCaptureView());
   }
 
   onunload() {

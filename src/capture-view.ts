@@ -303,11 +303,11 @@ export class JournalCaptureView extends ItemView {
   }
 
   getDisplayText(): string {
-    return t('capture.quickCapture');
+    return t('app.name');
   }
 
   getIcon(): string {
-    return 'feather';
+    return 'sparkle';
   }
 
   async onOpen(): Promise<void> {
@@ -416,7 +416,7 @@ export class JournalCaptureView extends ItemView {
   private buildTabBar(root: HTMLElement) {
     this.tabBarEl = root.createDiv({ cls: 'jp-tab-bar' });
 
-    this.captureTabBtn = this.makeTabBtn('feather', true, t('capture.quickCapture'));
+    this.captureTabBtn = this.makeTabBtn('zap', true, t('capture.quickCapture'));
     this.captureTabBtn.addEventListener('click', () => this.switchTab('capture'));
 
     this.searchTabBtn = this.makeTabBtn('search', false, t('search.searchJournal'));

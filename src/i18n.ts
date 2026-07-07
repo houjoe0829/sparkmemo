@@ -8,8 +8,9 @@ export type Locale = 'en' | 'zh';
 
 const dictionaries: Record<Locale, Record<string, string>> = {
   en: {
+    'app.name': 'Spark Memo',
     'command.openCaptureView': 'Open quick capture sidebar',
-    'ribbon.captureView': 'Quick capture',
+    'ribbon.captureView': 'Spark Memo',
     'notice.dailyNotesRequired': '⚠️ Please enable the core "Daily Notes" plugin first',
     'notice.writeFailed': '❌ Write failed: {{error}}',
     'notice.timestampReadonly': '⏰ Timestamps cannot be edited',
@@ -224,8 +225,9 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'stats.cellTitleNoData': '{{date}} · not written',
   },
   zh: {
+    'app.name': 'Spark Memo',
     'command.openCaptureView': '打开快速记录侧边栏',
-    'ribbon.captureView': '快速记录',
+    'ribbon.captureView': 'Spark Memo',
     'notice.dailyNotesRequired': '⚠️ 请先启用 Obsidian 自带的「Daily Notes」核心插件',
     'notice.writeFailed': '❌ 写入失败：{{error}}',
     'notice.timestampReadonly': '⏰ 时间戳不可修改',
