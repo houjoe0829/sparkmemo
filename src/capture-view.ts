@@ -25,6 +25,7 @@ import {
   Platform,
   TFile,
   WorkspaceLeaf,
+  getAllTags,
   moment,
   requestUrl,
   setIcon,
@@ -89,7 +90,7 @@ export class JournalCaptureView extends ItemView {
   private plugin: SparkMemoPlugin;
 
   // Top-level tab state
-  private currentTab: 'capture' | 'stats' | 'search' | 'location' = 'capture';
+  private currentTab: 'capture' | 'stats' | 'search' | 'location' | 'tag' = 'capture';
   private tabBarEl!: HTMLElement;
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
@@ -97,6 +98,7 @@ export class JournalCaptureView extends ItemView {
   private statsTabBtn!: HTMLButtonElement;
   private searchTabBtn!: HTMLButtonElement;
   private locationTabBtn!: HTMLButtonElement;
+  private tagAggTabBtn!: HTMLButtonElement;
 
   // Search state
   private searchBarEl!: HTMLElement;
@@ -124,6 +126,19 @@ export class JournalCaptureView extends ItemView {
   /** Non-null while viewing a single city's memo list; null while viewing the city list. */
   private selectedLocationCity: string | null = null;
 
+  // Tag-aggregation tab state
+  private tagAggBarEl!: HTMLElement;
+  private tagAggBackBtn!: HTMLButtonElement;
+  private tagAggTitleEl!: HTMLElement;
+  /** `#tag` → aggregated memo data, built by a one-time full scan. Invalidated on any md file change. */
+  private tagAggIndex: Map<
+    string,
+    { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+  > | null = null;
+  private tagAggLoading = false;
+  /** Non-null while viewing a single tag's memo list; null while viewing the tag list. */
+  private selectedTag: string | null = null;
+
   // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
   private dayNavEl!: HTMLElement;
@@ -133,6 +148,13 @@ export class JournalCaptureView extends ItemView {
   private timelineEl!: HTMLElement;
   private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
+  /** Vault-wide tag list (frontmatter + inline `#tags`), sorted by usage. Rebuilt lazily; invalidated on metadata changes. */
+  private tagCache: { tag: string; count: number }[] | null = null;
+  private tagSuggestEl!: HTMLElement;
+  /** Character range in `textareaEl.value` of the `#partial` currently being completed, or null while the popup is closed. */
+  private tagSuggestRange: { start: number; end: number } | null = null;
+  private tagSuggestMatches: string[] = [];
+  private tagSuggestIndex = 0;
   private submitBtn!: HTMLButtonElement;
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
@@ -292,6 +314,7 @@ export class JournalCaptureView extends ItemView {
           this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
+          this.tagAggIndex = null;
         }
       }),
     );
@@ -303,6 +326,7 @@ export class JournalCaptureView extends ItemView {
           this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
+          this.tagAggIndex = null;
         }
       }),
     );
@@ -316,6 +340,7 @@ export class JournalCaptureView extends ItemView {
           this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
+          this.tagAggIndex = null;
         }
       }),
     );
@@ -370,6 +395,9 @@ export class JournalCaptureView extends ItemView {
     this.searchTabBtn = this.makeTabBtn('search', false, t('search.searchJournal'));
     this.searchTabBtn.addEventListener('click', () => this.switchTab('search'));
 
+    this.tagAggTabBtn = this.makeTabBtn('tags', false, t('tag.aggregation'));
+    this.tagAggTabBtn.addEventListener('click', () => this.switchTab('tag'));
+
     this.locationTabBtn = this.makeTabBtn('map-pin', false, t('location.aggregation'));
     this.locationTabBtn.addEventListener('click', () => this.switchTab('location'));
 
@@ -404,6 +432,20 @@ export class JournalCaptureView extends ItemView {
     setIcon(this.randomMemoBtn, 'dice');
     this.randomMemoBtn.addEventListener('click', () => void this.showRandomMemo());
 
+    // Tag bar — collapsed by default, shown when the tag tab is active
+    this.tagAggBarEl = root.createDiv({ cls: 'jp-location-bar' });
+    this.tagAggBarEl.style.display = 'none';
+
+    this.tagAggBackBtn = this.tagAggBarEl.createEl('button', {
+      cls: 'jp-location-back-btn',
+      attr: { 'aria-label': t('tag.backToList'), title: t('tag.backToList') },
+    });
+    setIcon(this.tagAggBackBtn, 'arrow-left');
+    this.tagAggBackBtn.style.display = 'none';
+    this.tagAggBackBtn.addEventListener('click', () => this.backToTagList());
+
+    this.tagAggTitleEl = this.tagAggBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('tag.all') });
+
     // Location bar — collapsed by default, shown when location tab is active
     this.locationBarEl = root.createDiv({ cls: 'jp-location-bar' });
     this.locationBarEl.style.display = 'none';
@@ -430,7 +472,7 @@ export class JournalCaptureView extends ItemView {
     return btn;
   }
 
-  private switchTab(tab: 'capture' | 'stats' | 'search' | 'location') {
+  private switchTab(tab: 'capture' | 'stats' | 'search' | 'location' | 'tag') {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
@@ -439,6 +481,7 @@ export class JournalCaptureView extends ItemView {
     this.searchTabBtn.toggleClass('is-active', tab === 'search');
     this.statsTabBtn.toggleClass('is-active', tab === 'stats');
     this.locationTabBtn.toggleClass('is-active', tab === 'location');
+    this.tagAggTabBtn.toggleClass('is-active', tab === 'tag');
 
     if (tab === 'search') {
       this.capturePaneEl.style.display = '';
@@ -446,6 +489,7 @@ export class JournalCaptureView extends ItemView {
       this.inputCardEl.style.display = 'none';
       this.searchBarEl.style.display = '';
       this.locationBarEl.style.display = 'none';
+      this.tagAggBarEl.style.display = 'none';
       this.searchActive = true;
 
       if (prevTab !== 'search') {
@@ -466,6 +510,7 @@ export class JournalCaptureView extends ItemView {
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
       this.locationBarEl.style.display = 'none';
+      this.tagAggBarEl.style.display = 'none';
 
       // Always clean up search state when returning to capture
       if (this.searchActive || prevTab === 'search') {
@@ -486,6 +531,7 @@ export class JournalCaptureView extends ItemView {
       this.inputCardEl.style.display = 'none';
       this.searchBarEl.style.display = 'none';
       this.locationBarEl.style.display = '';
+      this.tagAggBarEl.style.display = 'none';
 
       if (prevTab !== 'location') {
         this.disposeDays();
@@ -500,6 +546,27 @@ export class JournalCaptureView extends ItemView {
           }
         });
       }
+    } else if (tab === 'tag') {
+      this.capturePaneEl.style.display = '';
+      this.statsPaneEl.style.display = 'none';
+      this.inputCardEl.style.display = 'none';
+      this.searchBarEl.style.display = 'none';
+      this.locationBarEl.style.display = 'none';
+      this.tagAggBarEl.style.display = '';
+
+      if (prevTab !== 'tag') {
+        this.disposeDays();
+        this.timelineEl.empty();
+        this.selectedTag = null;
+        this.tagAggBackBtn.style.display = 'none';
+        this.tagAggTitleEl.setText(t('tag.all'));
+        void this.loadTagIndex().then(() => {
+          // Bail if the user already navigated away or picked a tag while scanning
+          if (this.currentTab === 'tag' && this.selectedTag === null) {
+            this.renderTagList();
+          }
+        });
+      }
     } else {
       // stats tab
       this.capturePaneEl.style.display = 'none';
@@ -507,6 +574,7 @@ export class JournalCaptureView extends ItemView {
       this.inputCardEl.style.display = '';
       this.searchBarEl.style.display = 'none';
       this.locationBarEl.style.display = 'none';
+      this.tagAggBarEl.style.display = 'none';
 
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
@@ -842,7 +910,31 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.addEventListener('input', () => {
       this.refreshSubmitState();
       this.autoResizeTextarea();
+      this.updateTagSuggestions();
     });
+    // Cursor moves (arrow keys, clicks) don't fire 'input' — re-check the
+    // trigger so the popup follows the caret / closes when it leaves the tag.
+    this.textareaEl.addEventListener('keyup', (e: KeyboardEvent) => {
+      // Navigation/selection keys are handled (and preventDefault'd) on
+      // keydown below when the popup is open — nothing left to do here.
+      if (this.tagSuggestRange && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key)) return;
+      this.updateTagSuggestions();
+    });
+    this.textareaEl.addEventListener('click', () => this.updateTagSuggestions());
+    this.textareaEl.addEventListener('blur', () => {
+      // Defer so a mousedown on the popup (which fires before blur) can
+      // still register its click before we tear the list down.
+      window.setTimeout(() => this.closeTagSuggest(), 0);
+    });
+    this.textareaEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      this.handleTagSuggestKeydown(e);
+    });
+
+    this.tagSuggestEl = inputWrapper.createDiv({ cls: 'jp-tag-suggest jp-tag-suggest--hidden' });
+
+    this.registerEvent(this.app.metadataCache.on('changed', () => {
+      this.tagCache = null;
+    }));
     // Image paste: intercept at document level (capture phase) for reliability
     this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -1392,6 +1484,27 @@ export class JournalCaptureView extends ItemView {
     });
     setIcon(plusBtn, 'plus');
 
+    // "#" button — inserts a literal "#" at the cursor, same as pressing the
+    // key, so Obsidian's own tag-suggestion popup can pick it up without the
+    // user reaching for the keyboard.
+    const tagBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-tag-btn',
+      text: '#',
+      attr: { 'aria-label': t('capture.addTag') },
+    });
+    tagBtn.addEventListener('click', () => {
+      const textarea = this.textareaEl;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const before = textarea.value.substring(0, start);
+      const after = textarea.value.substring(end);
+      textarea.focus();
+      textarea.value = before + '#' + after;
+      const newPos = start + 1;
+      textarea.setSelectionRange(newPos, newPos);
+      textarea.dispatchEvent(new Event('input'));
+    });
+
     // Shared stop path: stop recording + restore the idle UI (icon group,
     // submit button) with a smooth transition. The actual text insert /
     // transcription runs async in onstop, independent of this UI restore.
@@ -1425,7 +1538,7 @@ export class JournalCaptureView extends ItemView {
           fileInput.click();
         }));
       menu.addItem(item => item
-        .setTitle(t('capture.recordAudio', { max: String(JournalCaptureView.MAX_PENDING_AUDIO) }))
+        .setTitle(t('capture.recordAudio'))
         .setIcon('mic')
         .setDisabled(micDisabled)
         .onClick(async () => {
@@ -2281,6 +2394,164 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.style.height = `${next}px`;
   }
 
+  // ── Tag ("#") suggestion popup ──────────────────────────────────────────
+
+  /** Every tag used anywhere in the vault (frontmatter + inline), most-used first. Cached until metadata changes. */
+  private getVaultTags(): { tag: string; count: number }[] {
+    if (this.tagCache) return this.tagCache;
+    const counts = new Map<string, number>();
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      const tags = getAllTags(cache);
+      if (!tags) continue;
+      for (const tag of tags) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    const list = Array.from(counts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    this.tagCache = list;
+    return list;
+  }
+
+  /** Looks at the caret position and shows/hides/refreshes the tag popup accordingly. */
+  private updateTagSuggestions() {
+    const value = this.textareaEl.value;
+    const caret = this.textareaEl.selectionStart;
+    if (caret !== this.textareaEl.selectionEnd) {
+      this.closeTagSuggest();
+      return;
+    }
+    // Walk back from the caret to the nearest "#" that starts the current
+    // word — bail if we hit whitespace/newline first (not currently in a tag).
+    let start = caret;
+    while (start > 0 && !/\s/.test(value[start - 1]) && value[start - 1] !== '#') start--;
+    if (start === 0 || value[start - 1] !== '#') {
+      this.closeTagSuggest();
+      return;
+    }
+    start--; // include the '#'
+    const query = value.slice(start + 1, caret);
+    // Obsidian tag syntax: any-script letters/numbers plus -/_// (nested
+    // tags), no spaces or punctuation — and never purely numeric (Obsidian
+    // doesn't recognize e.g. "#2026" as a tag at all).
+    if (/[^\p{L}\p{N}_\-/]/u.test(query) || /^\p{N}+$/u.test(query)) {
+      this.closeTagSuggest();
+      return;
+    }
+
+    const all = this.getVaultTags();
+    const q = query.toLowerCase();
+    const matches = (q.length === 0 ? all : all.filter(t => t.tag.slice(1).toLowerCase().includes(q)))
+      .slice(0, 8)
+      .map(t => t.tag);
+
+    if (matches.length === 0) {
+      this.closeTagSuggest();
+      return;
+    }
+
+    this.tagSuggestRange = { start, end: caret };
+    this.tagSuggestMatches = matches;
+    this.tagSuggestIndex = 0;
+    this.renderTagSuggestList();
+    this.positionTagSuggest(start);
+  }
+
+  private renderTagSuggestList() {
+    this.tagSuggestEl.empty();
+    this.tagSuggestMatches.forEach((tag, i) => {
+      const item = this.tagSuggestEl.createDiv({
+        cls: 'jp-tag-suggest-item' + (i === this.tagSuggestIndex ? ' jp-tag-suggest-item--active' : ''),
+        text: tag,
+      });
+      // mousedown (not click) fires before the textarea's blur handler runs.
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this.selectTagSuggestion(tag);
+      });
+    });
+    this.tagSuggestEl.toggleClass('jp-tag-suggest--hidden', false);
+  }
+
+  /** Positions the popup just below the line containing `charIndex`, using a hidden mirror div to measure caret pixel position. */
+  private positionTagSuggest(charIndex: number) {
+    const ta = this.textareaEl;
+    const mirror = document.createElement('div');
+    const style = window.getComputedStyle(ta);
+    const props: string[] = [
+      'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize',
+    ];
+    for (const prop of props) {
+      (mirror.style as any)[prop] = (style as any)[prop];
+    }
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.wordWrap = 'break-word';
+    mirror.style.top = '0';
+    mirror.style.left = '-9999px';
+    mirror.textContent = ta.value.slice(0, charIndex);
+    const marker = document.createElement('span');
+    marker.textContent = '​';
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    const markerTop = marker.offsetTop;
+    const lineHeight = parseFloat(style.lineHeight) || marker.offsetHeight;
+    document.body.removeChild(mirror);
+
+    // inputWrapper (tagSuggestEl's offsetParent) shares its top-left with the
+    // textarea, so the mirror's local offsets translate directly, minus the
+    // scroll position.
+    this.tagSuggestEl.style.left = `${ta.offsetLeft}px`;
+    this.tagSuggestEl.style.top = `${ta.offsetTop + markerTop + lineHeight - ta.scrollTop}px`;
+  }
+
+  private closeTagSuggest() {
+    if (!this.tagSuggestRange) return;
+    this.tagSuggestRange = null;
+    this.tagSuggestMatches = [];
+    this.tagSuggestEl.toggleClass('jp-tag-suggest--hidden', true);
+    this.tagSuggestEl.empty();
+  }
+
+  private selectTagSuggestion(tag: string) {
+    const range = this.tagSuggestRange;
+    if (!range) return;
+    const value = this.textareaEl.value;
+    const inserted = `${tag} `;
+    this.textareaEl.value = value.slice(0, range.start) + inserted + value.slice(range.end);
+    const newPos = range.start + inserted.length;
+    this.closeTagSuggest();
+    this.textareaEl.focus();
+    this.textareaEl.setSelectionRange(newPos, newPos);
+    this.refreshSubmitState();
+    this.autoResizeTextarea();
+  }
+
+  private handleTagSuggestKeydown(e: KeyboardEvent) {
+    if (!this.tagSuggestRange || this.tagSuggestMatches.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this.tagSuggestIndex = (this.tagSuggestIndex + 1) % this.tagSuggestMatches.length;
+      this.renderTagSuggestList();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this.tagSuggestIndex = (this.tagSuggestIndex - 1 + this.tagSuggestMatches.length) % this.tagSuggestMatches.length;
+      this.renderTagSuggestList();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      this.selectTagSuggestion(this.tagSuggestMatches[this.tagSuggestIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      this.closeTagSuggest();
+    }
+  }
+
   private scheduleFullRebuild() {
     // Only skip when actively on the search tab — other tabs don't hold timeline state
     if (this.currentTab === 'search') return;
@@ -2769,6 +3040,207 @@ export class JournalCaptureView extends ItemView {
     }
   }
 
+  // ── Tag aggregation (tag tab) ────────────────────────────────────────────
+
+  /**
+   * Full scan of every daily note, grouping entries by the `#tag`s found in
+   * their body text. Cached in `tagAggIndex` until any md file changes (see
+   * the vault 'modify'/'create'/'delete' listeners in onOpen, which null it
+   * out) — mirrors `loadLocationIndex` but keys on tag name instead of city.
+   */
+  private async loadTagIndex(): Promise<void> {
+    if (this.tagAggIndex || this.tagAggLoading) return;
+    this.tagAggLoading = true;
+    this.renderTopLevelMessage(t('tag.scanning'));
+
+    try {
+      if (!appHasDailyNotesPluginLoaded()) {
+        this.renderTopLevelMessage(t('notice.dailyNotesRequired'));
+        return;
+      }
+
+      const all = getAllDailyNotes() as Record<string, TFile>;
+      const index = new Map<
+        string,
+        { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+      >();
+
+      for (const file of Object.values(all)) {
+        if (!(file instanceof TFile)) continue;
+        const date = getDateFromFile(file, 'day');
+        if (!date) continue;
+        const day = date.clone().startOf('day');
+
+        let content: string;
+        try {
+          content = await this.app.vault.cachedRead(file);
+        } catch {
+          continue;
+        }
+        const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
+        if (!section) continue;
+        const text = content.slice(section.from, section.to);
+        const entries = parseJournalEntries(text, this.plugin.settings.timestampPattern);
+
+        for (const entry of entries) {
+          const tags = extractEntryTags(entry.text);
+          if (tags.length === 0) continue;
+
+          const [hh, mm] = entry.timestamp.split(':').map(Number);
+          const ts = day
+            .clone()
+            .add(hh || 0, 'hours')
+            .add(mm || 0, 'minutes')
+            .valueOf();
+
+          for (const tag of tags) {
+            let data = index.get(tag);
+            if (!data) {
+              data = { count: 0, lastTs: 0, entries: [] };
+              index.set(tag, data);
+            }
+            data.count++;
+            if (ts > data.lastTs) data.lastTs = ts;
+            data.entries.push({ file, date: day, entry });
+          }
+        }
+      }
+
+      this.tagAggIndex = index;
+    } catch (err) {
+      console.error('[Spark Memo] tag index build failed', err);
+      this.renderTopLevelMessage(t('tag.scanFailed'));
+    } finally {
+      this.tagAggLoading = false;
+    }
+  }
+
+  /** Render the top-level "all tags" list, sorted by most-recently-used first. */
+  private renderTagList() {
+    this.disposeDays();
+    this.timelineEl.empty();
+
+    if (!this.tagAggIndex || this.tagAggIndex.size === 0) {
+      this.tagAggTitleEl.setText('');
+      this.renderTopLevelMessage(t('tag.empty'));
+      return;
+    }
+
+    this.tagAggTitleEl.setText(t('tag.allCount', { count: String(this.tagAggIndex.size) }));
+
+    const tags = [...this.tagAggIndex.entries()].sort((a, b) => b[1].lastTs - a[1].lastTs);
+    const listEl = this.timelineEl.createDiv({ cls: 'jp-location-list' });
+    for (const [tag, data] of tags) {
+      const item = listEl.createDiv({ cls: 'jp-location-item' });
+      const iconEl = item.createSpan({ cls: 'jp-location-item-icon' });
+      setIcon(iconEl, 'tag');
+      item.createDiv({ cls: 'jp-location-item-name', text: tag });
+      item.createDiv({ cls: 'jp-location-item-count', text: `${data.count}` });
+      item.addEventListener('click', () => this.selectTag(tag));
+    }
+
+    this.exhausted = true;
+  }
+
+  /** Drill into a single tag: render its memos as day-grouped timeline entries, newest first. */
+  private selectTag(tag: string) {
+    const data = this.tagAggIndex?.get(tag);
+    if (!data) return;
+
+    this.selectedTag = tag;
+    this.tagAggBackBtn.style.display = '';
+    this.tagAggTitleEl.setText(tag);
+
+    this.disposeDays();
+    this.timelineEl.empty();
+
+    const byDate = new Map<string, { date: moment.Moment; file: TFile; entries: JournalEntry[] }>();
+    for (const e of data.entries) {
+      const key = e.date.format('YYYY-MM-DD');
+      let bucket = byDate.get(key);
+      if (!bucket) {
+        bucket = { date: e.date, file: e.file, entries: [] };
+        byDate.set(key, bucket);
+      }
+      bucket.entries.push(e.entry);
+    }
+    const sortedDays = [...byDate.values()].sort((a, b) => (a.date.isBefore(b.date) ? 1 : -1));
+
+    if (sortedDays.length === 0) {
+      this.renderTopLevelMessage(t('tag.tagNotFound', { tag }));
+      return;
+    }
+
+    for (const d of sortedDays) {
+      const day: DaySection = {
+        date: d.date,
+        el: createDiv({ cls: 'jp-timeline-day' }),
+        scope: new Component(),
+        filePath: d.file.path,
+      };
+      day.scope.load();
+      this.renderTagDayContent(day, d.entries);
+      this.timelineEl.appendChild(day.el);
+      this.days.push(day);
+    }
+
+    this.exhausted = true;
+    this.markEndOfTimeline();
+  }
+
+  /** Return from a tag's memo list back to the "all tags" list. */
+  private backToTagList() {
+    this.selectedTag = null;
+    this.tagAggBackBtn.style.display = 'none';
+    this.tagAggTitleEl.setText(t('tag.all'));
+    this.renderTagList();
+  }
+
+  /** Render one day's entries for a selected tag — same shape as the location tab's day renderer. */
+  private renderTagDayContent(day: DaySection, entries: JournalEntry[]) {
+    const headerLabel = this.formatDateHeader(day.date, entries.length);
+    const headerRow = day.el.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
+    headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+    const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
+    const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
+    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: t('capture.memoCount', { count: String(entries.length) }) });
+    this.addOpenNoteBtn(headerCard, day);
+
+    const sourcePath = day.filePath ?? '';
+    const sorted = [...entries].sort((a, b) =>
+      a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : b.lineIndex - a.lineIndex,
+    );
+
+    for (const entry of sorted) {
+      const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
+      row.createDiv({ cls: 'jp-timeline-dot' });
+
+      const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
+      const tsEl = head.createEl('span', {
+        cls: 'jp-timestamp jp-location-jump',
+        text: entry.timestamp,
+        attr: { 'aria-label': t('capture.jumpToSource'), title: t('capture.jumpToSource') },
+      });
+      tsEl.addEventListener('click', () => void this.openEntryAtLine(sourcePath, entry));
+      const { text: bodyText, location } = extractLocationTag(entry.text);
+      if (location) this.renderLocationChip(head, day, entry, location);
+
+      const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
+      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
+        this.applyImageGrid(bubble);
+        this.attachImagePreviews(bubble);
+      });
+
+      const openMenu = (evt: MouseEvent) => {
+        evt.preventDefault();
+        this.openEntryMenu(evt, day, entry);
+      };
+      head.addEventListener('contextmenu', openMenu);
+      bubble.addEventListener('contextmenu', openMenu);
+    }
+  }
+
   /** Open `filePath` and place the cursor on `entry`'s source line. */
   private async openEntryAtLine(filePath: string, entry: JournalEntry): Promise<void> {
     try {
@@ -2927,31 +3399,24 @@ export class JournalCaptureView extends ItemView {
     this.days.push(day);
   }
 
-  /** Render a single randomly-picked entry, with a re-roll button in the header. */
+  /** Render a single randomly-picked entry. Re-roll lives in the search bar's dice button, not here. */
   private renderRandomMemoContent(day: DaySection, entry: JournalEntry) {
-    const headerLabel = this.formatDateHeader(day.date, 1);
     const headerRow = day.el.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
-    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: t('search.randomMemoLabel') });
-
-    const actions = headerCard.createDiv({ cls: 'jp-timeline-header-actions' });
-    this.addOpenNoteBtn(actions, day);
-
-    const rerollBtn = actions.createEl('button', {
-      cls: 'jp-timeline-open-btn',
-      attr: { 'aria-label': t('search.reroll') },
-    });
-    setIcon(rerollBtn, 'dice');
-    rerollBtn.addEventListener('click', () => void this.showRandomMemo());
+    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: t('search.randomMemoLabel') });
 
     const sourcePath = day.filePath ?? '';
     const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
     row.createDiv({ cls: 'jp-timeline-dot' });
     const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
-    head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+    // Special-cased here only: since the heavy date/weekday header above is
+    // gone, the timestamp badge carries the date itself so it's still clear
+    // which day this randomly-picked entry came from.
+    const isCurrentYear = day.date.year() === moment().year();
+    const dateTimeLabel = `${day.date.format(isCurrentYear ? 'M/D' : 'YYYY/M/D')} ${entry.timestamp}`;
+    head.createEl('span', { cls: 'jp-timestamp', text: dateTimeLabel });
     const { text: bodyText, location } = extractLocationTag(entry.text);
     if (location) this.renderLocationChip(head, day, entry, location);
     const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
@@ -3804,6 +4269,28 @@ function extractLocationTag(text: string): { text: string; location: EntryLocati
   if (!m) return { text, location: null };
   const location: EntryLocation = { name: m[1], latitude: Number(m[2]), longitude: Number(m[3]) };
   return { text: text.slice(0, m.index) + text.slice(m.index + m[0].length), location };
+}
+
+// ── Hashtag helpers (tag-aggregation tab) ───────────────────────────────────
+
+/**
+ * `#tag` occurrences inside an entry's body — any-script letters/numbers plus
+ * -/_// (nested tags), matching Obsidian's own tag syntax (see the compose-box
+ * tag-suggest popup, which validates against the same rules). Purely numeric
+ * matches (e.g. "#2026") are excluded since Obsidian doesn't recognize those
+ * as tags either.
+ */
+const ENTRY_TAG_RE_GLOBAL = /(^|\s)#([\p{L}\p{N}_][\p{L}\p{N}_\-/]*)/gu;
+
+/** Distinct `#tag` names (deduped, `#`-prefixed) found in an entry's text. */
+function extractEntryTags(text: string): string[] {
+  const seen = new Set<string>();
+  for (const m of text.matchAll(ENTRY_TAG_RE_GLOBAL)) {
+    const raw = m[2];
+    if (/^\p{N}+$/u.test(raw)) continue;
+    seen.add(`#${raw}`);
+  }
+  return [...seen];
 }
 
 

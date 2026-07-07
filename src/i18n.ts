@@ -57,8 +57,9 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.transcribing': 'Transcribing…',
     'capture.realtimeTranscribing': 'Transcribing live…',
     'capture.add': 'Add',
+    'capture.addTag': 'Add tag',
     'capture.uploadImage': 'Upload image (up to {{max}})',
-    'capture.recordAudio': 'Record audio (up to {{max}})',
+    'capture.recordAudio': 'Record audio',
     'capture.submit': 'Submit',
     'capture.removeImage': 'Remove image',
     'capture.removeAudio': 'Remove audio',
@@ -92,8 +93,8 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.noMemoYet': 'No memos yet',
     'capture.loadedToEarliest': '— Loaded to the earliest journal —',
 
-    'search.searchJournal': 'Search journal',
-    'search.searchJournalPlaceholder': 'Search journal…',
+    'search.searchJournal': 'Search memos',
+    'search.searchJournalPlaceholder': 'Search memos…',
     'search.randomMemo': 'Show a random memo',
     'search.typeToSearch': 'Type a keyword to search',
     'search.searching': 'Searching…',
@@ -101,7 +102,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'search.matchCount': '{{count}} matches',
     'search.noPastEntries': 'No past journal entries to view yet',
     'search.noRandomMemo': 'No memos available to view yet',
-    'search.randomMemoLabel': 'A randomly picked memo',
+    'search.randomMemoLabel': 'Random Memo',
     'search.reroll': 'Show another',
 
     'location.aggregation': 'Locations',
@@ -114,6 +115,15 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'location.scanFailed': '❌ Failed to scan locations',
     'location.allCount': 'All {{count}} locations',
     'location.cityNotFound': 'No memos found for "{{city}}"',
+
+    'tag.aggregation': 'Tags',
+    'tag.backToList': 'Back to tag list',
+    'tag.all': 'All tags',
+    'tag.empty': 'No tagged memos yet',
+    'tag.scanning': 'Scanning tags…',
+    'tag.scanFailed': '❌ Failed to scan tags',
+    'tag.allCount': 'All {{count}} tags',
+    'tag.tagNotFound': 'No memos found for "{{tag}}"',
 
     'stats.yearlyStats': 'Yearly stats',
 
@@ -261,8 +271,9 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.transcribing': '转写中…',
     'capture.realtimeTranscribing': '实时转写中…',
     'capture.add': '添加',
+    'capture.addTag': '添加标签',
     'capture.uploadImage': '上传图片（最多 {{max}} 张）',
-    'capture.recordAudio': '录音（最多 {{max}} 段）',
+    'capture.recordAudio': '录音',
     'capture.submit': '记录',
     'capture.removeImage': '移除图片',
     'capture.removeAudio': '移除录音',
@@ -296,8 +307,8 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.noMemoYet': '还没有 memo',
     'capture.loadedToEarliest': '— 已加载到最早的日记 —',
 
-    'search.searchJournal': '搜索日记',
-    'search.searchJournalPlaceholder': '搜索日记…',
+    'search.searchJournal': '搜索 memo',
+    'search.searchJournalPlaceholder': '搜索 memo…',
     'search.randomMemo': '随机看一篇 Memo',
     'search.typeToSearch': '输入关键词开始搜索',
     'search.searching': '搜索中…',
@@ -305,7 +316,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'search.matchCount': '{{count}} 条匹配',
     'search.noPastEntries': '还没有过去的日记可以随机查看',
     'search.noRandomMemo': '还没有可以随机查看的 Memo',
-    'search.randomMemoLabel': '随机看到的一篇 Memo',
+    'search.randomMemoLabel': 'Random Memo',
     'search.reroll': '换一篇',
 
     'location.aggregation': '地点聚合',
@@ -318,6 +329,15 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'location.scanFailed': '❌ 扫描地点失败',
     'location.allCount': '全部 {{count}} 个地点',
     'location.cityNotFound': '没有找到「{{city}}」的 memo',
+
+    'tag.aggregation': '标签聚合',
+    'tag.backToList': '返回标签列表',
+    'tag.all': '全部标签',
+    'tag.empty': '还没有带标签的 memo',
+    'tag.scanning': '正在扫描标签…',
+    'tag.scanFailed': '❌ 扫描标签失败',
+    'tag.allCount': '全部 {{count}} 个标签',
+    'tag.tagNotFound': '没有找到「{{tag}}」的 memo',
 
     'stats.yearlyStats': '年度统计',
 

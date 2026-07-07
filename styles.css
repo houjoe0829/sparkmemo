@@ -164,28 +164,54 @@
 .jp-capture-input-wrapper {
   position: relative;
 }
+.jp-tag-suggest {
+  position: absolute;
+  z-index: 50;
+  min-width: 140px;
+  max-width: 260px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-s);
+  padding: 4px;
+}
+.jp-tag-suggest--hidden {
+  display: none;
+}
+.jp-tag-suggest-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-normal);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jp-tag-suggest-item--active,
+.jp-tag-suggest-item:hover {
+  background: var(--background-modifier-hover);
+}
 .jp-capture-button-row {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 0;
-  width: 30px;
-  height: 30px;
-  background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary));
-  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent);
-  border-radius: 50%;
+  gap: 4px;
   padding: 0;
 }
-.jp-capture-plus-btn {
-  background: transparent !important;
-  border: none !important;
+.jp-capture-plus-btn,
+.jp-capture-tag-btn {
+  background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary)) !important;
+  border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent) !important;
   outline: none !important;
   box-shadow: none !important;
   color: color-mix(in srgb, var(--jp-tl-dot) 70%, var(--text-muted)) !important;
   cursor: pointer;
-  width: 100%;
-  height: 100%;
+  width: 30px;
+  height: 30px;
   padding: 0 !important;
   border-radius: 50%;
   display: inline-flex !important;
@@ -197,11 +223,13 @@
   -webkit-appearance: none !important;
   appearance: none !important;
 }
-.jp-capture-plus-btn:hover {
+.jp-capture-plus-btn:hover,
+.jp-capture-tag-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
-.jp-capture-plus-btn svg {
+.jp-capture-plus-btn svg,
+.jp-capture-tag-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -209,6 +237,11 @@
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
+}
+.jp-capture-tag-btn {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
 }
 .jp-capture-left-group {
   display: inline-flex;
