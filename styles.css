@@ -203,7 +203,8 @@
   padding: 0;
 }
 .jp-capture-plus-btn,
-.jp-capture-tag-btn {
+.jp-capture-tag-btn,
+.jp-capture-mention-btn {
   background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary)) !important;
   border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent) !important;
   outline: none !important;
@@ -224,12 +225,14 @@
   appearance: none !important;
 }
 .jp-capture-plus-btn:hover,
-.jp-capture-tag-btn:hover {
+.jp-capture-tag-btn:hover,
+.jp-capture-mention-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
 .jp-capture-plus-btn svg,
-.jp-capture-tag-btn svg {
+.jp-capture-tag-btn svg,
+.jp-capture-mention-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -238,7 +241,8 @@
   stroke: currentColor;
   stroke-width: 2;
 }
-.jp-capture-tag-btn {
+.jp-capture-tag-btn,
+.jp-capture-mention-btn {
   font-size: 15px;
   font-weight: 600;
   line-height: 1;

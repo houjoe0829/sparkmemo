@@ -20,13 +20,13 @@
 ├─────────────────────────────┤
 │ 多行 textarea                │
 ├─────────────────────────────┤
-│ [+] [#]  [时间pill][位置pill][编辑pill]        [↑提交] │
+│ [+] [#] [@]  [时间pill][位置pill][编辑pill]        [↑提交] │
 └─────────────────────────────┘
 ```
 
 ## 左侧图标按钮组（`.jp-capture-button-row`）
 
-两个等大（30×30，圆形）图标按钮并排：
+三个等大（30×30，圆形）图标按钮并排：
 
 ### "+" 按钮
 
@@ -37,9 +37,13 @@
 
 图片支持粘贴（`paste` 事件，全局监听但仅在输入框内聚焦时生效）和拖拽（`drop`/`dragover`）两种额外入口，走同一条 `addImageFiles` 逻辑（EXIF 时间/GPS 检测 → 按设置压缩为 WebP → 存入 vault → `addPendingImage`）。
 
-### "#" 按钮（本次新增）
+### "#" 按钮
 
 点击时在光标当前位置插入一个字面的 `#` 字符（等同于手动敲键盘），随后触发一次 `input` 事件——因此会立刻联动弹出下方的标签建议下拉框。按钮本身不做任何标签逻辑判断，纯粹是"帮用户按下这个键"。
+
+### "@" 按钮（本次新增）
+
+点击时在光标当前位置插入一个字面的 `@` 字符，随后触发一次 `input` 事件，联动弹出下方的笔记引用建议下拉框。用法与 "#" 按钮完全对称。
 
 ## 标签（`#`）建议下拉框
 
@@ -81,7 +85,34 @@
 - 鼠标点击候选项：效果同 `Enter`（用 `mousedown` 而非 `click` 绑定，确保比 textarea 的 `blur` 更早触发，避免下拉框在点击瞬间被关闭事件抢先销毁）
 - textarea 失焦（`blur`）：延迟到下一个事件循环再关闭下拉框，给上面的 `mousedown` 留出窗口期
 
-## 状态 pill（`leftGroup`，"+"/"#" 按钮右侧）
+## 笔记引用（`@`）建议下拉框（本次新增）
+
+触发方式：在 textarea 里手动输入 `@`，或点击上面的 "@" 按钮插入 `@`。UI/交互与标签下拉框同构（同一套定位、键盘导航、`mousedown`/`blur` 时序），仅触发判定、候选来源、插入内容不同。
+
+### 触发判定（`updateMentionSuggestions`）
+
+从光标位置向左扫描"当前词"的起点，但因笔记名可能带空格，判定规则与标签不同：
+
+- 只在遇到换行符或扫描超过 100 字符时停止（不因空格停止），找到起点为 `@` → 进入引用补全模式
+- `@` 前一个字符必须是空白或位于文本开头，避免在邮箱地址（`foo@bar`）这类场景里误触发
+- 查询词 `query`（`@` 与光标之间的文本）里如果出现换行符，关闭下拉框
+
+### 候选来源（`getVaultFiles`）
+
+- `vault.getMarkdownFiles()` 取全部笔记文件，按 `mtime` 降序（最近修改的排最前）
+- 结果缓存在 `this.mentionCache`；监听 `metadataCache.on('changed')` 及 `vault` 的 `create`/`delete`/`rename` 事件使缓存失效
+
+### 展示与过滤
+
+- `query` 为空 → 按缓存的"最近修改优先"顺序展示前 8 个
+- `query` 非空 → 先取「笔记名前缀匹配」的结果，再补「笔记名中间包含」的结果（两组内部各自保持最近修改优先），合并后取前 8 个
+- 没有任何匹配 → 关闭下拉框（不展示空列表）
+
+### 插入内容
+
+确认候选项时，用 Obsidian 的 `metadataCache.fileToLinktext(file, '', true)` 计算「同名笔记消歧后的最短链接文本」，插入 `[[链接文本]] `（末尾带空格）。这是标准的 Obsidian wiki 链接语法，落盘后可以正常点击跳转，也会被 Obsidian 的反向链接/图谱识别。
+
+## 状态 pill（`leftGroup`，"+"/"#"/"@" 按钮右侧）
 
 三个可选 pill，按优先级从左到右排列，互不冲突可同时出现：
 
@@ -103,9 +134,10 @@
 
 ## 涉及的 i18n key
 
-`capture.add`、`capture.addTag`（本次新增）、`capture.uploadImage`、`capture.recordAudio`、`capture.submit`、`capture.removeImage`、`capture.removeAudio`、`capture.revertToNow`、`capture.editing`、`capture.cancelEdit`、`location.retryGeocode`、`location.remove` 等，均在 `i18n.ts` 的 `dictionaries.en` / `dictionaries.zh` 里成对维护。
+`capture.add`、`capture.addTag`、`capture.addMention`（本次新增）、`capture.uploadImage`、`capture.recordAudio`、`capture.submit`、`capture.removeImage`、`capture.removeAudio`、`capture.revertToNow`、`capture.editing`、`capture.cancelEdit`、`location.retryGeocode`、`location.remove` 等，均在 `i18n.ts` 的 `dictionaries.en` / `dictionaries.zh` 里成对维护。
 
 ## 已知限制
 
 - 标签建议下拉框只读取"已存在于库中的标签"，不支持在弹窗里直接新建从未出现过的标签——但这不影响手动打完整标签名，落盘后 Obsidian 会正常识别
-- 这是一个自制的纯文本框（非 Obsidian 正式 CM6 编辑器），Obsidian 原生的标签/双链自动补全不会自动出现在这里；本文档描述的下拉框是插件自己实现的等效功能，只覆盖标签场景，不含 `[[双链]]` 补全
+- 笔记引用下拉框只能引用"已存在的笔记"，不支持像 Obsidian 原生双链那样"输入不存在的笔记名会新建一篇笔记"
+- 这是一个自制的纯文本框（非 Obsidian 正式 CM6 编辑器），Obsidian 原生的标签/双链自动补全不会自动出现在这里；本文档描述的两个下拉框（`#` 标签、`@` 笔记引用）是插件自己实现的等效功能

@@ -155,6 +155,13 @@ export class JournalCaptureView extends ItemView {
   private tagSuggestRange: { start: number; end: number } | null = null;
   private tagSuggestMatches: string[] = [];
   private tagSuggestIndex = 0;
+  /** Vault-wide markdown file list, sorted by name. Rebuilt lazily; invalidated on vault/metadata changes. */
+  private mentionCache: TFile[] | null = null;
+  private mentionSuggestEl!: HTMLElement;
+  /** Character range in `textareaEl.value` of the `@partial` currently being completed, or null while the popup is closed. */
+  private mentionSuggestRange: { start: number; end: number } | null = null;
+  private mentionSuggestMatches: TFile[] = [];
+  private mentionSuggestIndex = 0;
   private submitBtn!: HTMLButtonElement;
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
@@ -938,30 +945,49 @@ export class JournalCaptureView extends ItemView {
       this.refreshSubmitState();
       this.autoResizeTextarea();
       this.updateTagSuggestions();
+      this.updateMentionSuggestions();
     });
     // Cursor moves (arrow keys, clicks) don't fire 'input' — re-check the
     // trigger so the popup follows the caret / closes when it leaves the tag.
     this.textareaEl.addEventListener('keyup', (e: KeyboardEvent) => {
       // Navigation/selection keys are handled (and preventDefault'd) on
-      // keydown below when the popup is open — nothing left to do here.
-      if (this.tagSuggestRange && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key)) return;
-      this.updateTagSuggestions();
+      // keydown below when a popup is open — nothing left to do here.
+      const navKey = ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key);
+      if (!(this.tagSuggestRange && navKey)) this.updateTagSuggestions();
+      if (!(this.mentionSuggestRange && navKey)) this.updateMentionSuggestions();
     });
-    this.textareaEl.addEventListener('click', () => this.updateTagSuggestions());
+    this.textareaEl.addEventListener('click', () => {
+      this.updateTagSuggestions();
+      this.updateMentionSuggestions();
+    });
     this.textareaEl.addEventListener('blur', () => {
       // Defer so a mousedown on the popup (which fires before blur) can
       // still register its click before we tear the list down.
-      window.setTimeout(() => this.closeTagSuggest(), 0);
+      window.setTimeout(() => {
+        this.closeTagSuggest();
+        this.closeMentionSuggest();
+      }, 0);
     });
     this.textareaEl.addEventListener('keydown', (e: KeyboardEvent) => {
-      this.handleTagSuggestKeydown(e);
+      // Mention popup takes priority when both would otherwise react, since
+      // the two triggers ('#' and '@') can never be active at the same time.
+      if (this.mentionSuggestRange) {
+        this.handleMentionSuggestKeydown(e);
+      } else {
+        this.handleTagSuggestKeydown(e);
+      }
     });
 
     this.tagSuggestEl = inputWrapper.createDiv({ cls: 'jp-tag-suggest jp-tag-suggest--hidden' });
+    this.mentionSuggestEl = inputWrapper.createDiv({ cls: 'jp-tag-suggest jp-mention-suggest jp-tag-suggest--hidden' });
 
     this.registerEvent(this.app.metadataCache.on('changed', () => {
       this.tagCache = null;
+      this.mentionCache = null;
     }));
+    this.registerEvent(this.app.vault.on('create', () => { this.mentionCache = null; }));
+    this.registerEvent(this.app.vault.on('delete', () => { this.mentionCache = null; }));
+    this.registerEvent(this.app.vault.on('rename', () => { this.mentionCache = null; }));
     // Image paste: intercept at document level (capture phase) for reliability
     this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -1527,6 +1553,27 @@ export class JournalCaptureView extends ItemView {
       const after = textarea.value.substring(end);
       textarea.focus();
       textarea.value = before + '#' + after;
+      const newPos = start + 1;
+      textarea.setSelectionRange(newPos, newPos);
+      textarea.dispatchEvent(new Event('input'));
+    });
+
+    // "@" button — inserts a literal "@" at the cursor to trigger the
+    // note-mention popup below, which inserts an Obsidian-recognized
+    // `[[wikilink]]` to the chosen file.
+    const mentionBtn = buttonRow.createEl('button', {
+      cls: 'jp-capture-mention-btn',
+      text: '@',
+      attr: { 'aria-label': t('capture.addMention') },
+    });
+    mentionBtn.addEventListener('click', () => {
+      const textarea = this.textareaEl;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const before = textarea.value.substring(0, start);
+      const after = textarea.value.substring(end);
+      textarea.focus();
+      textarea.value = before + '@' + after;
       const newPos = start + 1;
       textarea.setSelectionRange(newPos, newPos);
       textarea.dispatchEvent(new Event('input'));
@@ -2719,6 +2766,170 @@ export class JournalCaptureView extends ItemView {
     } else if (e.key === 'Escape') {
       e.preventDefault();
       this.closeTagSuggest();
+    }
+  }
+
+  // ── Note mention ("@") suggestion popup ─────────────────────────────────
+
+  /** Every markdown file in the vault, most recently modified first — recent notes are what you're usually reaching for. Cached until vault/metadata changes. */
+  private getVaultFiles(): TFile[] {
+    if (this.mentionCache) return this.mentionCache;
+    const list = this.app.vault.getMarkdownFiles().sort((a, b) => b.stat.mtime - a.stat.mtime);
+    this.mentionCache = list;
+    return list;
+  }
+
+  /** Looks at the caret position and shows/hides/refreshes the mention popup accordingly. */
+  private updateMentionSuggestions() {
+    const value = this.textareaEl.value;
+    const caret = this.textareaEl.selectionStart;
+    if (caret !== this.textareaEl.selectionEnd) {
+      this.closeMentionSuggest();
+      return;
+    }
+    // Walk back from the caret to the nearest "@" on the current line — file
+    // names may contain spaces, so (unlike tags) we don't stop at whitespace,
+    // only at a newline or once we've scanned an unreasonably long span.
+    let start = caret;
+    while (start > 0 && caret - start < 100 && value[start - 1] !== '@' && value[start - 1] !== '\n') start--;
+    if (start === 0 || value[start - 1] !== '@') {
+      this.closeMentionSuggest();
+      return;
+    }
+    // Require the "@" to be at the start of a word (preceded by whitespace or
+    // the start of the text) so we don't trigger inside things like emails.
+    if (start > 1 && !/\s/.test(value[start - 2])) {
+      this.closeMentionSuggest();
+      return;
+    }
+    start--; // include the '@'
+    const query = value.slice(start + 1, caret);
+    if (query.includes('\n')) {
+      this.closeMentionSuggest();
+      return;
+    }
+
+    const all = this.getVaultFiles();
+    const q = query.toLowerCase();
+    // With no query, lean on the recency ordering from getVaultFiles() as-is.
+    // Once the user starts typing, prefer name-prefix matches over
+    // mid-name matches (both groups keep their relative recency order),
+    // since a prefix match is almost always the note they mean.
+    let matches: TFile[];
+    if (q.length === 0) {
+      matches = all;
+    } else {
+      const startsWith: TFile[] = [];
+      const contains: TFile[] = [];
+      for (const f of all) {
+        const name = f.basename.toLowerCase();
+        if (name.startsWith(q)) startsWith.push(f);
+        else if (name.includes(q)) contains.push(f);
+      }
+      matches = startsWith.concat(contains);
+    }
+    matches = matches.slice(0, 8);
+
+    if (matches.length === 0) {
+      this.closeMentionSuggest();
+      return;
+    }
+
+    this.mentionSuggestRange = { start, end: caret };
+    this.mentionSuggestMatches = matches;
+    this.mentionSuggestIndex = 0;
+    this.renderMentionSuggestList();
+    this.positionMentionSuggest(start);
+  }
+
+  private renderMentionSuggestList() {
+    this.mentionSuggestEl.empty();
+    this.mentionSuggestMatches.forEach((file, i) => {
+      const item = this.mentionSuggestEl.createDiv({
+        cls: 'jp-tag-suggest-item' + (i === this.mentionSuggestIndex ? ' jp-tag-suggest-item--active' : ''),
+        text: file.basename,
+      });
+      // mousedown (not click) fires before the textarea's blur handler runs.
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this.selectMentionSuggestion(file);
+      });
+    });
+    this.mentionSuggestEl.toggleClass('jp-tag-suggest--hidden', false);
+  }
+
+  /** Positions the popup just below the line containing `charIndex` — reuses the tag popup's mirror-div measurement approach. */
+  private positionMentionSuggest(charIndex: number) {
+    const ta = this.textareaEl;
+    const mirror = document.createElement('div');
+    const style = window.getComputedStyle(ta);
+    const props: string[] = [
+      'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize',
+    ];
+    for (const prop of props) {
+      (mirror.style as any)[prop] = (style as any)[prop];
+    }
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.wordWrap = 'break-word';
+    mirror.style.top = '0';
+    mirror.style.left = '-9999px';
+    mirror.textContent = ta.value.slice(0, charIndex);
+    const marker = document.createElement('span');
+    marker.textContent = '​';
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    const markerTop = marker.offsetTop;
+    const lineHeight = parseFloat(style.lineHeight) || marker.offsetHeight;
+    document.body.removeChild(mirror);
+
+    this.mentionSuggestEl.style.left = `${ta.offsetLeft}px`;
+    this.mentionSuggestEl.style.top = `${ta.offsetTop + markerTop + lineHeight - ta.scrollTop}px`;
+  }
+
+  private closeMentionSuggest() {
+    if (!this.mentionSuggestRange) return;
+    this.mentionSuggestRange = null;
+    this.mentionSuggestMatches = [];
+    this.mentionSuggestEl.toggleClass('jp-tag-suggest--hidden', true);
+    this.mentionSuggestEl.empty();
+  }
+
+  /** Inserts an Obsidian-recognized `[[wikilink]]` (shortest unique linktext) for the chosen file. */
+  private selectMentionSuggestion(file: TFile) {
+    const range = this.mentionSuggestRange;
+    if (!range) return;
+    const linktext = this.app.metadataCache.fileToLinktext(file, '', true);
+    const value = this.textareaEl.value;
+    const inserted = `[[${linktext}]] `;
+    this.textareaEl.value = value.slice(0, range.start) + inserted + value.slice(range.end);
+    const newPos = range.start + inserted.length;
+    this.closeMentionSuggest();
+    this.textareaEl.focus();
+    this.textareaEl.setSelectionRange(newPos, newPos);
+    this.refreshSubmitState();
+    this.autoResizeTextarea();
+  }
+
+  private handleMentionSuggestKeydown(e: KeyboardEvent) {
+    if (!this.mentionSuggestRange || this.mentionSuggestMatches.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this.mentionSuggestIndex = (this.mentionSuggestIndex + 1) % this.mentionSuggestMatches.length;
+      this.renderMentionSuggestList();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this.mentionSuggestIndex = (this.mentionSuggestIndex - 1 + this.mentionSuggestMatches.length) % this.mentionSuggestMatches.length;
+      this.renderMentionSuggestList();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      this.selectMentionSuggestion(this.mentionSuggestMatches[this.mentionSuggestIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      this.closeMentionSuggest();
     }
   }
 
