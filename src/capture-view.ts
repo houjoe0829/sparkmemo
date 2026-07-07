@@ -2279,9 +2279,11 @@ export class JournalCaptureView extends ItemView {
       modalRef.open();
     });
 
-    if (gpsCoord) {
-      void reverseGeocodeCity(gpsCoord.latitude, gpsCoord.longitude).then(name => modalRef?.setLocationName(name));
-    }
+    // Kept alongside the modal's own copy so that if the user accepts before
+    // this resolves, we can still apply the name once it lands — the modal
+    // resolves with whatever it had *at click time* and won't update after.
+    const geocodePromise = gpsCoord ? reverseGeocodeCity(gpsCoord.latitude, gpsCoord.longitude) : null;
+    if (geocodePromise) void geocodePromise.then(name => modalRef?.setLocationName(name));
 
     const result = await resultPromise;
 
@@ -2317,6 +2319,25 @@ export class JournalCaptureView extends ItemView {
       this.pendingLocation = { latitude: gpsCoord.latitude, longitude: gpsCoord.longitude, name: finalName };
       this.renderLocationPill();
       appliedParts.push(t('capture.metadataAppliedLocation', { name: finalName ?? t('capture.coordOnly') }));
+
+      // The user may have clicked "使用图片信息" while the geocode lookup was
+      // still in flight — the modal resolved with `name: null` at that
+      // instant and won't tell us anything more. Piggyback on the same
+      // in-flight request so the pill still fills in the place name once it
+      // lands, instead of being stuck showing raw coordinates forever.
+      if (finalName === null && geocodePromise) {
+        void geocodePromise.then(name => {
+          if (
+            this.pendingLocation &&
+            this.pendingLocation.latitude === gpsCoord.latitude &&
+            this.pendingLocation.longitude === gpsCoord.longitude &&
+            this.pendingLocation.name === null
+          ) {
+            this.pendingLocation.name = name;
+            this.renderLocationPill();
+          }
+        });
+      }
     }
     new Notice(t('notice.metadataApplied', { parts: appliedParts.join(t('capture.metadataJoiner')) }));
   }
