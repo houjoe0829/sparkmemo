@@ -1943,6 +1943,7 @@ export class JournalCaptureView extends ItemView {
    * save, so this round-trips cleanly.
    */
   private async startEdit(day: DaySection, entry: JournalEntry): Promise<void> {
+    if (this.currentTab !== 'capture') this.switchTab('capture');
     this.editingEntry = { day, entry };
     // The metadata hint pill is new-entry-only — an edit shouldn't offer to
     // apply a *different* photo batch's leftover time/location.
@@ -2784,12 +2785,8 @@ export class JournalCaptureView extends ItemView {
 
     const row = this.timelineEl.createDiv({ cls: 'jp-timeline-bottom-nav-row' });
 
-    const prevEl = row.createDiv({
-      cls: 'jp-timeline-bottom-nav' + (atLookbackFloor ? ' is-disabled' : ''),
-    });
-    if (atLookbackFloor) {
-      prevEl.setText(t('capture.earliestReached'));
-    } else {
+    if (!atLookbackFloor) {
+      const prevEl = row.createDiv({ cls: 'jp-timeline-bottom-nav' });
       const icon = prevEl.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
       setIcon(icon, 'chevron-down');
       prevEl.createSpan({ text: t('capture.viewPrevDay') });
@@ -3976,7 +3973,11 @@ export class JournalCaptureView extends ItemView {
         }
 
         if (!isFuture) {
-          cell.addEventListener('click', () => void this.openDailyNoteByDate(date));
+          cell.addEventListener('click', () => {
+            this.currentDate = date.clone().startOf('day');
+            this.switchTab('capture');
+            void this.fullRebuild();
+          });
         }
       }
     }
@@ -4839,6 +4840,15 @@ class CalendarPickerModal extends Modal {
           this.close();
         });
       }
+    }
+
+    if (!today.isSame(this.selected, 'day') || !today.isSame(this.viewMonth, 'month')) {
+      const footer = contentEl.createDiv({ cls: 'jp-cal-footer' });
+      const todayBtn = footer.createEl('button', { cls: 'jp-cal-today-btn', text: t('capture.backToToday') });
+      todayBtn.addEventListener('click', () => {
+        this.onPick(today);
+        this.close();
+      });
     }
   }
 }

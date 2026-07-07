@@ -606,17 +606,6 @@
 /* Timeline */
 .jp-timeline {
   position: relative;
-  padding-left: 24px;
-}
-.jp-timeline::before {
-  content: '';
-  position: absolute;
-  left: 7px;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  background: var(--jp-tl-line);
-  border-radius: 2px;
 }
 .jp-timeline-entry {
   position: relative;
@@ -921,10 +910,22 @@
   display: none !important;
 }
 
-/* Continuous-scroll timeline: each day is a sub-section; the vertical line
-   already drawn by .jp-timeline::before spans the whole stream. */
+/* Continuous-scroll timeline: each day is a sub-section with its own
+   vertical line, scoped to that day's header + entries only — it must not
+   bleed into sibling UI like the bottom-nav row or end-of-list marker. */
 .jp-timeline-day {
   position: relative;
+  padding-left: 24px;
+}
+.jp-timeline-day::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--jp-tl-line);
+  border-radius: 2px;
 }
 .jp-timeline-day + .jp-timeline-day {
   margin-top: 18px;
@@ -1275,6 +1276,26 @@
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+.jp-cal-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.jp-cal-today-btn {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--jp-tl-dot);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.jp-cal-today-btn:hover {
+  background: var(--background-modifier-hover);
 }
 .jp-image-preview-img {
   display: block;

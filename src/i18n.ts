@@ -75,7 +75,6 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.prevDay': 'Previous day',
     'capture.pickDate': 'Pick a date',
     'capture.nextDay': 'Next day',
-    'capture.earliestReached': '— Reached the earliest viewable date —',
     'capture.viewPrevDay': 'View previous day',
     'capture.backToToday': 'Back to today',
     'capture.emptyDayNudge': 'No memos yet, write something →',
@@ -92,7 +91,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.relativeToday': ' · Today',
     'capture.relativeYesterday': ' · Yesterday',
     'capture.noMemoYet': 'No memos yet',
-    'capture.loadedToEarliest': '— Loaded to the earliest journal —',
+    'capture.loadedToEarliest': '— Loaded to the earliest memo —',
 
     'search.searchJournal': 'Search memos',
     'search.searchJournalPlaceholder': 'Search memos…',
@@ -292,7 +291,6 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.prevDay': '前一天',
     'capture.pickDate': '选择日期',
     'capture.nextDay': '后一天',
-    'capture.earliestReached': '— 已到最早可查看的日期 —',
     'capture.viewPrevDay': '查看前一天',
     'capture.backToToday': '返回今天',
     'capture.emptyDayNudge': '还没有 memo，写点什么吧 →',
@@ -309,7 +307,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.relativeToday': ' · 今天',
     'capture.relativeYesterday': ' · 昨天',
     'capture.noMemoYet': '还没有 memo',
-    'capture.loadedToEarliest': '— 已加载到最早的日记 —',
+    'capture.loadedToEarliest': '— 已加载到最早的 memo —',
 
     'search.searchJournal': '搜索 memo',
     'search.searchJournalPlaceholder': '搜索 memo…',
