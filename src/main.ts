@@ -201,6 +201,14 @@ export default class SparkMemoPlugin extends Plugin {
       { decorations: v => v.decorations },
     );
 
+    // Note: lightweight Markdown decorations (bold/italic/headings/lists)
+    // are NOT applied here — Obsidian's own Live Preview already renders
+    // standard Markdown natively in the daily note editor, so a second
+    // decoration layer here would just double up on (and conflict with)
+    // native heading/list styling. The lightweight renderer is only used in
+    // the quick-capture sidebar's input box, which is a plain CM6 instance
+    // with no native Markdown mode of its own.
+
     // Transaction filter: reject changes that overlap a timestamp range
     const readonlyFilter = EditorState.transactionFilter.of(
       (tr: Transaction) => {
@@ -268,24 +276,50 @@ export default class SparkMemoPlugin extends Plugin {
             const currentIndent = indentMatch?.[1] ?? '';
             const isNested = currentIndent.length > 0;
 
-            const markerMatch = line.text.match(/^\s*([-*+]\s+)/);
-            const listMarker = markerMatch ? markerMatch[1] : '';
+            // Continuation lines also support ordered-list markers
+            // (`1. `), which never appear on an entry's own top-level line.
+            const orderedMatch = isNested
+              ? line.text.match(/^\s*(\d+)(\.\s+)/)
+              : null;
+            const unorderedMatch = line.text.match(/^\s*([-*+]\s+)/);
+            const listMarker = orderedMatch
+              ? orderedMatch[1] + orderedMatch[2]
+              : unorderedMatch
+                ? unorderedMatch[1]
+                : '';
 
             if (!listMarker) return false;
 
-            let insertion: string;
+            let changes: { from: number; to: number; insert: string };
+            let newCursor: number;
 
-            if (isNested) {
-              insertion = '\n' + currentIndent + listMarker;
+            const restOfLine = line.text.slice(
+              currentIndent.length + listMarker.length,
+            );
+
+            if (isNested && restOfLine.trim().length === 0) {
+              // Empty list item — clear the marker and exit list mode
+              // instead of repeating an empty prefix forever.
+              changes = { from: line.from, to: cursor.to, insert: '\n' };
+              newCursor = line.from + 1;
+            } else if (isNested) {
+              const nextMarker = orderedMatch
+                ? `${Number(orderedMatch[1]) + 1}. `
+                : listMarker;
+              const insertion = '\n' + currentIndent + nextMarker;
+              changes = { from: cursor.from, to: cursor.to, insert: insertion };
+              newCursor = cursor.from + insertion.length;
             } else {
               const ts = generateTimestamp();
-              insertion = '\n' + listMarker + ts + ' ';
+              const insertion = '\n' + listMarker + ts + ' ';
+              changes = { from: cursor.from, to: cursor.to, insert: insertion };
+              newCursor = cursor.from + insertion.length;
             }
 
             view.dispatch(
               state.update({
-                changes: { from: cursor.from, to: cursor.to, insert: insertion },
-                selection: { anchor: cursor.from + insertion.length },
+                changes,
+                selection: { anchor: newCursor },
                 scrollIntoView: true,
               }),
             );

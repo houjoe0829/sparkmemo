@@ -53,6 +53,7 @@ import {
   stripAttachmentEmbeds,
   updateEntryLocationName,
 } from './section';
+import { CaptureEditor } from './capture-editor';
 import { readExifCaptureDate, readExifGpsLocation } from './exif';
 import { reverseGeocodeCity } from './geocode';
 import { encodeWebp } from './webp-encoder';
@@ -169,9 +170,10 @@ export class JournalCaptureView extends ItemView {
   private calendarBtn!: HTMLButtonElement;
   private timelineEl!: HTMLElement;
   private sentinelEl!: HTMLElement;
-  private textareaEl!: HTMLTextAreaElement;
+  private textareaEl!: CaptureEditor;
   /** Vault-wide tag list (frontmatter + inline `#tags`), sorted by usage. Rebuilt lazily; invalidated on metadata changes. */
   private tagCache: { tag: string; count: number }[] | null = null;
+  private inputWrapperEl!: HTMLElement;
   private tagSuggestEl!: HTMLElement;
   /** Character range in `textareaEl.value` of the `#partial` currently being completed, or null while the popup is closed. */
   private tagSuggestRange: { start: number; end: number } | null = null;
@@ -986,14 +988,10 @@ export class JournalCaptureView extends ItemView {
 
     // Wrapper for textarea
     const inputWrapper = this.inputCardEl.createDiv({ cls: 'jp-capture-input-wrapper' });
+    this.inputWrapperEl = inputWrapper;
 
-    this.textareaEl = inputWrapper.createEl('textarea', {
-      cls: 'jp-capture-input',
-      attr: {
-        placeholder: this.pickRandomPlaceholder(),
-        rows: '3',
-      },
-    });
+    this.textareaEl = new CaptureEditor(inputWrapper, 'jp-capture-input');
+    this.textareaEl.placeholder = this.pickRandomPlaceholder();
     this.textareaEl.addEventListener('input', () => {
       this.refreshSubmitState();
       this.autoResizeTextarea();
@@ -2772,39 +2770,12 @@ export class JournalCaptureView extends ItemView {
     this.tagSuggestEl.toggleClass('jp-tag-suggest--hidden', false);
   }
 
-  /** Positions the popup just below the line containing `charIndex`, using a hidden mirror div to measure caret pixel position. */
+  /** Positions the popup just below the line containing `charIndex`, using CM6's own coordsAtPos — no mirror-div measurement needed. */
   private positionTagSuggest(charIndex: number) {
-    const ta = this.textareaEl;
-    const mirror = document.createElement('div');
-    const style = window.getComputedStyle(ta);
-    const props: string[] = [
-      'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
-      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize',
-    ];
-    for (const prop of props) {
-      (mirror.style as any)[prop] = (style as any)[prop];
-    }
-    mirror.style.position = 'absolute';
-    mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
-    mirror.style.wordWrap = 'break-word';
-    mirror.style.top = '0';
-    mirror.style.left = '-9999px';
-    mirror.textContent = ta.value.slice(0, charIndex);
-    const marker = document.createElement('span');
-    marker.textContent = '​';
-    mirror.appendChild(marker);
-    document.body.appendChild(mirror);
-    const markerTop = marker.offsetTop;
-    const lineHeight = parseFloat(style.lineHeight) || marker.offsetHeight;
-    document.body.removeChild(mirror);
-
-    // inputWrapper (tagSuggestEl's offsetParent) shares its top-left with the
-    // textarea, so the mirror's local offsets translate directly, minus the
-    // scroll position.
-    this.tagSuggestEl.style.left = `${ta.offsetLeft}px`;
-    this.tagSuggestEl.style.top = `${ta.offsetTop + markerTop + lineHeight - ta.scrollTop}px`;
+    const coords = this.textareaEl.coordsRelativeTo(charIndex, this.inputWrapperEl);
+    if (!coords) return;
+    this.tagSuggestEl.style.left = `${coords.left}px`;
+    this.tagSuggestEl.style.top = `${coords.bottom}px`;
   }
 
   private closeTagSuggest() {
@@ -2937,36 +2908,12 @@ export class JournalCaptureView extends ItemView {
     this.mentionSuggestEl.toggleClass('jp-tag-suggest--hidden', false);
   }
 
-  /** Positions the popup just below the line containing `charIndex` — reuses the tag popup's mirror-div measurement approach. */
+  /** Positions the popup just below the line containing `charIndex`, using CM6's own coordsAtPos. */
   private positionMentionSuggest(charIndex: number) {
-    const ta = this.textareaEl;
-    const mirror = document.createElement('div');
-    const style = window.getComputedStyle(ta);
-    const props: string[] = [
-      'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
-      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize',
-    ];
-    for (const prop of props) {
-      (mirror.style as any)[prop] = (style as any)[prop];
-    }
-    mirror.style.position = 'absolute';
-    mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
-    mirror.style.wordWrap = 'break-word';
-    mirror.style.top = '0';
-    mirror.style.left = '-9999px';
-    mirror.textContent = ta.value.slice(0, charIndex);
-    const marker = document.createElement('span');
-    marker.textContent = '​';
-    mirror.appendChild(marker);
-    document.body.appendChild(mirror);
-    const markerTop = marker.offsetTop;
-    const lineHeight = parseFloat(style.lineHeight) || marker.offsetHeight;
-    document.body.removeChild(mirror);
-
-    this.mentionSuggestEl.style.left = `${ta.offsetLeft}px`;
-    this.mentionSuggestEl.style.top = `${ta.offsetTop + markerTop + lineHeight - ta.scrollTop}px`;
+    const coords = this.textareaEl.coordsRelativeTo(charIndex, this.inputWrapperEl);
+    if (!coords) return;
+    this.mentionSuggestEl.style.left = `${coords.left}px`;
+    this.mentionSuggestEl.style.top = `${coords.bottom}px`;
   }
 
   private closeMentionSuggest() {

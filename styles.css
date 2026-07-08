@@ -76,6 +76,67 @@
   cursor: text;
 }
 
+/* ── Lightweight Markdown (Memo section inline/block formatting) ─────────── */
+
+/* Syntax symbols stay visible, just faded — never hidden/replaced. */
+.jp-md-marker {
+  color: var(--text-faint);
+}
+
+/* Block-level markers (heading `#`, list `-`/`*`/`1.`) are bold + faded. */
+.jp-md-block-marker {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.jp-md-bold {
+  font-weight: 700;
+}
+
+.jp-md-italic {
+  font-style: italic;
+}
+
+.jp-md-strike {
+  text-decoration: line-through;
+}
+
+.jp-md-highlight {
+  background-color: rgba(250, 204, 21, 0.35);
+  border-radius: 2px;
+}
+
+.jp-md-code {
+  font-family: var(
+    --font-monospace,
+    ui-monospace,
+    "Cascadia Code",
+    "Fira Code",
+    monospace
+  );
+  color: #dc5f36;
+  background-color: var(--code-background, rgba(127, 127, 127, 0.12));
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.jp-md-link {
+  color: var(--link-color, #3b82f6);
+}
+
+.jp-md-heading-text {
+  font-weight: 600;
+}
+
+/* Line-level indent for recognized headings/lists — gives visual feedback
+   that the line was parsed as structured content, and hangs any soft-wrapped
+   continuation under the marker (via the inline padding/text-indent style
+   computed per line in buildMarkdownDecorations). */
+.jp-md-heading-line,
+.jp-md-list-line {
+  box-sizing: border-box;
+}
+
 /* ── Quick-capture sidebar view ─────────────────────────────────────────── */
 
 .jp-capture-root {
@@ -152,13 +213,71 @@
   box-shadow: none !important;
   background: transparent;
   color: var(--text-normal);
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.55;
+  /* Match the rendered timeline bubble's typography (.jp-timeline-bubble):
+     --font-text (not --font-interface/"inherit") is what Obsidian's
+     rendered note content actually uses, so that's what to match here too. */
+  font-family: var(--font-text, inherit);
+  font-size: 13.5px;
+  line-height: 1.5;
   padding: 0;
   box-sizing: border-box;
+  /* CM6's own layout relies on .cm-editor being a column flexbox with
+     .cm-scroller stretching to fill it — Obsidian's global editor CSS
+     (shared class names) can clobber this, leaving a dead-click zone below
+     a short line of text but above the box's visual bottom edge. Force it
+     back so the whole visible box is click-to-focus, all the way down. */
+  display: flex !important;
+  flex-direction: column !important;
 }
 .jp-capture-input::placeholder {
+  color: var(--text-faint);
+}
+/* The input box is a CM6 EditorView (see capture-editor.ts), not a native
+   <textarea> — reset CM6's own defaults (gutters, content padding, focus
+   ring) so it still reads as a plain, borderless input surface. */
+.jp-capture-input.cm-editor {
+  outline: none !important;
+}
+.jp-capture-input.cm-editor.cm-focused {
+  outline: none !important;
+}
+.jp-capture-input .cm-scroller {
+  overflow-y: auto;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  /* Stretch to fill .cm-editor's full height (see the flex rule above) so
+     clicking anywhere in the box, not just on the text line itself, focuses
+     the editor and places the caret. */
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+}
+.jp-capture-input .cm-content {
+  padding: 0;
+  color: var(--text-normal);
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  /* Without CM6's drawSelection() extension, the caret is just the browser's
+     native contentEditable cursor, which only respects caret-color (not the
+     .cm-cursor rule below) — that's the actual fix for the dark-on-dark
+     caret; the .cm-cursor rule is a no-op until drawSelection() is added. */
+  caret-color: var(--text-normal);
+  /* Click-to-focus for the visually-empty area below the last text line is
+     handled in capture-editor.ts (mousedown listener) rather than by
+     expanding .cm-content — the CSS-only approach relied on min-height: 100%
+     which resolves to 0 under this flex layout. */
+}
+.jp-capture-input .cm-line {
+  padding: 0;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+/* We use the native contentEditable caret (see caret-color on .cm-content
+   above) rather than CM6's drawSelection() cursor layer, because the extra
+   layer produced a stray horizontal artifact near line boundaries. */
+.jp-capture-input .cm-placeholder {
   color: var(--text-faint);
 }
 .jp-capture-input-wrapper {

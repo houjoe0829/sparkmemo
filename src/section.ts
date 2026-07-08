@@ -6,7 +6,7 @@
  * and timestamp parsing in one place.
  */
 
-import { RangeSetBuilder } from '@codemirror/state';
+import { Range, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet } from '@codemirror/view';
 
 // ── Types & defaults ────────────────────────────────────────────────────────
@@ -190,6 +190,216 @@ export function buildDecorations(
   }
 
   return builder.finish();
+}
+
+// ── Lightweight Markdown decorations ───────────────────────────────────────
+
+/**
+ * True when `line` is a journal entry's head line (`- HH:MM …`), i.e. the
+ * leading list marker belongs to the entry itself rather than to
+ * user-authored Markdown. Block-level syntax (headings, lists) only applies
+ * to lines that are *not* entry heads — see docs/staging for the rationale.
+ */
+function isEntryHeadLine(line: string, settings: SparkMemoSettings): boolean {
+  const re = new RegExp(`^[-*+]\\s+(${settings.timestampPattern})(?=\\s|$)`);
+  return re.test(line);
+}
+
+const MD_MARKER_CLASS = 'jp-md-marker';
+const MD_BLOCK_MARKER_CLASS = 'jp-md-block-marker';
+
+const markDeco = (cls: string) =>
+  Decoration.mark({ class: cls, inclusiveStart: false, inclusiveEnd: false });
+
+const INLINE_MARK: Record<string, Decoration> = {
+  bold: markDeco('jp-md-bold'),
+  italic: markDeco('jp-md-italic'),
+  strike: markDeco('jp-md-strike'),
+  highlight: markDeco('jp-md-highlight'),
+  code: markDeco('jp-md-code'),
+  link: markDeco('jp-md-link'),
+};
+const MARKER_MARK = markDeco(MD_MARKER_CLASS);
+const BLOCK_MARKER_MARK = markDeco(MD_BLOCK_MARKER_CLASS);
+const HEADING_TEXT_MARK = markDeco('jp-md-heading-text');
+
+type LocalSpan = { from: number; to: number; deco: Decoration };
+
+/** Trim common trailing punctuation off an auto-detected bare URL match. */
+function trimUrlMatch(url: string): string {
+  return url.replace(/[),.;:!?，。；：！？、】》")\]]+$/, '');
+}
+
+/**
+ * Scan a single line's inline formatting: bold / italic / strikethrough /
+ * highlight / inline code / bare URLs. Applies to both entry head lines and
+ * continuation lines. Returns spans local to the line (0-based).
+ *
+ * Each construct is scanned in its own pass; a later pass skips any match
+ * that overlaps a span already claimed by an earlier pass, so (for example)
+ * a `**` pair inside a code span isn't separately parsed as bold.
+ */
+function scanInlineFormats(line: string): LocalSpan[] {
+  const spans: LocalSpan[] = [];
+  const claimed: Array<[number, number]> = [];
+
+  const overlaps = (from: number, to: number) =>
+    claimed.some(([a, b]) => from < b && to > a);
+
+  const passes: Array<{ re: RegExp; type: keyof typeof INLINE_MARK }> = [
+    { re: /`([^`\n]+)`/g, type: 'code' },
+    { re: /\*\*([^\s*](?:[^\n]*?[^\s*])?)\*\*/g, type: 'bold' },
+    { re: /~~([^\s~](?:[^\n]*?[^\s~])?)~~/g, type: 'strike' },
+    { re: /==([^\s=](?:[^\n]*?[^\s=])?)==/g, type: 'highlight' },
+    { re: /(?<!\*)\*(?!\*)([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?!\*)/g, type: 'italic' },
+  ];
+
+  for (const { re, type } of passes) {
+    for (const m of line.matchAll(re)) {
+      const whole = m[0];
+      const from = m.index ?? 0;
+      const to = from + whole.length;
+      if (overlaps(from, to)) continue;
+      claimed.push([from, to]);
+
+      const markerLen = (whole.length - m[1].length) / 2;
+      spans.push({ from, to: from + markerLen, deco: MARKER_MARK });
+      spans.push({ from: from + markerLen, to: to - markerLen, deco: INLINE_MARK[type] });
+      spans.push({ from: to - markerLen, to, deco: MARKER_MARK });
+    }
+  }
+
+  // Bare URLs — plain-text auto-link, no marker to fade.
+  for (const m of line.matchAll(/https?:\/\/[^\s]+/g)) {
+    const rawFrom = m.index ?? 0;
+    const trimmed = trimUrlMatch(m[0]);
+    if (trimmed.length === 0) continue;
+    const to = rawFrom + trimmed.length;
+    if (overlaps(rawFrom, to)) continue;
+    claimed.push([rawFrom, to]);
+    spans.push({ from: rawFrom, to, deco: INLINE_MARK.link });
+  }
+
+  return spans;
+}
+
+/** Matches a heading (`#` to `###`) at the start of a line. Levels 4+ don't render. */
+const HEADING_RE = /^(#{1,3})(\s+)/;
+
+/** Matches a list marker (`-`/`*`/`+` or `1.`) at the start of a line. */
+const LIST_RE = /^(\s*)([-*+]|\d+\.)(\s+)/;
+
+/**
+ * Scan a continuation line for block-level structure (heading / list).
+ * Never called for entry head lines. Returns the inline spans for the
+ * marker/content, plus an optional line-level decoration (indent + heading
+ * style) to apply at the line's start.
+ */
+function scanBlockStructure(
+  line: string,
+): { spans: LocalSpan[]; lineDeco?: Decoration } {
+  const headingMatch = HEADING_RE.exec(line);
+  if (headingMatch) {
+    const markerLen = headingMatch[0].length;
+    const spans: LocalSpan[] = [
+      { from: 0, to: headingMatch[1].length, deco: BLOCK_MARKER_MARK },
+    ];
+    const rest = line.slice(markerLen);
+    if (rest.length > 0) {
+      spans.push({ from: markerLen, to: line.length, deco: HEADING_TEXT_MARK });
+    }
+    return {
+      spans,
+      lineDeco: Decoration.line({
+        class: 'jp-md-heading-line',
+        attributes: { style: `padding-left:${markerLen}ch;text-indent:-${markerLen}ch;` },
+      }),
+    };
+  }
+
+  const listMatch = LIST_RE.exec(line);
+  if (listMatch) {
+    const markerLen = listMatch[0].length;
+    return {
+      spans: [{ from: 0, to: markerLen, deco: BLOCK_MARKER_MARK }],
+      lineDeco: Decoration.line({
+        class: 'jp-md-list-line',
+        attributes: { style: `padding-left:${markerLen + 1}ch;text-indent:-${markerLen}ch;` },
+      }),
+    };
+  }
+
+  return { spans: [] };
+}
+
+/**
+ * Shared core: scan every line of `text` for the lightweight Markdown
+ * syntax, calling `isHeadLine(line, lineIndex)` to decide whether that line
+ * gets block-level treatment (headings/lists) or only inline formatting.
+ * `baseOffset` is added to every produced range so callers can scan a
+ * substring of a larger document and still get absolute positions.
+ */
+function scanMarkdownLines(
+  text: string,
+  baseOffset: number,
+  isHeadLine: (line: string, lineIndex: number) => boolean,
+): Range<Decoration>[] {
+  const lines = text.split('\n');
+  const ranges: Range<Decoration>[] = [];
+
+  let offset = baseOffset;
+  lines.forEach((line, lineIndex) => {
+    const isHead = isHeadLine(line, lineIndex);
+
+    if (!isHead) {
+      const { spans, lineDeco } = scanBlockStructure(line);
+      for (const s of spans) ranges.push(s.deco.range(offset + s.from, offset + s.to));
+      if (lineDeco) ranges.push(lineDeco.range(offset));
+    }
+
+    for (const s of scanInlineFormats(line)) {
+      ranges.push(s.deco.range(offset + s.from, offset + s.to));
+    }
+
+    offset += line.length + 1;
+  });
+
+  return ranges;
+}
+
+/**
+ * Build a CM6 DecorationSet for the lightweight Markdown syntax supported
+ * inside the target section: inline formatting on every line, headings and
+ * lists on continuation lines only (never on an entry's own `- HH:MM` head
+ * line — see docs/staging/[open]轻量Markdown渲染.md for the rationale).
+ */
+export function buildMarkdownDecorations(
+  doc: string,
+  settings: SparkMemoSettings,
+): DecorationSet {
+  const section = findSection(doc, settings.targetHeading, settings.headingLevel);
+  if (!section) return Decoration.none;
+
+  const sectionText = doc.slice(section.from, section.to);
+  const ranges = scanMarkdownLines(sectionText, section.from, line =>
+    isEntryHeadLine(line, settings),
+  );
+
+  return Decoration.set(ranges, true);
+}
+
+/**
+ * Build a CM6 DecorationSet for the lightweight Markdown syntax inside the
+ * quick-capture input box. The box holds a single in-progress entry with no
+ * `- HH:MM` prefix yet (that's prepended by `buildEntryLine` at submit
+ * time), so the "head line" is simply line 1 — whatever the user types there
+ * ends up glued right after the timestamp, never at a real line start, so
+ * headings/lists typed there wouldn't actually take effect once submitted.
+ * Lines 2+ become indented continuation lines and get full support.
+ */
+export function buildCaptureMarkdownDecorations(doc: string): DecorationSet {
+  const ranges = scanMarkdownLines(doc, 0, (_line, lineIndex) => lineIndex === 0);
+  return Decoration.set(ranges, true);
 }
 
 // ── Capture-view helpers ───────────────────────────────────────────────────
