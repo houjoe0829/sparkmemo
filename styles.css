@@ -690,6 +690,23 @@
   line-height: 1.5;
   color: var(--text-normal);
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Code blocks (and any long unbroken token, e.g. a URL or API key, that
+   isn't inside a real fenced code block) must wrap within the bubble's own
+   width instead of forcing the whole card — and the timeline column with
+   it — wider than the sidebar. */
+.jp-timeline-bubble pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.jp-timeline-bubble code {
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 /* Dark theme adjustments */
