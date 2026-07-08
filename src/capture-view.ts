@@ -927,6 +927,12 @@ export class JournalCaptureView extends ItemView {
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
+    // Editing-mode pill — shown once an existing entry is loaded into the
+    // input box for editing. Sits above everything else so it doesn't
+    // compete for space with the capture-time/location pills near the
+    // action row. Clicking × cancels the edit.
+    this.editingPillEl = this.inputCardEl.createDiv({ cls: 'jp-capture-time-pill jp-capture-editing-pill jp-location-pill--hidden' });
+
     // Pending-image thumbnail strip — sits above the textarea, pushing it
     // down, so added images preview like an attachment card would.
     this.attachmentListEl = this.inputCardEl.createDiv({ cls: 'jp-capture-attachments jp-capture-attachments--empty' });
@@ -1645,10 +1651,6 @@ export class JournalCaptureView extends ItemView {
     // processing) doesn't lose the offer permanently.
     this.metadataHintPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
 
-    // Editing-mode pill — shown once an existing entry is loaded into the
-    // input box for editing. Clicking × cancels the edit.
-    this.editingPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
-
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
       attr: { 'aria-label': t('capture.submit') },
@@ -1885,11 +1887,10 @@ export class JournalCaptureView extends ItemView {
    * After clearing an applied capture-time or location pill, brings the
    * "apply photo info?" hint back if *both* pills are now gone and we still
    * remember what was applied — otherwise removing them would silently lose
-   * the offer instead of letting the user bring it back. New-entry
-   * composition only, same as the hint pill itself.
+   * the offer instead of letting the user bring it back. Applies whether
+   * composing a new entry or editing an existing one.
    */
   private maybeRestoreMetadataHintAfterClear(): void {
-    if (this.editingEntry) return;
     if (this.pendingCaptureOverride || this.pendingLocation) return;
     if (!this.lastAppliedMetadata) return;
     this.pendingMetadataHint = this.lastAppliedMetadata;
@@ -1997,6 +1998,10 @@ export class JournalCaptureView extends ItemView {
     this.pendingMetadataHint = null;
     this.lastAppliedMetadata = null;
     this.renderMetadataHintPill();
+    // Leftover from a previous entry's photo-time confirmation shouldn't
+    // silently carry into this edit.
+    this.pendingCaptureOverride = null;
+    this.renderCaptureTimePill();
 
     const { text: textWithoutLocation, location } = extractLocationTag(entry.text);
     const audioPaths = extractAudioEmbeds(textWithoutLocation);
@@ -2336,12 +2341,12 @@ export class JournalCaptureView extends ItemView {
     const result = await resultPromise;
 
     if (!result.useImageInfo) {
-      // Only outside an active edit — this hint is for composing a new
-      // entry, not for touching up an existing one.
-      if (!this.editingEntry) {
-        this.pendingMetadataHint = { capturedAt, diffMinutes, gpsCoord };
-        this.renderMetadataHintPill();
-      }
+      // Declined (or dismissed) — keep the offer around as a hint pill so
+      // the user can re-open this same modal later without re-attaching the
+      // photo. Applies while editing too: an uploaded photo's time/location
+      // should be just as re-offerable there as when composing a new entry.
+      this.pendingMetadataHint = { capturedAt, diffMinutes, gpsCoord };
+      this.renderMetadataHintPill();
       return;
     }
 
@@ -4536,10 +4541,12 @@ export class JournalCaptureView extends ItemView {
         this.textareaEl.placeholder = this.pickRandomPlaceholder();
         this.pendingImages = [];
         this.pendingAudio = [];
+        this.pendingCaptureOverride = null;
         this.pendingLocation = null;
         this.pendingMetadataHint = null;
         this.lastAppliedMetadata = null;
         this.renderAttachmentList();
+        this.renderCaptureTimePill();
         this.renderLocationPill();
         this.renderMetadataHintPill();
         this.renderEditingPill();
@@ -4602,9 +4609,12 @@ export class JournalCaptureView extends ItemView {
 
   /**
    * Rewrites the entry currently being edited (see `startEdit`) in place,
-   * preserving its original timestamp. Returns false (with a Notice already
-   * shown) on failure or if the underlying file changed under us since the
-   * menu was opened.
+   * preserving its original timestamp — unless the user applied a photo's
+   * EXIF capture time via `pendingCaptureOverride` while editing, in which
+   * case that time replaces it (only when the photo's date matches the day
+   * this entry already lives in; editing can't move an entry to a different
+   * day's note). Returns false (with a Notice already shown) on failure or
+   * if the underlying file changed under us since the menu was opened.
    */
   private async updateEditedEntry(raw: string): Promise<boolean> {
     const { day, entry } = this.editingEntry!;
@@ -4618,6 +4628,11 @@ export class JournalCaptureView extends ItemView {
       return false;
     }
 
+    const override = this.pendingCaptureOverride;
+    const newTimestamp = override && override.date.isSame(day.date, 'day')
+      ? override.time
+      : undefined;
+
     try {
       const content = await this.app.vault.read(file);
       const next = replaceEntryTextInSection(
@@ -4626,6 +4641,7 @@ export class JournalCaptureView extends ItemView {
         entry.lineIndex,
         entry.timestamp,
         raw,
+        newTimestamp,
       );
       if (next === content) {
         new Notice(t('notice.journalChangedRetry'));

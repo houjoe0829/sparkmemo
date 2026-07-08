@@ -549,7 +549,8 @@ export function removeAudioEmbedsFromEntry(
 
 /**
  * Replace one entry's body text in place, preserving its original timestamp
- * and list marker. Used by the "编辑" context-menu action.
+ * and list marker unless `newTimestamp` is given (e.g. an EXIF capture time
+ * applied while editing). Used by the "编辑" context-menu action.
  *
  * Rebuilds the head + continuation lines via `buildEntryLine` (so multi-line
  * input still gets proper soft-breaks) and splices them in at the entry's
@@ -565,6 +566,7 @@ export function replaceEntryTextInSection(
   lineIndex: number,
   timestamp: string,
   newText: string,
+  newTimestamp?: string,
 ): string {
   const section = findSection(
     content,
@@ -586,7 +588,7 @@ export function replaceEntryTextInSection(
   }
 
   const marker = lines[lineIndex].match(/^([-*+])\s+/)?.[1] ?? '-';
-  const newLine = buildEntryLine(newText, timestamp).replace(/^-/, marker);
+  const newLine = buildEntryLine(newText, newTimestamp ?? timestamp).replace(/^-/, marker);
 
   lines.splice(lineIndex, end - lineIndex, ...newLine.split('\n'));
 

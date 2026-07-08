@@ -370,6 +370,12 @@
   display: none;
 }
 
+/* Editing pill sits on its own row above the attachments/textarea, so it
+   needs bottom spacing that the inline action-row pills don't. */
+.jp-capture-editing-pill {
+  margin-bottom: 8px;
+}
+
 /* Location chip next to the timeline timestamp — same pill styling, but
    rendered as a clickable <a href="maps://..."> rather than a <div>. */
 .jp-location-chip {
