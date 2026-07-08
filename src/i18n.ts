@@ -201,7 +201,6 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.coordGeocodeFailed': '{{lat}}, {{lon}} (place name lookup failed)',
     'capture.coordLocating': 'Looking up place name…',
     'capture.retry': 'Retry',
-    'capture.openJournal': 'Open journal',
     'capture.jumpToDay': 'Jump to this day',
     'capture.metadataHintLabel': 'Tap to use photo time/location',
     'capture.metadataHintDismiss': 'Dismiss',
@@ -220,7 +219,6 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'notice.memoUpdated': '✏️ Updated',
     'notice.recordedToDate': '📅 Recorded to {{date}}\'s journal',
     'notice.updateFailed': '❌ Update failed: {{error}}',
-    'notice.noJournalFileForDate': '⚠️ No journal file for {{date}}',
 
     'stats.loadFailed': '❌ Failed to load: {{error}}',
     'stats.loadingData': 'Loading journal data…',
@@ -441,7 +439,6 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.coordGeocodeFailed': '{{lat}}, {{lon}}（获取地名失败）',
     'capture.coordLocating': '正在获取地名…',
     'capture.retry': '重试',
-    'capture.openJournal': '打开日记',
     'capture.jumpToDay': '跳转到当天',
     'capture.metadataHintLabel': '点击使用图片时间/位置信息',
     'capture.metadataHintDismiss': '关闭',
@@ -460,7 +457,6 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'notice.memoUpdated': '✏️ 已更新',
     'notice.recordedToDate': '📅 已记录到 {{date}} 的日记',
     'notice.updateFailed': '❌ 更新失败：{{error}}',
-    'notice.noJournalFileForDate': '⚠️ {{date}} 没有日记文件',
 
     'stats.loadFailed': '❌ 加载失败：{{error}}',
     'stats.loadingData': '正在加载日记数据…',

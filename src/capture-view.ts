@@ -154,6 +154,8 @@ export class JournalCaptureView extends ItemView {
     { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
   > | null = null;
   private tagAggLoading = false;
+  /** In-flight `loadTagIndex` scan, so concurrent callers await the same build instead of racing past a half-built index. */
+  private tagAggLoadPromise: Promise<void> | null = null;
   /** Non-null while viewing a single tag's memo list; null while viewing the tag list. */
   private selectedTag: string | null = null;
   /** Full paths (e.g. "#parent/child") of tag-tree nodes currently expanded in the tag list. */
@@ -799,6 +801,7 @@ export class JournalCaptureView extends ItemView {
         this.highlightKeyword(bubble, query);
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
+        this.attachTagClickHandlers(bubble);
       });
 
       const openMenu = (evt: MouseEvent) => {
@@ -877,6 +880,30 @@ export class JournalCaptureView extends ItemView {
         new ImagePreviewModal(this.app, img.getAttribute('src') ?? '', img.getAttribute('alt') ?? '').open();
       });
     }
+  }
+
+  /**
+   * Redirects clicks on rendered `#tag` links (Obsidian's own `a.tag`
+   * anchors) away from core's default tag search and into this plugin's
+   * tag aggregation tab instead.
+   */
+  private attachTagClickHandlers(bubble: HTMLElement) {
+    for (const a of Array.from(bubble.querySelectorAll<HTMLAnchorElement>('a.tag'))) {
+      a.addEventListener('click', evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        const tag = a.getAttribute('href') || a.textContent || '';
+        if (tag) void this.openTagAggregation(tag);
+      });
+    }
+  }
+
+  /** Switches to the tag aggregation tab and drills straight into `tag`. */
+  private async openTagAggregation(tag: string) {
+    const normalized = tag.startsWith('#') ? tag : `#${tag}`;
+    this.switchTab('tag');
+    await this.ensureTagIndexAndRenderList();
+    this.selectTag(normalized);
   }
 
   /** Walk DOM text nodes and wrap keyword occurrences in highlight spans. */
@@ -3257,6 +3284,7 @@ export class JournalCaptureView extends ItemView {
         .then(() => {
           this.applyImageGrid(bubble);
           this.attachImagePreviews(bubble);
+          this.attachTagClickHandlers(bubble);
         });
 
       // Context menu: copy / delete (with optional audio cleanup).
@@ -3458,6 +3486,7 @@ export class JournalCaptureView extends ItemView {
       void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
+        this.attachTagClickHandlers(bubble);
       });
 
       const openMenu = (evt: MouseEvent) => {
@@ -3477,8 +3506,17 @@ export class JournalCaptureView extends ItemView {
    * the vault 'modify'/'create'/'delete' listeners in onOpen, which null it
    * out) — mirrors `loadLocationIndex` but keys on tag name instead of city.
    */
-  private async loadTagIndex(): Promise<void> {
-    if (this.tagAggIndex || this.tagAggLoading) return;
+  /** Kicks off the scan on first call; concurrent/later callers await the same in-flight promise. */
+  private loadTagIndex(): Promise<void> {
+    if (this.tagAggIndex) return Promise.resolve();
+    if (this.tagAggLoadPromise) return this.tagAggLoadPromise;
+    this.tagAggLoadPromise = this.buildTagIndex().finally(() => {
+      this.tagAggLoadPromise = null;
+    });
+    return this.tagAggLoadPromise;
+  }
+
+  private async buildTagIndex(): Promise<void> {
     this.tagAggLoading = true;
     this.renderTopLevelMessage(t('tag.scanning'));
 
@@ -3934,6 +3972,7 @@ export class JournalCaptureView extends ItemView {
       void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
+        this.attachTagClickHandlers(bubble);
       });
 
       const openMenu = (evt: MouseEvent) => {
@@ -4140,6 +4179,7 @@ export class JournalCaptureView extends ItemView {
     void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
       this.applyImageGrid(bubble);
       this.attachImagePreviews(bubble);
+      this.attachTagClickHandlers(bubble);
     });
 
     const openMenu = (evt: MouseEvent) => {
@@ -4537,31 +4577,22 @@ export class JournalCaptureView extends ItemView {
     }
   }
 
-  /** Add a locate button to the right side of a day header card. */
+  /** Add a locate button to the right side of a day header card, jumping to that day in the capture timeline. */
   private addOpenNoteBtn(headerCard: HTMLElement, day: DaySection) {
     if (!day.filePath) return;
     const btn = headerCard.createEl('button', {
       cls: 'jp-timeline-open-btn',
-      attr: { 'aria-label': t('capture.openJournal') },
+      attr: { 'aria-label': t('capture.jumpToDay'), title: t('capture.jumpToDay') },
     });
     setIcon(btn, 'crosshair');
-    btn.addEventListener('click', () => void this.openDailyNoteByDate(day.date));
-  }
-
-  /** Open the daily note for `date` in a new center tab. */
-  private async openDailyNoteByDate(date: moment.Moment): Promise<void> {
-    try {
-      const file = getDailyNote(date, getAllDailyNotes()) as TFile | null;
-      if (!file) {
-        new Notice(t('notice.noJournalFileForDate', { date: date.format(t('stats.cellDateFormat')) }));
-        return;
+    btn.addEventListener('click', () => {
+      this.currentDate = day.date.clone().startOf('day');
+      if (this.currentTab === 'capture') {
+        void this.fullRebuild();
+      } else {
+        this.switchTab('capture');
       }
-      const leaf = this.app.workspace.getLeaf(false);
-      await leaf.openFile(file);
-    } catch (err) {
-      console.error('[Spark Memo] open daily note failed', err);
-      new Notice(t('notice.openFailed'));
-    }
+    });
   }
 
   // ── Mobile toolbar auto-hide ────────────────────────────────────────────
