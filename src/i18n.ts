@@ -180,6 +180,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.coordLocating': 'Looking up place name…',
     'capture.retry': 'Retry',
     'capture.openJournal': 'Open journal',
+    'capture.jumpToDay': 'Jump to this day',
     'capture.metadataHintLabel': 'Tap to use photo time/location',
     'capture.metadataHintDismiss': 'Dismiss',
 
@@ -397,6 +398,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'capture.coordLocating': '正在获取地名…',
     'capture.retry': '重试',
     'capture.openJournal': '打开日记',
+    'capture.jumpToDay': '跳转到当天',
     'capture.metadataHintLabel': '点击使用图片时间/位置信息',
     'capture.metadataHintDismiss': '关闭',
 

@@ -3783,6 +3783,19 @@ export class JournalCaptureView extends ItemView {
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
     headerText.createEl('div', { cls: 'jp-timeline-header-title', text: t('search.randomMemoLabel') });
+    const jumpBtn = headerCard.createEl('button', {
+      cls: 'jp-timeline-open-btn',
+      attr: { 'aria-label': t('capture.jumpToDay'), title: t('capture.jumpToDay') },
+    });
+    setIcon(jumpBtn, 'crosshair');
+    jumpBtn.addEventListener('click', () => {
+      this.currentDate = day.date.clone().startOf('day');
+      if (this.currentTab === 'capture') {
+        void this.fullRebuild();
+      } else {
+        this.switchTab('capture');
+      }
+    });
 
     const sourcePath = day.filePath ?? '';
     const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
@@ -4186,8 +4199,11 @@ export class JournalCaptureView extends ItemView {
         if (!isFuture) {
           cell.addEventListener('click', () => {
             this.currentDate = date.clone().startOf('day');
-            this.switchTab('capture');
-            void this.fullRebuild();
+            if (this.currentTab === 'capture') {
+              void this.fullRebuild();
+            } else {
+              this.switchTab('capture');
+            }
           });
         }
       }
