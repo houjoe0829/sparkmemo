@@ -596,6 +596,80 @@ export function replaceEntryTextInSection(
   return content.slice(0, section.from) + newSection + content.slice(section.to);
 }
 
+/** Matches an inline `#tag` token, requiring a line-start/whitespace boundary before the `#`. Purely-numeric tags (e.g. "#2026") still match here — callers filter those out separately, mirroring Obsidian's own tag rules. Shared with `extractEntryTags` in capture-view.ts. */
+export const TAG_TOKEN_RE = /(^|\s)#([\p{L}\p{N}_][\p{L}\p{N}_\-/]*)/gu;
+
+/**
+ * Applies `mapTag` to every `#tag` token found in `text` — the shared
+ * primitive behind tag rename / move-under-parent / merge / delete. `mapTag`
+ * receives a token exactly as written (e.g. "#work/meeting") and returns:
+ *   - the same string → left untouched
+ *   - a different string → the token is replaced with it
+ *   - null → the token is stripped out entirely
+ */
+export function rewriteTagsInText(text: string, mapTag: (tag: string) => string | null): string {
+  let changed = false;
+  const rewritten = text.replace(TAG_TOKEN_RE, (whole, boundary: string, raw: string) => {
+    const tag = `#${raw}`;
+    const mapped = mapTag(tag);
+    if (mapped === null) {
+      changed = true;
+      return boundary; // strip the tag, keep the separator it followed
+    }
+    if (mapped === tag) return whole;
+    changed = true;
+    return boundary + mapped;
+  });
+  // No tag actually touched — return the original untouched. Critically,
+  // this must be a hard bail-out, not just an optimization: a follow-on
+  // whitespace cleanup applied unconditionally would "fix" pre-existing
+  // double spaces (or the deliberate two-space Markdown soft break at a
+  // line's end) on every entry in the vault, not just ones we edited.
+  if (!changed) return text;
+  // A stripped tag can leave a doubled space/tab behind — collapse it, but
+  // only when followed by more content on the same line. Trailing
+  // whitespace (including a soft-break's two spaces) is left alone.
+  return rewritten.replace(/[ \t]{2,}(?=\S)/g, ' ');
+}
+
+/**
+ * Runs `rewriteTagsInText` over every entry in the target section, rewriting
+ * matched entries in place (bottom-to-top, so earlier `lineIndex`es stay
+ * valid while later ones get spliced). Returns the rewritten document plus
+ * how many entries actually changed, so the caller can skip a no-op write.
+ */
+export function rewriteTagsInSection(
+  content: string,
+  settings: SparkMemoSettings,
+  mapTag: (tag: string) => string | null,
+): { content: string; changedCount: number } {
+  const section = findSection(content, settings.targetHeading, settings.headingLevel);
+  if (!section) return { content, changedCount: 0 };
+
+  const sectionText = content.slice(section.from, section.to);
+  const lines = sectionText.split('\n');
+  const entries = parseJournalEntries(sectionText, settings.timestampPattern);
+
+  let changedCount = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    const newText = rewriteTagsInText(entry.text, mapTag);
+    if (newText === entry.text) continue;
+
+    let end = entry.lineIndex + 1;
+    while (end < lines.length && /^\s+\S/.test(lines[end])) end++;
+
+    const marker = lines[entry.lineIndex].match(/^([-*+])\s+/)?.[1] ?? '-';
+    const newLine = buildEntryLine(newText, entry.timestamp).replace(/^-/, marker);
+    lines.splice(entry.lineIndex, end - entry.lineIndex, ...newLine.split('\n'));
+    changedCount++;
+  }
+
+  if (changedCount === 0) return { content, changedCount: 0 };
+  const newSection = lines.join('\n');
+  return { content: content.slice(0, section.from) + newSection + content.slice(section.to), changedCount };
+}
+
 /**
  * Replaces the display name inside an entry's `[名字](geo:lat,lon)` location
  * tag — used by the timeline's "重试" button when the name was left as the

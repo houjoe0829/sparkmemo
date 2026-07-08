@@ -194,6 +194,13 @@
 .jp-tag-suggest-item:hover {
   background: var(--background-modifier-hover);
 }
+.jp-tag-suggest-item-parent {
+  color: var(--text-faint);
+}
+.jp-tag-suggest-item-leaf {
+  color: var(--text-normal);
+  font-weight: 600;
+}
 .jp-capture-button-row {
   display: inline-flex;
   flex-direction: row;
@@ -1527,6 +1534,72 @@
   background: var(--background-modifier-border);
   border-radius: 999px;
   padding: 1px 8px;
+}
+.jp-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+.jp-tag-item {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+}
+.jp-tag-item--parent {
+  background: color-mix(in srgb, var(--jp-tl-dot) 10%, var(--background-secondary));
+  border-color: color-mix(in srgb, var(--jp-tl-dot) 35%, var(--background-modifier-border));
+}
+.jp-tag-item--parent:hover {
+  background: color-mix(in srgb, var(--jp-tl-dot) 18%, var(--background-secondary));
+}
+.jp-tag-item--parent .jp-location-item-name {
+  font-weight: 600;
+}
+.jp-tag-item-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.jp-tag-item-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-tag-item--parent .jp-tag-item-chevron {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--jp-tl-dot) 22%, transparent);
+  color: var(--jp-tl-dot);
+}
+.jp-tag-item-chevron--spacer {
+  width: 14px;
+  cursor: default;
+}
+.jp-tag-rename-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.jp-tag-rename-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+}
+.jp-tag-delete-children-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 .jp-location-jump {
   cursor: pointer;

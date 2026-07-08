@@ -16,6 +16,7 @@
 
 import {
   Component,
+  FuzzySuggestModal,
   ItemView,
   MarkdownRenderer,
   MarkdownView,
@@ -39,6 +40,7 @@ import {
 
 import {
   JournalEntry,
+  TAG_TOKEN_RE,
   deleteEntryFromSection,
   extractAudioEmbeds,
   extractImageEmbeds,
@@ -47,6 +49,7 @@ import {
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
   replaceEntryTextInSection,
+  rewriteTagsInSection,
   stripAttachmentEmbeds,
   updateEntryLocationName,
 } from './section';
@@ -73,6 +76,21 @@ export const CAPTURE_VIEW_TYPE = 'spark-memo-capture-view';
  * any switch that doesn't handle it.
  */
 type DeleteMode = 'memo' | 'memo+audio' | 'audio-only';
+
+/** One node ("segment") of the `/`-nested tag tree used by the tag-aggregation tab. */
+interface TagTreeNode {
+  /** This segment's own name, e.g. "child" for "#parent/child". */
+  name: string;
+  /** Full tag path from root, e.g. "#parent/child". */
+  fullPath: string;
+  /** Aggregated data for memos tagged with exactly `fullPath`, if any were. */
+  own: { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> } | null;
+  children: Map<string, TagTreeNode>;
+  /** own.count plus every descendant's count. */
+  totalCount: number;
+  /** Most recent lastTs across own + all descendants. */
+  lastTs: number;
+}
 
 /** Per-day rendered chunk in the infinite-scroll timeline. */
 interface DaySection {
@@ -138,6 +156,8 @@ export class JournalCaptureView extends ItemView {
   private tagAggLoading = false;
   /** Non-null while viewing a single tag's memo list; null while viewing the tag list. */
   private selectedTag: string | null = null;
+  /** Full paths (e.g. "#parent/child") of tag-tree nodes currently expanded in the tag list. */
+  private expandedTagPaths: Set<string> = new Set();
 
   // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
@@ -2666,9 +2686,30 @@ export class JournalCaptureView extends ItemView {
 
     const all = this.getVaultTags();
     const q = query.toLowerCase();
-    const matches = (q.length === 0 ? all : all.filter(t => t.tag.slice(1).toLowerCase().includes(q)))
-      .slice(0, 8)
-      .map(t => t.tag);
+    let matches: string[];
+    if (q.length === 0) {
+      matches = all.slice(0, 8).map(t => t.tag);
+    } else {
+      // Rank so that, for nested tags, matching the leaf segment (e.g. typing
+      // "child" for "#parent/child") or the tag's own prefix outranks a
+      // plain substring match buried in an unrelated parent segment.
+      matches = all
+        .map(t => {
+          const body = t.tag.slice(1).toLowerCase();
+          const segments = body.split('/');
+          let score: number;
+          if (body === q) score = 0;
+          else if (body.startsWith(q)) score = 1;
+          else if (segments.some(seg => seg.startsWith(q))) score = 2;
+          else if (body.includes(q)) score = 3;
+          else score = -1;
+          return { tag: t.tag, count: t.count, score };
+        })
+        .filter(t => t.score >= 0)
+        .sort((a, b) => a.score - b.score || b.count - a.count)
+        .slice(0, 8)
+        .map(t => t.tag);
+    }
 
     if (matches.length === 0) {
       this.closeTagSuggest();
@@ -2687,8 +2728,14 @@ export class JournalCaptureView extends ItemView {
     this.tagSuggestMatches.forEach((tag, i) => {
       const item = this.tagSuggestEl.createDiv({
         cls: 'jp-tag-suggest-item' + (i === this.tagSuggestIndex ? ' jp-tag-suggest-item--active' : ''),
-        text: tag,
       });
+      // Dim the parent segment(s) so the matched/leaf segment stands out for nested tags.
+      const segments = tag.slice(1).split('/');
+      item.createSpan({ text: '#' });
+      if (segments.length > 1) {
+        item.createSpan({ cls: 'jp-tag-suggest-item-parent', text: `${segments.slice(0, -1).join('/')}/` });
+      }
+      item.createSpan({ cls: 'jp-tag-suggest-item-leaf', text: segments[segments.length - 1] });
       // mousedown (not click) fires before the textarea's blur handler runs.
       item.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -3497,6 +3544,46 @@ export class JournalCaptureView extends ItemView {
     }
   }
 
+  /** Group the flat `tagAggIndex` into a `/`-nested tree, e.g. "#parent/child" hangs under "#parent". */
+  private buildTagTree(): Map<string, TagTreeNode> {
+    const roots = new Map<string, TagTreeNode>();
+    if (!this.tagAggIndex) return roots;
+
+    for (const [tag, data] of this.tagAggIndex) {
+      const segments = tag.slice(1).split('/').filter(s => s.length > 0);
+      if (segments.length === 0) continue;
+      let siblings = roots;
+      let path = '';
+      let node: TagTreeNode | null = null;
+      for (const segment of segments) {
+        path += (path ? '/' : '#') + segment;
+        let next = siblings.get(segment);
+        if (!next) {
+          next = { name: segment, fullPath: path, own: null, children: new Map(), totalCount: 0, lastTs: 0 };
+          siblings.set(segment, next);
+        }
+        node = next;
+        siblings = next.children;
+      }
+      if (node) node.own = data;
+    }
+
+    const computeTotals = (node: TagTreeNode): void => {
+      let count = node.own?.count ?? 0;
+      let lastTs = node.own?.lastTs ?? 0;
+      for (const child of node.children.values()) {
+        computeTotals(child);
+        count += child.totalCount;
+        lastTs = Math.max(lastTs, child.lastTs);
+      }
+      node.totalCount = count;
+      node.lastTs = lastTs;
+    };
+    for (const root of roots.values()) computeTotals(root);
+
+    return roots;
+  }
+
   /** Render the top-level "all tags" list, sorted by most-recently-used first. */
   private renderTagList() {
     this.disposeDays();
@@ -3510,18 +3597,253 @@ export class JournalCaptureView extends ItemView {
 
     this.tagAggTitleEl.setText(t('tag.allCount', { count: String(this.tagAggIndex.size) }));
 
-    const tags = [...this.tagAggIndex.entries()].sort((a, b) => b[1].lastTs - a[1].lastTs);
-    const listEl = this.timelineEl.createDiv({ cls: 'jp-location-list' });
-    for (const [tag, data] of tags) {
-      const item = listEl.createDiv({ cls: 'jp-location-item' });
-      const iconEl = item.createSpan({ cls: 'jp-location-item-icon' });
-      setIcon(iconEl, 'tag');
-      item.createDiv({ cls: 'jp-location-item-name', text: tag });
-      item.createDiv({ cls: 'jp-location-item-count', text: `${data.count}` });
-      item.addEventListener('click', () => this.selectTag(tag));
+    const tree = this.buildTagTree();
+    const roots = [...tree.values()].sort((a, b) => b.lastTs - a.lastTs);
+    const listEl = this.timelineEl.createDiv({ cls: 'jp-tag-list' });
+    for (const node of roots) {
+      this.renderTagNode(node, listEl, 0);
     }
 
     this.exhausted = true;
+  }
+
+  /** Render one tag-tree node (and, if expanded, its children) as a row. */
+  private renderTagNode(node: TagTreeNode, container: HTMLElement, depth: number) {
+    const hasChildren = node.children.size > 0;
+    const isExpanded = this.expandedTagPaths.has(node.fullPath);
+
+    const item = container.createDiv({
+      cls: 'jp-location-item jp-tag-item' + (hasChildren ? ' jp-tag-item--parent' : ''),
+    });
+    item.style.marginLeft = `${depth * 18}px`;
+
+    const chevronEl = item.createSpan({ cls: 'jp-tag-item-chevron' + (hasChildren ? '' : ' jp-tag-item-chevron--spacer') });
+    if (hasChildren) {
+      setIcon(chevronEl, isExpanded ? 'chevron-down' : 'chevron-right');
+      chevronEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleTagExpand(node.fullPath);
+      });
+    }
+
+    const iconEl = item.createSpan({ cls: 'jp-location-item-icon' });
+    setIcon(iconEl, 'tag');
+    item.createDiv({ cls: 'jp-location-item-name', text: depth === 0 ? `#${node.name}` : node.name });
+    item.createDiv({ cls: 'jp-location-item-count', text: `${node.totalCount}` });
+
+    item.addEventListener('click', () => {
+      if (node.own) this.selectTag(node.fullPath);
+      else if (hasChildren) this.toggleTagExpand(node.fullPath);
+    });
+
+    // Management (rename/move/merge/delete) lives on right-click rather than
+    // an always-reserved row button — desktop-only, same as the timeline's
+    // entry context menu (there's no touch equivalent for a hover affordance).
+    if (!Platform.isMobile) {
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this.openTagMenu(e, node);
+      });
+    }
+
+    if (hasChildren && isExpanded) {
+      const children = [...node.children.values()].sort((a, b) => b.lastTs - a.lastTs);
+      for (const child of children) {
+        this.renderTagNode(child, container, depth + 1);
+      }
+    }
+  }
+
+  private toggleTagExpand(path: string) {
+    if (this.expandedTagPaths.has(path)) this.expandedTagPaths.delete(path);
+    else this.expandedTagPaths.add(path);
+    void this.ensureTagIndexAndRenderList();
+  }
+
+  /**
+   * `tagAggIndex` can go stale between renders — the vault's own `modify`
+   * listener nulls it out on any daily-note write, including ones this view
+   * itself just made (rename/move/merge/delete). `loadTagIndex` is a no-op
+   * when the index is already warm, so this is cheap on the common path.
+   */
+  private async ensureTagIndexAndRenderList(): Promise<void> {
+    await this.loadTagIndex();
+    if (this.currentTab === 'tag' && this.selectedTag === null) {
+      this.renderTagList();
+    }
+  }
+
+  /** Every tag-tree node's full path (own-tagged or pure category nodes alike), for move/merge target pickers. */
+  private collectAllTagPaths(): string[] {
+    const paths: string[] = [];
+    const walk = (nodes: Map<string, TagTreeNode>) => {
+      for (const node of nodes.values()) {
+        paths.push(node.fullPath);
+        walk(node.children);
+      }
+    };
+    walk(this.buildTagTree());
+    return paths.sort();
+  }
+
+  /** "重命名 / 移到子标签下 / 合并到另一个标签 / 删除" — the tag row's hover menu. */
+  private openTagMenu(evt: MouseEvent, node: TagTreeNode) {
+    const menu = new Menu();
+
+    menu.addItem(item =>
+      item
+        .setTitle(t('tag.manage.rename'))
+        .setIcon('pencil')
+        .onClick(() => {
+          new TagRenameModal(this.app, node.name, (newName) => {
+            void this.handleRenameTag(node, newName);
+          }).open();
+        }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle(t('tag.manage.moveUnder'))
+        .setIcon('corner-right-down')
+        .onClick(() => {
+          void this.openTagTargetPicker(node, 'move');
+        }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle(t('tag.manage.mergeInto'))
+        .setIcon('git-merge')
+        .onClick(() => {
+          void this.openTagTargetPicker(node, 'merge');
+        }),
+    );
+
+    menu.addSeparator();
+
+    menu.addItem(item =>
+      item
+        .setTitle(t('tag.manage.delete'))
+        .setIcon('trash-2')
+        .onClick(() => {
+          new TagDeleteConfirmModal(this.app, {
+            tag: node.fullPath,
+            hasChildren: node.children.size > 0,
+            ownCount: node.own?.count ?? 0,
+            totalCount: node.totalCount,
+            onConfirm: (includeChildren) => {
+              void this.runTagRewrite(
+                this.tagDeleteMapper(node.fullPath, includeChildren),
+                includeChildren ? 'tag.manage.deleteDoneWithChildren' : 'tag.manage.deleteDone',
+              );
+            },
+          }).open();
+        }),
+    );
+
+    menu.showAtMouseEvent(evt);
+  }
+
+  /** Opens a fuzzy picker of candidate tags for "move under" / "merge into" — excludes the node itself and its own descendants (would create a cycle). */
+  private async openTagTargetPicker(node: TagTreeNode, mode: 'move' | 'merge'): Promise<void> {
+    // `tagAggIndex` may have gone stale since this row was rendered (see
+    // `ensureTagIndexAndRenderList`) — reload before reading it here too,
+    // otherwise the candidate list can silently come back empty.
+    await this.loadTagIndex();
+    const candidates = this.collectAllTagPaths().filter(
+      p => p !== node.fullPath && !p.startsWith(`${node.fullPath}/`),
+    );
+    if (mode === 'merge' && candidates.length === 0) {
+      new Notice(t('tag.manage.noOtherTags'));
+      return;
+    }
+    const topLevelOption = mode === 'move' ? t('tag.manage.topLevelOption') : null;
+    const items = topLevelOption ? [topLevelOption, ...candidates] : candidates;
+
+    new TagPickerModal(this.app, items, mode, (choice) => {
+      if (mode === 'move') {
+        const newFull = choice === topLevelOption ? `#${node.name}` : `${choice}/${node.name}`;
+        void this.handleRenameTagPath(node.fullPath, newFull, 'tag.manage.moveDone');
+      } else {
+        void this.handleRenameTagPath(node.fullPath, choice, 'tag.manage.mergeDone');
+      }
+    }).open();
+  }
+
+  /** Renames just this node's own segment, keeping its current parent (use "move" to change parent). */
+  private async handleRenameTag(node: TagTreeNode, newName: string): Promise<void> {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === node.name) return;
+    if (/[\s#/]/.test(trimmed)) {
+      new Notice(t('tag.manage.invalidName'));
+      return;
+    }
+    const idx = node.fullPath.lastIndexOf('/');
+    const parentPrefix = idx === -1 ? '' : node.fullPath.slice(0, idx);
+    const newFull = parentPrefix ? `${parentPrefix}/${trimmed}` : `#${trimmed}`;
+    await this.handleRenameTagPath(node.fullPath, newFull, 'tag.manage.renameDone');
+  }
+
+  /** Shared rewrite for rename / move / merge — all three are "replace this tag (and its subtree) with a new full path". */
+  private async handleRenameTagPath(oldFull: string, newFull: string, successKey: string): Promise<void> {
+    if (newFull === oldFull) return;
+    await this.runTagRewrite(this.tagRenamePrefixMapper(oldFull, newFull), successKey);
+  }
+
+  private tagRenamePrefixMapper(oldFull: string, newFull: string): (tag: string) => string | null {
+    return (tag: string) => {
+      if (tag === oldFull) return newFull;
+      if (tag.startsWith(`${oldFull}/`)) return newFull + tag.slice(oldFull.length);
+      return tag;
+    };
+  }
+
+  private tagDeleteMapper(oldFull: string, includeChildren: boolean): (tag: string) => string | null {
+    return (tag: string) => {
+      if (tag === oldFull) return null;
+      if (includeChildren && tag.startsWith(`${oldFull}/`)) return null;
+      return tag;
+    };
+  }
+
+  /** Batch-rewrites tags across every daily note's Memo section, refreshes the tag index/cache, and reports the result. */
+  private async runTagRewrite(mapTag: (tag: string) => string | null, successKey: string): Promise<void> {
+    try {
+      const { filesChanged, entriesChanged } = await this.applyTagRewrite(mapTag);
+      if (entriesChanged === 0) {
+        new Notice(t('tag.manage.noChanges'));
+        return;
+      }
+      this.tagAggIndex = null;
+      this.tagCache = null;
+      await this.ensureTagIndexAndRenderList();
+      new Notice(t(successKey, { count: String(entriesChanged), files: String(filesChanged) }));
+    } catch (err) {
+      console.error('[Spark Memo] tag rewrite failed', err);
+      new Notice(t('tag.manage.failed', { error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
+  /** Reads every daily note, rewrites tag tokens in its Memo section via `mapTag`, and writes back only the files that actually changed. */
+  private async applyTagRewrite(mapTag: (tag: string) => string | null): Promise<{ filesChanged: number; entriesChanged: number }> {
+    const all = getAllDailyNotes() as Record<string, TFile>;
+    let filesChanged = 0;
+    let entriesChanged = 0;
+    for (const file of Object.values(all)) {
+      if (!(file instanceof TFile)) continue;
+      let content: string;
+      try {
+        content = await this.app.vault.read(file);
+      } catch {
+        continue;
+      }
+      const { content: next, changedCount } = rewriteTagsInSection(content, this.plugin.settings, mapTag);
+      if (changedCount === 0) continue;
+      await this.app.vault.modify(file, next);
+      filesChanged++;
+      entriesChanged += changedCount;
+    }
+    return { filesChanged, entriesChanged };
   }
 
   /** Drill into a single tag: render its memos as day-grouped timeline entries, newest first. */
@@ -4699,12 +5021,10 @@ function extractLocationTag(text: string): { text: string; location: EntryLocati
  * matches (e.g. "#2026") are excluded since Obsidian doesn't recognize those
  * as tags either.
  */
-const ENTRY_TAG_RE_GLOBAL = /(^|\s)#([\p{L}\p{N}_][\p{L}\p{N}_\-/]*)/gu;
-
 /** Distinct `#tag` names (deduped, `#`-prefixed) found in an entry's text. */
 function extractEntryTags(text: string): string[] {
   const seen = new Set<string>();
-  for (const m of text.matchAll(ENTRY_TAG_RE_GLOBAL)) {
+  for (const m of text.matchAll(TAG_TOKEN_RE)) {
     const raw = m[2];
     if (/^\p{N}+$/u.test(raw)) continue;
     seen.add(`#${raw}`);
@@ -4981,6 +5301,150 @@ class DeleteConfirmModal extends Modal {
       this.opts.onConfirm();
     });
     // Initial focus on cancel — safer default for a destructive dialog.
+    window.setTimeout(() => cancelBtn.focus(), 0);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+// ── Tag management modals (rename / move / merge / delete) ──────────────
+
+/** Small text-input prompt for renaming a tag's own segment name. */
+class TagRenameModal extends Modal {
+  private currentName: string;
+  private onSubmit: (newName: string) => void;
+
+  constructor(app: import('obsidian').App, currentName: string, onSubmit: (newName: string) => void) {
+    super(app);
+    this.currentName = currentName;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen(): void {
+    const { contentEl, titleEl } = this;
+    titleEl.setText(t('tag.manage.renameTitle'));
+    titleEl.addClass('jp-modal-title-flush');
+
+    contentEl.addClass('jp-tag-rename-modal');
+
+    const inputEl = contentEl.createEl('input', {
+      type: 'text',
+      cls: 'jp-tag-rename-input',
+      value: this.currentName,
+    });
+    inputEl.select();
+
+    const submit = () => {
+      const value = inputEl.value;
+      this.close();
+      this.onSubmit(value);
+    };
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submit();
+      }
+    });
+
+    const actions = contentEl.createDiv({ cls: 'jp-delete-confirm-actions' });
+    const cancelBtn = actions.createEl('button', {
+      cls: 'jp-delete-confirm-cancel',
+      text: t('capture.cancel'),
+    });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const confirmBtn = actions.createEl('button', {
+      cls: 'mod-cta jp-delete-confirm-confirm',
+      text: t('tag.manage.renameAction'),
+    });
+    confirmBtn.addEventListener('click', submit);
+
+    window.setTimeout(() => inputEl.focus(), 0);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** Fuzzy-suggest modal for picking a "move under" parent or "merge into" target tag. */
+class TagPickerModal extends FuzzySuggestModal<string> {
+  private items: string[];
+
+  constructor(app: import('obsidian').App, items: string[], mode: 'move' | 'merge', private onChoose: (item: string) => void) {
+    super(app);
+    this.items = items;
+    this.setPlaceholder(mode === 'move' ? t('tag.manage.movePlaceholder') : t('tag.manage.mergePlaceholder'));
+  }
+
+  getItems(): string[] {
+    return this.items;
+  }
+
+  getItemText(item: string): string {
+    return item;
+  }
+
+  onChooseItem(item: string): void {
+    this.onChoose(item);
+  }
+}
+
+/** Confirms a tag delete, offering to also drop its child tags when the node has any. */
+class TagDeleteConfirmModal extends Modal {
+  private opts: {
+    tag: string;
+    hasChildren: boolean;
+    ownCount: number;
+    totalCount: number;
+    onConfirm: (includeChildren: boolean) => void;
+  };
+
+  constructor(app: import('obsidian').App, opts: TagDeleteConfirmModal['opts']) {
+    super(app);
+    this.opts = opts;
+  }
+
+  onOpen(): void {
+    const { contentEl, titleEl } = this;
+    titleEl.setText(t('tag.manage.deleteTitle'));
+    titleEl.addClass('jp-modal-title-flush');
+
+    contentEl.addClass('jp-delete-confirm');
+
+    contentEl.createEl('p', {
+      cls: 'jp-delete-confirm-question',
+      text: t('tag.manage.deleteQuestion', { tag: this.opts.tag, count: String(this.opts.ownCount) }),
+    });
+
+    let includeChildren = false;
+    if (this.opts.hasChildren) {
+      const label = contentEl.createEl('label', { cls: 'jp-tag-delete-children-option' });
+      const checkbox = label.createEl('input', { type: 'checkbox' });
+      checkbox.addEventListener('change', () => {
+        includeChildren = checkbox.checked;
+      });
+      label.createSpan({ text: t('tag.manage.deleteIncludeChildren', { count: String(this.opts.totalCount - this.opts.ownCount) }) });
+    }
+
+    const actions = contentEl.createDiv({ cls: 'jp-delete-confirm-actions' });
+    const cancelBtn = actions.createEl('button', {
+      cls: 'jp-delete-confirm-cancel',
+      text: t('capture.cancel'),
+    });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const confirmBtn = actions.createEl('button', {
+      cls: 'mod-warning jp-delete-confirm-confirm',
+      text: t('capture.deleteAction'),
+    });
+    confirmBtn.addEventListener('click', () => {
+      this.close();
+      this.opts.onConfirm(includeChildren);
+    });
     window.setTimeout(() => cancelBtn.focus(), 0);
   }
 
