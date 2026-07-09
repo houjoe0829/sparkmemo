@@ -997,8 +997,18 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.addEventListener('input', () => {
       this.refreshSubmitState();
       this.autoResizeTextarea();
+      // Run synchronously (desktop / normal case) and again on the next tick.
+      // On iOS software keyboards, `selectionStart` sometimes still points
+      // *before* the just-inserted character when 'input' fires — the sync
+      // pass would see caret=0 for a value of "#" and bail out. Deferring
+      // gives the selection a chance to catch up so a lone "#" still opens
+      // the popup.
       this.updateTagSuggestions();
       this.updateMentionSuggestions();
+      window.setTimeout(() => {
+        this.updateTagSuggestions();
+        this.updateMentionSuggestions();
+      }, 0);
     });
     // Cursor moves (arrow keys, clicks) don't fire 'input' — re-check the
     // trigger so the popup follows the caret / closes when it leaves the tag.
@@ -2696,12 +2706,14 @@ export class JournalCaptureView extends ItemView {
     // Walk back from the caret to the nearest "#" that starts the current
     // word — bail if we hit whitespace/newline first (not currently in a tag).
     let start = caret;
-    while (start > 0 && !/\s/.test(value[start - 1]) && value[start - 1] !== '#') start--;
-    if (start === 0 || value[start - 1] !== '#') {
+    // Accept both half-width '#' and full-width '＃' (U+FF03) — iOS/iPadOS
+    // Chinese keyboards insert the full-width form when in Chinese mode.
+    while (start > 0 && !/\s/.test(value[start - 1]) && value[start - 1] !== '#' && value[start - 1] !== '＃') start--;
+    if (start === 0 || (value[start - 1] !== '#' && value[start - 1] !== '＃')) {
       this.closeTagSuggest();
       return;
     }
-    start--; // include the '#'
+    start--; // include the '#' / '＃'
     const query = value.slice(start + 1, caret);
     // Obsidian tag syntax: any-script letters/numbers plus -/_// (nested
     // tags), no spaces or punctuation — and never purely numeric (Obsidian
@@ -2870,8 +2882,10 @@ export class JournalCaptureView extends ItemView {
     // names may contain spaces, so (unlike tags) we don't stop at whitespace,
     // only at a newline or once we've scanned an unreasonably long span.
     let start = caret;
-    while (start > 0 && caret - start < 100 && value[start - 1] !== '@' && value[start - 1] !== '\n') start--;
-    if (start === 0 || value[start - 1] !== '@') {
+    // Accept both half-width '@' and full-width '＠' (U+FF20) — iOS/iPadOS
+    // Chinese keyboards insert the full-width form when in Chinese mode.
+    while (start > 0 && caret - start < 100 && value[start - 1] !== '@' && value[start - 1] !== '＠' && value[start - 1] !== '\n') start--;
+    if (start === 0 || (value[start - 1] !== '@' && value[start - 1] !== '＠')) {
       this.closeMentionSuggest();
       return;
     }
