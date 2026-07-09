@@ -245,6 +245,10 @@ export class JournalCaptureView extends ItemView {
    */
   private editingEntry: { day: DaySection; entry: JournalEntry } | null = null;
   private editingPillEl!: HTMLElement;
+  /** Wrapper above the textarea that holds editing / capture-time / location / metadata-hint pills side by side. */
+  private topPillRowEl!: HTMLElement;
+  /** The 📍 button (mobile only). Kept as a ref so it can be disabled while a `pendingLocation` is already set. */
+  private geoBtnEl: HTMLButtonElement | null = null;
 
   // DOM references (stats pane)
   private statsToolbarEl!: HTMLElement;
@@ -974,11 +978,14 @@ export class JournalCaptureView extends ItemView {
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
+    // Top-of-card pill row — holds the editing pill plus the capture-time /
+    // location / metadata-hint pills, all lined up above the textarea so the
+    // context of what will be submitted is visible in one place.
+    this.topPillRowEl = this.inputCardEl.createDiv({ cls: 'jp-capture-top-pill-row' });
+
     // Editing-mode pill — shown once an existing entry is loaded into the
-    // input box for editing. Sits above everything else so it doesn't
-    // compete for space with the capture-time/location pills near the
-    // action row. Clicking × cancels the edit.
-    this.editingPillEl = this.inputCardEl.createDiv({ cls: 'jp-capture-time-pill jp-capture-editing-pill jp-location-pill--hidden' });
+    // input box for editing. Clicking × cancels the edit.
+    this.editingPillEl = this.topPillRowEl.createDiv({ cls: 'jp-capture-time-pill jp-capture-editing-pill jp-location-pill--hidden' });
 
     // Pending-image thumbnail strip — sits above the textarea, pushing it
     // down, so added images preview like an attachment card would.
@@ -1642,6 +1649,24 @@ export class JournalCaptureView extends ItemView {
       textarea.dispatchEvent(new Event('input'));
     });
 
+    // "📍" button — grabs the current GPS coordinate via the browser
+    // Geolocation API, reverse-geocodes it, and drops the result into
+    // `pendingLocation` (same pill / same submit path as the EXIF flow).
+    // Mobile only: on Obsidian desktop, `navigator.geolocation` silently
+    // times out because Electron ships no Google Geolocation API key, so
+    // exposing the button there is worse than useless.
+    if (Platform.isMobile) {
+      const geoBtn = buttonRow.createEl('button', {
+        cls: 'jp-capture-geo-btn',
+        attr: { 'aria-label': t('capture.addLocation') },
+      });
+      setIcon(geoBtn, 'map-pin');
+      geoBtn.addEventListener('click', () => {
+        void this.pickCurrentLocation(geoBtn);
+      });
+      this.geoBtnEl = geoBtn;
+    }
+
     // Shared stop path: stop recording + restore the idle UI (icon group,
     // submit button) with a smooth transition. The actual text insert /
     // transcription runs async in onstop, independent of this UI restore.
@@ -1692,21 +1717,22 @@ export class JournalCaptureView extends ItemView {
     // Stop button centered under the waveform.
     recStopBtn.addEventListener('click', () => void doStop());
 
-    // Capture-time override pill — shown to the right of the icon-button
-    // pill once the user opts into using an image's capture time instead of
-    // "now". Removable, since the user may change their mind before submit.
-    this.captureTimePillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-capture-time-pill--hidden' });
+    // Capture-time override pill — shown once the user opts into using an
+    // image's capture time instead of "now". Removable, since the user may
+    // change their mind before submit. Rendered in the top pill row above
+    // the textarea so all pending-entry context lives in one place.
+    this.captureTimePillEl = this.topPillRowEl.createDiv({ cls: 'jp-capture-time-pill jp-capture-time-pill--hidden' });
 
-    // Location override pill — shown to the right of the capture-time pill
-    // once a photo's EXIF GPS coordinate has been detected. Removable, same
-    // as the capture-time pill.
-    this.locationPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
+    // Location override pill — shown once a photo's EXIF GPS coordinate has
+    // been detected (or the user tapped 📍 on mobile). Removable, same as
+    // the capture-time pill.
+    this.locationPillEl = this.topPillRowEl.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
 
     // "Apply photo info?" hint pill — shown after the confirm modal was
     // declined/dismissed but the photo still carries detected time/location,
     // so an accidental dismiss (misclick while several photos were still
     // processing) doesn't lose the offer permanently.
-    this.metadataHintPillEl = leftGroup.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
+    this.metadataHintPillEl = this.topPillRowEl.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
@@ -1909,6 +1935,13 @@ export class JournalCaptureView extends ItemView {
     this.locationPillEl.empty();
     const loc = this.pendingLocation;
     this.locationPillEl.toggleClass('jp-location-pill--hidden', !loc);
+    // Keep the 📍 button in sync: disabled while a location is already
+    // pending, so the user can't accidentally overwrite it — they have to
+    // clear the existing pill first.
+    if (this.geoBtnEl) {
+      this.geoBtnEl.disabled = !!loc;
+      this.geoBtnEl.toggleClass('is-disabled', !!loc);
+    }
     if (!loc) return;
 
     const iconEl = this.locationPillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
@@ -1995,6 +2028,53 @@ export class JournalCaptureView extends ItemView {
     this.pendingMetadataHint = null;
     this.renderMetadataHintPill();
     await this.confirmAndApplyMetadata(hint.capturedAt, hint.diffMinutes, hint.gpsCoord);
+  }
+
+  /**
+   * Grabs the device's current GPS coordinate and turns it into a pending
+   * location pill, same shape as the EXIF-driven flow. Reverse geocoding
+   * runs after the pill appears so the user isn't blocked on it — the pill
+   * shows "locating…" until the name resolves (or a retry button on failure).
+   */
+  private async pickCurrentLocation(btn: HTMLButtonElement): Promise<void> {
+    if (!('geolocation' in navigator)) {
+      notice(t('notice.geolocationUnsupported'));
+      return;
+    }
+    if (btn.hasClass('is-loading')) return;
+    btn.addClass('is-loading');
+    btn.disabled = true;
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 30000,
+        });
+      });
+      const latitude = pos.coords.latitude;
+      const longitude = pos.coords.longitude;
+      this.pendingLocation = { latitude, longitude, name: null };
+      this.renderLocationPill();
+      const name = await reverseGeocodeCity(latitude, longitude);
+      if (
+        this.pendingLocation &&
+        this.pendingLocation.latitude === latitude &&
+        this.pendingLocation.longitude === longitude
+      ) {
+        this.pendingLocation.name = name;
+        this.renderLocationPill();
+        if (name === null) notice(t('notice.geocodeFailedCoordOnly'));
+      }
+    } catch (err) {
+      const msg = err instanceof GeolocationPositionError
+        ? err.message || String(err.code)
+        : err instanceof Error ? err.message : String(err);
+      notice(t('notice.geolocationFailed', { error: msg }));
+    } finally {
+      btn.removeClass('is-loading');
+      btn.disabled = false;
+    }
   }
 
   /** Re-runs reverse geocoding for the pending location's coordinate. */

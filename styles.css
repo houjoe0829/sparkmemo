@@ -211,7 +211,8 @@
 }
 .jp-capture-plus-btn,
 .jp-capture-tag-btn,
-.jp-capture-mention-btn {
+.jp-capture-mention-btn,
+.jp-capture-geo-btn {
   background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary)) !important;
   border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent) !important;
   outline: none !important;
@@ -233,13 +234,39 @@
 }
 .jp-capture-plus-btn:hover,
 .jp-capture-tag-btn:hover,
-.jp-capture-mention-btn:hover {
+.jp-capture-mention-btn:hover,
+.jp-capture-geo-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
 }
+.jp-capture-geo-btn.is-disabled,
+.jp-capture-geo-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.jp-capture-geo-btn.is-loading {
+  cursor: wait;
+  position: relative;
+}
+.jp-capture-geo-btn.is-loading::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 250deg, var(--jp-tl-dot) 360deg);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: jp-geo-spin 0.9s linear infinite;
+  pointer-events: none;
+}
+@keyframes jp-geo-spin {
+  to { transform: rotate(360deg); }
+}
 .jp-capture-plus-btn svg,
 .jp-capture-tag-btn svg,
-.jp-capture-mention-btn svg {
+.jp-capture-mention-btn svg,
+.jp-capture-geo-btn svg {
   width: 18px !important;
   height: 18px !important;
   display: block;
@@ -248,8 +275,13 @@
   stroke: currentColor;
   stroke-width: 2;
 }
+.jp-capture-geo-btn svg {
+  width: 15px !important;
+  height: 15px !important;
+}
 .jp-capture-tag-btn,
-.jp-capture-mention-btn {
+.jp-capture-mention-btn,
+.jp-capture-geo-btn {
   font-size: 15px;
   font-weight: 600;
   line-height: 1;
@@ -377,10 +409,17 @@
   display: none;
 }
 
-/* Editing pill sits on its own row above the attachments/textarea, so it
-   needs bottom spacing that the inline action-row pills don't. */
-.jp-capture-editing-pill {
+/* Top-of-card pill row — sits above the attachments/textarea and holds the
+   editing / capture-time / location / metadata-hint pills side by side.
+   Collapses (no bottom spacing) when every child pill is hidden. */
+.jp-capture-top-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 8px;
+}
+.jp-capture-top-pill-row:not(:has(> *:not(.jp-capture-time-pill--hidden):not(.jp-location-pill--hidden))) {
+  display: none;
 }
 
 /* Location chip next to the timeline timestamp — same pill styling, but

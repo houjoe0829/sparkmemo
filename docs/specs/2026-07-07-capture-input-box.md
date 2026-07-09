@@ -8,25 +8,28 @@
 
 ## 整体结构
 
-输入卡片（`.jp-capture-card`）自上而下三层：
+输入卡片（`.jp-capture-card`）自上而下四层：
 
-1. **附件预览条**（`.jp-capture-attachments`）— 有待提交的图片/录音时才显示，为空时靠 `--empty` 类隐藏
-2. **文本输入区**（`.jp-capture-input-wrapper` → `.jp-capture-input` textarea）— 多行，随内容自动增高（最高 240px），Enter 换行、不提交
-3. **操作行**（`.jp-capture-actions`）— 左侧图标按钮组 + 状态 pill，右侧提交按钮
+1. **状态 pill 行**（`.jp-capture-top-pill-row`）— 编辑中 / 时间覆盖 / 位置 / "使用图片信息？"提示四个 pill 横排，全部为空时整行不占高度
+2. **附件预览条**（`.jp-capture-attachments`）— 有待提交的图片/录音时才显示，为空时靠 `--empty` 类隐藏
+3. **文本输入区**（`.jp-capture-input-wrapper` → `.jp-capture-input` textarea）— 多行，随内容自动增高（最高 240px），Enter 换行、不提交
+4. **操作行**（`.jp-capture-actions`）— 左侧图标按钮组，右侧提交按钮
 
 ```
-┌─────────────────────────────┐
-│ [图片缩略图 / 录音条]（可选）  │
-├─────────────────────────────┤
-│ 多行 textarea                │
-├─────────────────────────────┤
-│ [+] [#] [@]  [时间pill][位置pill][编辑pill]        [↑提交] │
-└─────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│ [编辑pill][时间pill][位置pill][图片信息pill]     │
+├───────────────────────────────────────────────┤
+│ [图片缩略图 / 录音条]（可选）                     │
+├───────────────────────────────────────────────┤
+│ 多行 textarea                                  │
+├───────────────────────────────────────────────┤
+│ [+] [#] [@] [📍(仅移动端)]              [↑提交]  │
+└───────────────────────────────────────────────┘
 ```
 
 ## 左侧图标按钮组（`.jp-capture-button-row`）
 
-三个等大（30×30，圆形）图标按钮并排：
+三到四个等大（30×30，圆形）图标按钮并排（📍 按钮仅移动端出现）：
 
 ### "+" 按钮
 
@@ -41,9 +44,15 @@
 
 点击时在光标当前位置插入一个字面的 `#` 字符（等同于手动敲键盘），随后触发一次 `input` 事件——因此会立刻联动弹出下方的标签建议下拉框。按钮本身不做任何标签逻辑判断，纯粹是"帮用户按下这个键"。
 
-### "@" 按钮（本次新增）
+### "@" 按钮
 
 点击时在光标当前位置插入一个字面的 `@` 字符，随后触发一次 `input` 事件，联动弹出下方的笔记引用建议下拉框。用法与 "#" 按钮完全对称。
+
+### "📍" 按钮（仅移动端）
+
+`Platform.isMobile` 为真时才创建。点击调用 `navigator.geolocation.getCurrentPosition`，成功后写入 `pendingLocation` 并触发反查地名，走的是和 EXIF GPS 完全一样的 pill / 提交链路，产出 `[地名](geo:lat,lon)`。加载中按钮外圈显示一段带渐隐尾巴的紫色弧形（conic-gradient 圆环 + `mask` 挖空成 2px 细环，`jp-geo-spin` 0.9s 顺时针一圈）；已经有 `pendingLocation` 时按钮自动置灰、`disabled=true`，避免误覆盖，删除位置 pill 后自动恢复。
+
+桌面端不出现该按钮，因为 Obsidian Electron 未内置 Google Geolocation Key，`navigator.geolocation` 会静默 timeout；此前调研过用 IP 定位（ipapi.co）兜底，但精度和 VPN 影响综合考虑不做，只留手机端入口。
 
 ## 标签（`#`）建议下拉框
 
@@ -112,17 +121,18 @@
 
 确认候选项时，用 Obsidian 的 `metadataCache.fileToLinktext(file, '', true)` 计算「同名笔记消歧后的最短链接文本」，插入 `[[链接文本]] `（末尾带空格）。这是标准的 Obsidian wiki 链接语法，落盘后可以正常点击跳转，也会被 Obsidian 的反向链接/图谱识别。
 
-## 状态 pill（`leftGroup`，"+"/"#"/"@" 按钮右侧）
+## 状态 pill（`.jp-capture-top-pill-row`，textarea 顶部）
 
-三个可选 pill，按优先级从左到右排列，互不冲突可同时出现：
+四个可选 pill，同放在输入框上方的横向 flex 行里，全部为空时整行折叠不占高度：
 
 | Pill | 出现条件 | 内容 | 可关闭 |
 |---|---|---|---|
-| 时间覆盖 pill | 图片 EXIF 拍摄时间与"现在"不一致，用户选择使用拍摄时间 | 时钟图标 + `HH:MM`（跨天则加 `MM-DD`） | ✕ 恢复为"现在" |
-| 位置 pill | 图片 EXIF 带 GPS 坐标 | 定位图标 + 反查到的地名（反查失败显示原始坐标 + 重试按钮） | ✕ 移除坐标 |
 | 编辑中 pill | 从时间线条目的右键菜单进入编辑模式 | "编辑中"文案 | ✕ 取消编辑，清空输入框 |
+| 时间覆盖 pill | 图片 EXIF 拍摄时间与"现在"不一致，用户选择使用拍摄时间 | 时钟图标 + `HH:MM`（跨天则加 `MM-DD`） | ✕ 恢复为"现在" |
+| 位置 pill | 图片 EXIF 带 GPS 坐标 / 移动端点击 📍 | 定位图标 + 反查到的地名（反查失败显示原始坐标 + 重试按钮） | ✕ 移除坐标 |
+| "使用图片信息？"提示 pill | 用户在 EXIF 确认弹窗里选择"不使用"后，仍保留一个 hint，允许后悔重新应用 | 提示图标 + 文案 | ✕ 关闭 |
 
-时间覆盖 pill 和位置 pill 都在最后一张待提交图片被移除时自动清空。
+时间覆盖 pill 和位置 pill 都在最后一张待提交图片被移除时自动清空；位置 pill 存在时会顺带把移动端的 📍 按钮置灰（见上）。
 
 ## 提交按钮
 
@@ -134,7 +144,7 @@
 
 ## 涉及的 i18n key
 
-`capture.add`、`capture.addTag`、`capture.addMention`（本次新增）、`capture.uploadImage`、`capture.recordAudio`、`capture.submit`、`capture.removeImage`、`capture.removeAudio`、`capture.revertToNow`、`capture.editing`、`capture.cancelEdit`、`location.retryGeocode`、`location.remove` 等，均在 `i18n.ts` 的 `dictionaries.en` / `dictionaries.zh` 里成对维护。
+`capture.add`、`capture.addTag`、`capture.addMention`、`capture.addLocation`、`capture.uploadImage`、`capture.recordAudio`、`capture.submit`、`capture.removeImage`、`capture.removeAudio`、`capture.revertToNow`、`capture.editing`、`capture.cancelEdit`、`location.retryGeocode`、`location.remove`、`notice.locating`、`notice.geolocationUnsupported`、`notice.geolocationFailed` 等，均在 `i18n.ts` 的 `dictionaries.en` / `dictionaries.zh` 里成对维护。
 
 ## 已知限制
 
