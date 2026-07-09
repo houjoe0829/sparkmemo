@@ -22,7 +22,6 @@ import {
   MarkdownView,
   Menu,
   Modal,
-  Notice,
   Platform,
   TFile,
   WorkspaceLeaf,
@@ -66,6 +65,7 @@ import {
 } from './stats';
 import type SparkMemoPlugin from './main';
 import { t, currentLocale } from './i18n';
+import { notice } from './notice';
 
 export const CAPTURE_VIEW_TYPE = 'spark-memo-capture-view';
 
@@ -1434,11 +1434,11 @@ export class JournalCaptureView extends ItemView {
 
     const startRecording = async () => {
       if (this.pendingImages.length > 0) {
-        new Notice(t('notice.imageAddedNoRecording'));
+        notice(t('notice.imageAddedNoRecording'));
         return;
       }
       if (this.pendingAudio.length >= JournalCaptureView.MAX_PENDING_AUDIO) {
-        new Notice(t('notice.maxOneRecording'));
+        notice(t('notice.maxOneRecording'));
         return;
       }
       try {
@@ -1491,7 +1491,7 @@ export class JournalCaptureView extends ItemView {
               try {
                 text = (await this.transcribeAudio(audioBlob)).trim();
               } catch (err) {
-                new Notice(t('notice.transcribeFailed', { error: err instanceof Error ? err.message : String(err) }));
+                notice(t('notice.transcribeFailed', { error: err instanceof Error ? err.message : String(err) }));
               }
             }
             // Drain any still-in-flight live segments before we touch the
@@ -1503,7 +1503,7 @@ export class JournalCaptureView extends ItemView {
             }
             this.addPendingAudio(audioFile, duration);
           } catch (err) {
-            new Notice(t('notice.recordingSaveFailed', { error: err instanceof Error ? err.message : String(err) }));
+            notice(t('notice.recordingSaveFailed', { error: err instanceof Error ? err.message : String(err) }));
           } finally {
             // RecBar fades out and the action bar (icon group + NOTE button)
             // comes back together — the user sees the result and the controls
@@ -1573,10 +1573,10 @@ export class JournalCaptureView extends ItemView {
 
         recordingTimeout = window.setTimeout(() => {
           void stopRecording();
-          new Notice(t('notice.recordingAutoStopped'));
+          notice(t('notice.recordingAutoStopped'));
         }, 5 * 60 * 1000);
       } catch (err) {
-        new Notice(t('notice.micAccessFailed', { error: err instanceof Error ? err.message : String(err) }));
+        notice(t('notice.micAccessFailed', { error: err instanceof Error ? err.message : String(err) }));
       }
     };
 
@@ -1895,7 +1895,7 @@ export class JournalCaptureView extends ItemView {
     clearBtn.addEventListener('click', () => {
       this.pendingCaptureOverride = null;
       this.renderCaptureTimePill();
-      new Notice(t('notice.revertedToNow'));
+      notice(t('notice.revertedToNow'));
       this.maybeRestoreMetadataHintAfterClear();
     });
   }
@@ -2011,7 +2011,7 @@ export class JournalCaptureView extends ItemView {
     ) {
       this.pendingLocation.name = name;
       this.renderLocationPill();
-      if (name === null) new Notice(t('notice.geocodeFailedCoordOnly'));
+      if (name === null) notice(t('notice.geocodeFailedCoordOnly'));
     }
   }
 
@@ -2088,7 +2088,7 @@ export class JournalCaptureView extends ItemView {
 
     const missingCount = (audioPaths.length - (audioFile ? 1 : 0)) + (imagePaths.length - imageFiles.length);
     if (missingCount > 0) {
-      new Notice(t('notice.attachmentsMissing', { count: String(missingCount) }));
+      notice(t('notice.attachmentsMissing', { count: String(missingCount) }));
     }
 
     this.textareaEl.focus();
@@ -2173,7 +2173,7 @@ export class JournalCaptureView extends ItemView {
     const name = await reverseGeocodeCity(location.latitude, location.longitude);
     if (!name) {
       retryBtn.disabled = false;
-      new Notice(t('notice.geocodeFailedRetry'));
+      notice(t('notice.geocodeFailedRetry'));
       return;
     }
 
@@ -2188,11 +2188,11 @@ export class JournalCaptureView extends ItemView {
     );
     if (next === content) {
       retryBtn.disabled = false;
-      new Notice(t('notice.locationTagNotFound'));
+      notice(t('notice.locationTagNotFound'));
       return;
     }
     await this.app.vault.modify(file, next);
-    new Notice(t('notice.locationNameUpdated', { name }));
+    notice(t('notice.locationNameUpdated', { name }));
   }
 
   /**
@@ -2202,17 +2202,17 @@ export class JournalCaptureView extends ItemView {
    */
   private async addImageFiles(files: File[]): Promise<void> {
     if (this.pendingAudio.length > 0) {
-      new Notice(t('notice.audioAddedNoImage'));
+      notice(t('notice.audioAddedNoImage'));
       return;
     }
     const room = JournalCaptureView.MAX_PENDING_IMAGES - this.pendingImages.length;
     if (room <= 0) {
-      new Notice(t('notice.maxImages', { max: String(JournalCaptureView.MAX_PENDING_IMAGES) }));
+      notice(t('notice.maxImages', { max: String(JournalCaptureView.MAX_PENDING_IMAGES) }));
       return;
     }
     const accepted = files.slice(0, room);
     if (files.length > accepted.length) {
-      new Notice(t('notice.maxImagesIgnored', { max: String(JournalCaptureView.MAX_PENDING_IMAGES), ignored: String(files.length - accepted.length) }));
+      notice(t('notice.maxImagesIgnored', { max: String(JournalCaptureView.MAX_PENDING_IMAGES), ignored: String(files.length - accepted.length) }));
     }
 
     try {
@@ -2231,7 +2231,7 @@ export class JournalCaptureView extends ItemView {
       }
       if (compressedCount > 0) {
         const savedPct = Math.round((1 - compressedTotal / originalTotal) * 100);
-        new Notice(
+        notice(
           t('notice.imagesCompressed', {
             count: String(compressedCount),
             before: formatBytes(originalTotal),
@@ -2245,7 +2245,7 @@ export class JournalCaptureView extends ItemView {
       // memory here.
       await this.maybeCheckImageMetadata(accepted);
     } catch (err) {
-      new Notice(t('notice.imageSaveFailed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('notice.imageSaveFailed', { error: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -2449,7 +2449,7 @@ export class JournalCaptureView extends ItemView {
         });
       }
     }
-    new Notice(t('notice.metadataApplied', { parts: appliedParts.join(t('capture.metadataJoiner')) }));
+    notice(t('notice.metadataApplied', { parts: appliedParts.join(t('capture.metadataJoiner')) }));
   }
 
   private async saveAudioToVault(blob: Blob): Promise<TFile> {
@@ -3806,7 +3806,7 @@ export class JournalCaptureView extends ItemView {
       p => p !== node.fullPath && !p.startsWith(`${node.fullPath}/`),
     );
     if (mode === 'merge' && candidates.length === 0) {
-      new Notice(t('tag.manage.noOtherTags'));
+      notice(t('tag.manage.noOtherTags'));
       return;
     }
     const topLevelOption = mode === 'move' ? t('tag.manage.topLevelOption') : null;
@@ -3827,7 +3827,7 @@ export class JournalCaptureView extends ItemView {
     const trimmed = newName.trim();
     if (!trimmed || trimmed === node.name) return;
     if (/[\s#/]/.test(trimmed)) {
-      new Notice(t('tag.manage.invalidName'));
+      notice(t('tag.manage.invalidName'));
       return;
     }
     const idx = node.fullPath.lastIndexOf('/');
@@ -3863,16 +3863,16 @@ export class JournalCaptureView extends ItemView {
     try {
       const { filesChanged, entriesChanged } = await this.applyTagRewrite(mapTag);
       if (entriesChanged === 0) {
-        new Notice(t('tag.manage.noChanges'));
+        notice(t('tag.manage.noChanges'));
         return;
       }
       this.tagAggIndex = null;
       this.tagCache = null;
       await this.ensureTagIndexAndRenderList();
-      new Notice(t(successKey, { count: String(entriesChanged), files: String(filesChanged) }));
+      notice(t(successKey, { count: String(entriesChanged), files: String(filesChanged) }));
     } catch (err) {
       console.error('[Spark Memo] tag rewrite failed', err);
-      new Notice(t('tag.manage.failed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('tag.manage.failed', { error: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -4003,13 +4003,13 @@ export class JournalCaptureView extends ItemView {
     try {
       const file = this.app.vault.getAbstractFileByPath(filePath);
       if (!(file instanceof TFile)) {
-        new Notice(t('notice.journalFileNotFound'));
+        notice(t('notice.journalFileNotFound'));
         return;
       }
       const content = await this.app.vault.cachedRead(file);
       const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
       if (!section) {
-        new Notice(t('notice.journalSectionNotFound'));
+        notice(t('notice.journalSectionNotFound'));
         return;
       }
       const lineOffset = content.slice(0, section.from).split('\n').length - 1;
@@ -4024,7 +4024,7 @@ export class JournalCaptureView extends ItemView {
       }
     } catch (err) {
       console.error('[Spark Memo] open entry failed', err);
-      new Notice(t('notice.openFailed'));
+      notice(t('notice.openFailed'));
     }
   }
 
@@ -4732,10 +4732,10 @@ export class JournalCaptureView extends ItemView {
   private async copyEntry(entry: JournalEntry): Promise<void> {
     try {
       await navigator.clipboard.writeText(entry.text);
-      new Notice(t('notice.copied'));
+      notice(t('notice.copied'));
     } catch (err) {
       console.error('[Spark Memo] copy failed', err);
-      new Notice(t('notice.copyFailed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('notice.copyFailed', { error: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -4797,12 +4797,12 @@ export class JournalCaptureView extends ItemView {
     audioPaths: string[],
   ): Promise<void> {
     if (!day.filePath) {
-      new Notice(t('notice.journalFileNotFound'));
+      notice(t('notice.journalFileNotFound'));
       return;
     }
     const file = this.app.vault.getAbstractFileByPath(day.filePath);
     if (!(file instanceof TFile)) {
-      new Notice(t('notice.journalFileNotFound'));
+      notice(t('notice.journalFileNotFound'));
       return;
     }
 
@@ -4815,14 +4815,14 @@ export class JournalCaptureView extends ItemView {
       if (next === content) {
         // No-op means our lineIndex no longer matches a head line — the file
         // changed under us. Refresh and bail rather than mangling content.
-        new Notice(t('notice.journalChangedRetry'));
+        notice(t('notice.journalChangedRetry'));
         await this.refreshDay(day);
         return;
       }
       await this.app.vault.modify(file, next);
     } catch (err) {
       console.error('[Spark Memo] delete entry failed', err);
-      new Notice(t('notice.deleteFailed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('notice.deleteFailed', { error: err instanceof Error ? err.message : String(err) }));
       return;
     }
 
@@ -4848,23 +4848,23 @@ export class JournalCaptureView extends ItemView {
 
     // User-visible toast — tuned per mode so the message is unambiguous.
     if (mode === 'memo') {
-      new Notice(t('notice.memoDeleted'));
+      notice(t('notice.memoDeleted'));
     } else if (mode === 'memo+audio') {
       if (missing === audioPaths.length) {
-        new Notice(t('notice.memoDeletedAudioMissing'));
+        notice(t('notice.memoDeletedAudioMissing'));
       } else if (trashed === audioPaths.length) {
-        new Notice(t('notice.memoAndAudioDeleted', { count: String(trashed) }));
+        notice(t('notice.memoAndAudioDeleted', { count: String(trashed) }));
       } else {
-        new Notice(t('notice.memoDeletedAudioPartial', { trashed: String(trashed), total: String(audioPaths.length) }));
+        notice(t('notice.memoDeletedAudioPartial', { trashed: String(trashed), total: String(audioPaths.length) }));
       }
     } else {
       // audio-only
       if (missing === audioPaths.length) {
-        new Notice(t('notice.audioLinkRemovedMissing'));
+        notice(t('notice.audioLinkRemovedMissing'));
       } else if (trashed === audioPaths.length) {
-        new Notice(t('notice.audioDeleted', { count: String(trashed) }));
+        notice(t('notice.audioDeleted', { count: String(trashed) }));
       } else {
-        new Notice(t('notice.audioLinkRemovedPartial', { trashed: String(trashed), total: String(audioPaths.length) }));
+        notice(t('notice.audioLinkRemovedPartial', { trashed: String(trashed), total: String(audioPaths.length) }));
       }
     }
   }
@@ -4889,7 +4889,7 @@ export class JournalCaptureView extends ItemView {
       : bodyText;
 
     if (!appHasDailyNotesPluginLoaded()) {
-      new Notice(t('notice.dailyNotesRequired'));
+      notice(t('notice.dailyNotesRequired'));
       return;
     }
 
@@ -4918,7 +4918,7 @@ export class JournalCaptureView extends ItemView {
         this.renderMetadataHintPill();
         this.renderEditingPill();
         this.autoResizeTextarea();
-        new Notice(t('notice.memoUpdated'));
+        notice(t('notice.memoUpdated'));
         return;
       }
 
@@ -4962,11 +4962,11 @@ export class JournalCaptureView extends ItemView {
         const scroller = this.containerEl.children[1] as HTMLElement;
         scroller.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        new Notice(t('notice.recordedToDate', { date: writtenDay.format('YYYY-MM-DD') }));
+        notice(t('notice.recordedToDate', { date: writtenDay.format('YYYY-MM-DD') }));
       }
     } catch (err) {
       console.error('[Spark Memo] submit failed', err);
-      new Notice(t('notice.writeFailed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('notice.writeFailed', { error: err instanceof Error ? err.message : String(err) }));
     } finally {
       this.submitBtn.removeClass('jp-capture-submit--loading');
       setIcon(this.submitBtn, 'arrow-up');
@@ -4986,12 +4986,12 @@ export class JournalCaptureView extends ItemView {
   private async updateEditedEntry(raw: string): Promise<boolean> {
     const { day, entry } = this.editingEntry!;
     if (!day.filePath) {
-      new Notice(t('notice.journalFileNotFound'));
+      notice(t('notice.journalFileNotFound'));
       return false;
     }
     const file = this.app.vault.getAbstractFileByPath(day.filePath);
     if (!(file instanceof TFile)) {
-      new Notice(t('notice.journalFileNotFound'));
+      notice(t('notice.journalFileNotFound'));
       return false;
     }
 
@@ -5011,7 +5011,7 @@ export class JournalCaptureView extends ItemView {
         newTimestamp,
       );
       if (next === content) {
-        new Notice(t('notice.journalChangedRetry'));
+        notice(t('notice.journalChangedRetry'));
         await this.refreshDay(day);
         return false;
       }
@@ -5019,7 +5019,7 @@ export class JournalCaptureView extends ItemView {
       return true;
     } catch (err) {
       console.error('[Spark Memo] update entry failed', err);
-      new Notice(t('notice.updateFailed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('notice.updateFailed', { error: err instanceof Error ? err.message : String(err) }));
       return false;
     }
   }

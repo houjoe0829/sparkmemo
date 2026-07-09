@@ -4,7 +4,6 @@ import {
   FuzzySuggestModal,
   MarkdownPostProcessorContext,
   MarkdownView,
-  Notice,
   Platform,
   Plugin,
   PluginSettingTab,
@@ -48,6 +47,7 @@ import {
 } from './section';
 import { CAPTURE_VIEW_TYPE, JournalCaptureView } from './capture-view';
 import { t } from './i18n';
+import { notice } from './notice';
 
 // ── CM6 utilities ───────────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ export default class SparkMemoPlugin extends Plugin {
     targetDate?: moment.Moment,
   ): Promise<boolean> {
     if (!appHasDailyNotesPluginLoaded()) {
-      new Notice(t('notice.dailyNotesRequired'));
+      notice(t('notice.dailyNotesRequired'));
       return false;
     }
     const trimmed = text.trim();
@@ -161,7 +161,7 @@ export default class SparkMemoPlugin extends Plugin {
       return true;
     } catch (err) {
       console.error('[Spark Memo] writeJournalEntry failed', err);
-      new Notice(t('notice.writeFailed', { error: err instanceof Error ? err.message : String(err) }));
+      notice(t('notice.writeFailed', { error: err instanceof Error ? err.message : String(err) }));
       return false;
     }
   }
@@ -223,7 +223,7 @@ export default class SparkMemoPlugin extends Plugin {
         });
 
         if (blocked) {
-          new Notice(t('notice.timestampReadonly'));
+          notice(t('notice.timestampReadonly'));
           return []; // reject the transaction
         }
 
@@ -643,7 +643,7 @@ class SparkMemoSettingTab extends PluginSettingTab {
               this.plugin.settings.timestampPattern = value;
               await this.plugin.saveSettings();
             } catch {
-              new Notice(t('notice.invalidRegex'));
+              notice(t('notice.invalidRegex'));
             }
           }),
       );

@@ -2035,3 +2035,18 @@
   color: var(--text-faint);
   text-align: center;
 }
+
+.jp-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.jp-notice__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.jp-notice__icon .svg-icon {
+  width: 1em;
+  height: 1em;
+}
