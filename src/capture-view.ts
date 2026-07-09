@@ -2929,13 +2929,28 @@ export class JournalCaptureView extends ItemView {
 
     const all = this.getVaultFiles();
     const q = query.toLowerCase();
-    // With no query, lean on the recency ordering from getVaultFiles() as-is.
-    // Once the user starts typing, prefer name-prefix matches over
-    // mid-name matches (both groups keep their relative recency order),
-    // since a prefix match is almost always the note they mean.
+    // Notes currently open in a tab are almost always what the user is
+    // reaching for — surface them first. Computed fresh each keystroke since
+    // tab state changes independently of vault mtime.
+    const openPaths = new Set<string>();
+    this.app.workspace.getLeavesOfType('markdown').forEach((leaf) => {
+      const file = (leaf.view as any)?.file as TFile | undefined;
+      if (file) openPaths.add(file.path);
+    });
+    const byOpenThenRecency = (a: TFile, b: TFile) => {
+      const ao = openPaths.has(a.path) ? 1 : 0;
+      const bo = openPaths.has(b.path) ? 1 : 0;
+      if (ao !== bo) return bo - ao;
+      return b.stat.mtime - a.stat.mtime;
+    };
+    // With no query, lean on the recency ordering from getVaultFiles() as-is,
+    // but lift open tabs to the top. Once the user starts typing, prefer
+    // name-prefix matches over mid-name matches (both groups keep their
+    // open-tabs-first + recency order), since a prefix match is almost
+    // always the note they mean.
     let matches: TFile[];
     if (q.length === 0) {
-      matches = all;
+      matches = all.slice().sort(byOpenThenRecency);
     } else {
       const startsWith: TFile[] = [];
       const contains: TFile[] = [];
@@ -2944,6 +2959,8 @@ export class JournalCaptureView extends ItemView {
         if (name.startsWith(q)) startsWith.push(f);
         else if (name.includes(q)) contains.push(f);
       }
+      startsWith.sort(byOpenThenRecency);
+      contains.sort(byOpenThenRecency);
       matches = startsWith.concat(contains);
     }
     matches = matches.slice(0, 8);
