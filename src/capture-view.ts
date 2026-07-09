@@ -171,7 +171,7 @@ export class JournalCaptureView extends ItemView {
   private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
   /** Vault-wide tag list (frontmatter + inline `#tags`), sorted by usage. Rebuilt lazily; invalidated on metadata changes. */
-  private tagCache: { tag: string; count: number }[] | null = null;
+  private tagCache: { tag: string; count: number; mtime: number }[] | null = null;
   private tagSuggestEl!: HTMLElement;
   /** Character range in `textareaEl.value` of the `#partial` currently being completed, or null while the popup is closed. */
   private tagSuggestRange: { start: number; end: number } | null = null;
@@ -2675,21 +2675,31 @@ export class JournalCaptureView extends ItemView {
 
   // ── Tag ("#") suggestion popup ──────────────────────────────────────────
 
-  /** Every tag used anywhere in the vault (frontmatter + inline), most-used first. Cached until metadata changes. */
-  private getVaultTags(): { tag: string; count: number }[] {
+  /**
+   * Every tag used anywhere in the vault (frontmatter + inline), most-used first.
+   * `mtime` = max file-modification time across all files carrying the tag, used as
+   * a "last touched" fallback when the tag browser's precise per-entry index isn't
+   * built yet or the tag only appears in frontmatter / non-daily notes.
+   * Cached until metadata changes.
+   */
+  private getVaultTags(): { tag: string; count: number; mtime: number }[] {
     if (this.tagCache) return this.tagCache;
     const counts = new Map<string, number>();
+    const mtimes = new Map<string, number>();
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cache = this.app.metadataCache.getFileCache(file);
       if (!cache) continue;
       const tags = getAllTags(cache);
       if (!tags) continue;
+      const mtime = file.stat.mtime;
       for (const tag of tags) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        const prev = mtimes.get(tag) ?? 0;
+        if (mtime > prev) mtimes.set(tag, mtime);
       }
     }
     const list = Array.from(counts.entries())
-      .map(([tag, count]) => ({ tag, count }))
+      .map(([tag, count]) => ({ tag, count, mtime: mtimes.get(tag) ?? 0 }))
       .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
     this.tagCache = list;
     return list;
@@ -2727,7 +2737,22 @@ export class JournalCaptureView extends ItemView {
     const q = query.toLowerCase();
     let matches: string[];
     if (q.length === 0) {
-      matches = all.slice(0, 8).map(t => t.tag);
+      // Sort by "last touched" — the max of (a) the memo entry's stated
+      // timestamp if the tag browser has been opened and built its index, and
+      // (b) the file's mtime. The max handles backfilled entries: if the
+      // entry says "09:00 yesterday" but you actually typed it today, mtime
+      // wins and the tag still surfaces as recent. Tags with no signal
+      // (mtime = 0) fall back to count-based order via the tiebreakers.
+      const agg = this.tagAggIndex;
+      matches = all
+        .map(t => {
+          const entryTs = agg?.get(t.tag)?.lastTs ?? 0;
+          const lastTs = Math.max(entryTs, t.mtime);
+          return { tag: t.tag, count: t.count, lastTs };
+        })
+        .sort((a, b) => b.lastTs - a.lastTs || b.count - a.count || a.tag.localeCompare(b.tag))
+        .slice(0, 8)
+        .map(t => t.tag);
     } else {
       // Rank so that, for nested tags, matching the leaf segment (e.g. typing
       // "child" for "#parent/child") or the tag's own prefix outranks a
