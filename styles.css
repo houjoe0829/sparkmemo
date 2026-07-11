@@ -16,7 +16,6 @@
   /* Monospace keeps time digits aligned */
   font-family: var(
     --font-monospace,
-    ui-monospace,
     "Cascadia Code",
     "Fira Code",
     monospace
@@ -1940,7 +1939,7 @@
   display: grid;
   grid-auto-columns: var(--jp-stats-cell-size);
   grid-auto-flow: column;
-  column-gap: var(--jp-stats-cell-gap);
+  gap: var(--jp-stats-cell-gap);
   height: 13px;
 }
 .jp-stats-monthlabel {
@@ -1955,7 +1954,7 @@
   display: grid;
   grid-auto-columns: var(--jp-stats-cell-size);
   grid-auto-flow: column;
-  column-gap: var(--jp-stats-cell-gap);
+  gap: var(--jp-stats-cell-gap);
 }
 .jp-stats-col {
   display: grid;
@@ -2088,4 +2087,28 @@
 .jp-notice__icon .svg-icon {
   width: 1em;
   height: 1em;
+}
+
+/* ── Settings preview badge ────────────────────────────────────────── */
+.jp-settings-preview {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.jp-settings-preview-label {
+  color: var(--text-muted);
+}
+
+/* ── Off-screen mirror div for measuring textarea caret position ───── */
+.jp-caret-mirror {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  top: 0;
+  left: -9999px;
 }

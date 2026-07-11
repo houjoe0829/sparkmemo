@@ -2740,9 +2740,9 @@ export class JournalCaptureView extends ItemView {
   }
 
   private autoResizeTextarea() {
-    this.textareaEl.style.height = 'auto';
+    this.textareaEl.setCssStyles({ height: 'auto' });
     const next = Math.min(this.textareaEl.scrollHeight, 240);
-    this.textareaEl.style.height = `${next}px`;
+    this.textareaEl.setCssStyles({ height: `${next}px` });
   }
 
   // ── Tag ("#") suggestion popup ──────────────────────────────────────────
@@ -2891,15 +2891,14 @@ export class JournalCaptureView extends ItemView {
       'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
       'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize',
     ];
+    const copied: Record<string, string> = {};
     for (const prop of props) {
-      (mirror.style as any)[prop] = (style as any)[prop];
+      copied[prop] = style.getPropertyValue(
+        prop.replace(/[A-Z]/g, m => '-' + m.toLowerCase()),
+      );
     }
-    mirror.style.position = 'absolute';
-    mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
-    mirror.style.wordWrap = 'break-word';
-    mirror.style.top = '0';
-    mirror.style.left = '-9999px';
+    mirror.addClass('jp-caret-mirror');
+    mirror.setCssStyles(copied as Partial<CSSStyleDeclaration>);
     mirror.textContent = ta.value.slice(0, charIndex);
     const marker = document.createElement('span');
     marker.textContent = '​';
@@ -3075,15 +3074,14 @@ export class JournalCaptureView extends ItemView {
       'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
       'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize',
     ];
+    const copied: Record<string, string> = {};
     for (const prop of props) {
-      (mirror.style as any)[prop] = (style as any)[prop];
+      copied[prop] = style.getPropertyValue(
+        prop.replace(/[A-Z]/g, m => '-' + m.toLowerCase()),
+      );
     }
-    mirror.style.position = 'absolute';
-    mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
-    mirror.style.wordWrap = 'break-word';
-    mirror.style.top = '0';
-    mirror.style.left = '-9999px';
+    mirror.addClass('jp-caret-mirror');
+    mirror.setCssStyles(copied as Partial<CSSStyleDeclaration>);
     mirror.textContent = ta.value.slice(0, charIndex);
     const marker = document.createElement('span');
     marker.textContent = '​';

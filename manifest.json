@@ -1,7 +1,7 @@
 {
   "id": "spark-memo",
   "name": "Spark Memo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.8.7",
   "description": "Highlight timestamps in your Journal section, capture quick notes, images, and audio from a sidebar, dictate with real-time speech-to-text, and review your year with a heatmap.",
   "author": "Joe Hou",

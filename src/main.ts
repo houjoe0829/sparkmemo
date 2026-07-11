@@ -1,6 +1,5 @@
 import {
   App,
-  ExtraButtonComponent,
   FuzzySuggestModal,
   MarkdownPostProcessorContext,
   MarkdownView,
@@ -77,10 +76,6 @@ export default class SparkMemoPlugin extends Plugin {
       callback: () => void this.activateCaptureView(),
     });
     this.addRibbonIcon('sparkle', t('ribbon.captureView'), () => void this.activateCaptureView());
-  }
-
-  onunload() {
-    this.app.workspace.detachLeavesOfType(CAPTURE_VIEW_TYPE);
   }
 
   /**
@@ -449,9 +444,8 @@ export default class SparkMemoPlugin extends Plugin {
   private refreshEditors() {
     this.app.workspace.iterateAllLeaves(leaf => {
       if (leaf.view instanceof MarkdownView) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cm: EditorView | undefined = (leaf.view.editor as any)?.cm;
-        cm?.dispatch({ effects: forceUpdateEffect.of(null) });
+        const editorWithCm = leaf.view.editor as unknown as { cm?: EditorView };
+        editorWithCm.cm?.dispatch({ effects: forceUpdateEffect.of(null) });
       }
     });
   }
@@ -490,10 +484,10 @@ class SparkMemoSettingTab extends PluginSettingTab {
    * Special values: `.` = same folder as the note, `/` or empty = vault root.
    */
   private attachmentFolderLabel(): string {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const folder = (this.app as any).vault?.config?.attachmentFolderPath as
-      | string
-      | undefined;
+    const vaultWithConfig = this.app.vault as unknown as {
+      config?: { attachmentFolderPath?: string };
+    };
+    const folder = vaultWithConfig.config?.attachmentFolderPath;
     if (!folder || folder === '/' || folder === '') return t('settings.attachmentFolder.vaultRoot');
     if (folder === '.') return t('settings.attachmentFolder.sameAsNote');
     return folder;
@@ -550,10 +544,10 @@ class SparkMemoSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: t('settings.title') });
+    new Setting(containerEl).setName(t('settings.title')).setHeading();
 
     // ── Timestamp Settings ────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: t('settings.timestamp.heading') });
+    new Setting(containerEl).setName(t('settings.timestamp.heading')).setHeading();
 
     new Setting(containerEl)
       .setName(t('settings.targetHeading.name'))
@@ -650,11 +644,10 @@ class SparkMemoSettingTab extends PluginSettingTab {
 
     // Preview badge
     const previewEl = containerEl.createDiv({ cls: 'jp-settings-preview' });
-    previewEl.style.cssText =
-      'margin-top: 24px; padding: 16px; border-radius: 8px;' +
-      'background: var(--background-secondary); display: flex; align-items: center; gap: 10px;';
-    previewEl.createEl('span', { text: t('settings.preview.label') }).style.color =
-      'var(--text-muted)';
+    previewEl.createEl('span', {
+      cls: 'jp-settings-preview-label',
+      text: t('settings.preview.label'),
+    });
     previewEl.createEl('span', {
       cls: 'jp-timestamp',
       text: '07:31',
@@ -662,7 +655,7 @@ class SparkMemoSettingTab extends PluginSettingTab {
     previewEl.createEl('span', { text: t('settings.preview.sampleText') });
 
     // ── Speech-to-text ────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: t('settings.stt.heading') });
+    new Setting(containerEl).setName(t('settings.stt.heading')).setHeading();
 
     this.addFolderSetting(
       containerEl,
@@ -755,7 +748,7 @@ class SparkMemoSettingTab extends PluginSettingTab {
     //   );
 
     // ── Shortcut ──────────────────────────────────────────────────────────
-    containerEl.createEl('h3', { text: t('settings.other.heading') });
+    new Setting(containerEl).setName(t('settings.other.heading')).setHeading();
 
     this.addFolderSetting(
       containerEl,
@@ -783,7 +776,6 @@ class SparkMemoSettingTab extends PluginSettingTab {
         slider
           .setLimits(0.1, 1, 0.05)
           .setValue(this.plugin.settings.imageCompressionQuality)
-          .setDynamicTooltip()
           .onChange(async value => {
             this.plugin.settings.imageCompressionQuality = value;
             await this.plugin.saveSettings();

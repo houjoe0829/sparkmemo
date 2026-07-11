@@ -26,7 +26,7 @@ if (!watch) {
 const options = {
   entryPoints: [path.join(root, 'src/main.ts')],
   bundle: true,
-  external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*', 'builtin-modules'],
+  external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*'],
   loader: { '.wasm': 'binary' },
   format: 'cjs',
   target: 'es2018',
