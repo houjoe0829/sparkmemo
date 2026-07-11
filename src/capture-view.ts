@@ -27,6 +27,7 @@ import {
   WorkspaceLeaf,
   getAllTags,
   moment,
+  normalizePath,
   requestUrl,
   setIcon,
 } from 'obsidian';
@@ -358,7 +359,7 @@ export class JournalCaptureView extends ItemView {
 
     // Stats pane (hidden initially; built lazily on first switch)
     this.statsPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-stats' });
-    this.statsPaneEl.style.display = 'none';
+    this.statsPaneEl.hide();
 
 
     // ── Vault listeners ──
@@ -466,7 +467,7 @@ export class JournalCaptureView extends ItemView {
 
     // Search bar — collapsed by default, shown when search tab is active
     this.searchBarEl = root.createDiv({ cls: 'jp-search-bar' });
-    this.searchBarEl.style.display = 'none';
+    this.searchBarEl.hide();
 
     const searchIcon = this.searchBarEl.createSpan({ cls: 'jp-search-bar-icon' });
     setIcon(searchIcon, 'search');
@@ -494,28 +495,28 @@ export class JournalCaptureView extends ItemView {
 
     // Tag bar — collapsed by default, shown when the tag tab is active
     this.tagAggBarEl = root.createDiv({ cls: 'jp-location-bar' });
-    this.tagAggBarEl.style.display = 'none';
+    this.tagAggBarEl.hide();
 
     this.tagAggBackBtn = this.tagAggBarEl.createEl('button', {
       cls: 'jp-location-back-btn',
       attr: { 'aria-label': t('tag.backToList'), title: t('tag.backToList') },
     });
     setIcon(this.tagAggBackBtn, 'arrow-left');
-    this.tagAggBackBtn.style.display = 'none';
+    this.tagAggBackBtn.hide();
     this.tagAggBackBtn.addEventListener('click', () => this.backToTagList());
 
     this.tagAggTitleEl = this.tagAggBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('tag.all') });
 
     // Location bar — collapsed by default, shown when location tab is active
     this.locationBarEl = root.createDiv({ cls: 'jp-location-bar' });
-    this.locationBarEl.style.display = 'none';
+    this.locationBarEl.hide();
 
     this.locationBackBtn = this.locationBarEl.createEl('button', {
       cls: 'jp-location-back-btn',
       attr: { 'aria-label': t('location.backToList'), title: t('location.backToList') },
     });
     setIcon(this.locationBackBtn, 'arrow-left');
-    this.locationBackBtn.style.display = 'none';
+    this.locationBackBtn.hide();
     this.locationBackBtn.addEventListener('click', () => this.backToLocationList());
 
     this.locationTitleEl = this.locationBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('location.all') });
@@ -544,12 +545,12 @@ export class JournalCaptureView extends ItemView {
     this.tagAggTabBtn.toggleClass('is-active', tab === 'tag');
 
     if (tab === 'search') {
-      this.capturePaneEl.style.display = '';
-      this.statsPaneEl.style.display = 'none';
-      this.inputCardEl.style.display = 'none';
-      this.searchBarEl.style.display = '';
-      this.locationBarEl.style.display = 'none';
-      this.tagAggBarEl.style.display = 'none';
+      this.capturePaneEl.show();
+      this.statsPaneEl.hide();
+      this.inputCardEl.hide();
+      this.searchBarEl.show();
+      this.locationBarEl.hide();
+      this.tagAggBarEl.hide();
       this.searchActive = true;
 
       if (prevTab !== 'search') {
@@ -565,12 +566,12 @@ export class JournalCaptureView extends ItemView {
         window.setTimeout(() => this.searchInputEl.focus(), 50);
       }
     } else if (tab === 'capture') {
-      this.capturePaneEl.style.display = '';
-      this.statsPaneEl.style.display = 'none';
-      this.inputCardEl.style.display = '';
-      this.searchBarEl.style.display = 'none';
-      this.locationBarEl.style.display = 'none';
-      this.tagAggBarEl.style.display = 'none';
+      this.capturePaneEl.show();
+      this.statsPaneEl.hide();
+      this.inputCardEl.show();
+      this.searchBarEl.hide();
+      this.locationBarEl.hide();
+      this.tagAggBarEl.hide();
 
       // Always clean up search state when returning to capture
       if (this.searchActive || prevTab === 'search') {
@@ -586,18 +587,18 @@ export class JournalCaptureView extends ItemView {
         void this.fullRebuild();
       }
     } else if (tab === 'location') {
-      this.capturePaneEl.style.display = '';
-      this.statsPaneEl.style.display = 'none';
-      this.inputCardEl.style.display = 'none';
-      this.searchBarEl.style.display = 'none';
-      this.locationBarEl.style.display = '';
-      this.tagAggBarEl.style.display = 'none';
+      this.capturePaneEl.show();
+      this.statsPaneEl.hide();
+      this.inputCardEl.hide();
+      this.searchBarEl.hide();
+      this.locationBarEl.show();
+      this.tagAggBarEl.hide();
 
       if (prevTab !== 'location') {
         this.disposeDays();
         this.timelineEl.empty();
         this.selectedLocationCity = null;
-        this.locationBackBtn.style.display = 'none';
+        this.locationBackBtn.hide();
         this.locationTitleEl.setText(t('location.all'));
         void this.loadLocationIndex().then(() => {
           // Bail if the user already navigated away or picked a city while scanning
@@ -607,18 +608,18 @@ export class JournalCaptureView extends ItemView {
         });
       }
     } else if (tab === 'tag') {
-      this.capturePaneEl.style.display = '';
-      this.statsPaneEl.style.display = 'none';
-      this.inputCardEl.style.display = 'none';
-      this.searchBarEl.style.display = 'none';
-      this.locationBarEl.style.display = 'none';
-      this.tagAggBarEl.style.display = '';
+      this.capturePaneEl.show();
+      this.statsPaneEl.hide();
+      this.inputCardEl.hide();
+      this.searchBarEl.hide();
+      this.locationBarEl.hide();
+      this.tagAggBarEl.show();
 
       if (prevTab !== 'tag') {
         this.disposeDays();
         this.timelineEl.empty();
         this.selectedTag = null;
-        this.tagAggBackBtn.style.display = 'none';
+        this.tagAggBackBtn.hide();
         this.tagAggTitleEl.setText(t('tag.all'));
         void this.loadTagIndex().then(() => {
           // Bail if the user already navigated away or picked a tag while scanning
@@ -629,12 +630,12 @@ export class JournalCaptureView extends ItemView {
       }
     } else {
       // stats tab
-      this.capturePaneEl.style.display = 'none';
-      this.statsPaneEl.style.display = '';
-      this.inputCardEl.style.display = '';
-      this.searchBarEl.style.display = 'none';
-      this.locationBarEl.style.display = 'none';
-      this.tagAggBarEl.style.display = 'none';
+      this.capturePaneEl.hide();
+      this.statsPaneEl.show();
+      this.inputCardEl.show();
+      this.searchBarEl.hide();
+      this.locationBarEl.hide();
+      this.tagAggBarEl.hide();
 
       if (this.statsPaneEl.childElementCount === 0) {
         this.buildStatsPane();
@@ -1099,7 +1100,7 @@ export class JournalCaptureView extends ItemView {
         multiple: 'true',
       },
     });
-    fileInput.style.display = 'none';
+    fileInput.hide();
     fileInput.addEventListener('change', async () => {
       const files = fileInput.files;
       if (!files || files.length === 0) return;
@@ -1111,7 +1112,7 @@ export class JournalCaptureView extends ItemView {
 
     // Hidden file input for image upload
     const recBar = this.inputCardEl.createDiv({ cls: 'jp-recording-bar' });
-    recBar.style.display = 'none';
+    recBar.hide();
     const recWaveRow = recBar.createDiv({ cls: 'jp-recording-wave-row' });
     const recCanvas = recWaveRow.createEl('canvas', { cls: 'jp-recording-waveform' });
     const recMeta = recWaveRow.createDiv({ cls: 'jp-recording-meta' });
@@ -1485,7 +1486,7 @@ export class JournalCaptureView extends ItemView {
           // appear together with the action buttons coming back).
           recStatus.setText(t('capture.transcribing'));
           recBar.addClass('is-transcribing');
-          recBar.style.display = '';
+          recBar.show();
           try {
             const audioFile = await this.saveAudioToVault(audioBlob);
             let text = '';
@@ -1517,7 +1518,7 @@ export class JournalCaptureView extends ItemView {
             // to act on it arrive in the same beat.
             recBar.removeClass('is-transcribing');
             recBar.removeClass('jp-bar-entering');
-            recBar.style.display = 'none';
+            recBar.hide();
             actions.removeClass('is-recording');
           }
         };
@@ -1562,7 +1563,7 @@ export class JournalCaptureView extends ItemView {
           // The `jp-bar-entering` class triggers a one-shot fade+slide
           // animation; we remove it after hide so the next show replays it.
           recStatus.setText(realtimeActive ? t('capture.realtimeTranscribing') : t('capture.recording'));
-          recBar.style.display = '';
+          recBar.show();
           recBar.addClass('jp-bar-entering');
           const dpr = window.devicePixelRatio || 1;
           recCanvas.width = Math.max(1, recCanvas.clientWidth) * dpr;
@@ -1777,18 +1778,18 @@ export class JournalCaptureView extends ItemView {
       return this.app.fileManager.getAvailablePathForAttachment(baseName, sourcePath);
     }
     // User-configured folder (`/` → vault root). De-dupe against it directly.
-    const folder = configured === '/' ? '' : configured;
+    const folder = configured === '/' ? '' : normalizePath(configured);
     const prefix = folder ? `${folder}/` : '';
-    let candidate = `${prefix}${baseName}`;
+    let candidate = normalizePath(`${prefix}${baseName}`);
     if (this.app.vault.getAbstractFileByPath(candidate)) {
       const dot = baseName.lastIndexOf('.');
       const stem = dot === -1 ? baseName : baseName.slice(0, dot);
       const ext = dot === -1 ? '' : baseName.slice(dot);
       let n = 1;
-      candidate = `${prefix}${stem} ${n}${ext}`;
+      candidate = normalizePath(`${prefix}${stem} ${n}${ext}`);
       while (this.app.vault.getAbstractFileByPath(candidate)) {
         n++;
-        candidate = `${prefix}${stem} ${n}${ext}`;
+        candidate = normalizePath(`${prefix}${stem} ${n}${ext}`);
       }
     }
     await this.ensureAttachmentFolder(folder);
@@ -2278,7 +2279,7 @@ export class JournalCaptureView extends ItemView {
   /**
    * Saves the picked/pasted/dropped image(s), adds them to the pending
    * strip (capped at `MAX_PENDING_IMAGES`), and — if enabled — checks the
-   * *earliest* capture time across this batch against now.
+   * *first* selected image's capture time against now.
    */
   private async addImageFiles(files: File[]): Promise<void> {
     if (this.pendingAudio.length > 0) {
@@ -2380,14 +2381,6 @@ export class JournalCaptureView extends ItemView {
         blob = await new Promise<Blob | null>(resolve =>
           canvas.toBlob(resolve, outType, settings.imageCompressionQuality));
       }
-      console.log('[Spark Memo] compress', {
-        originalType: file.type,
-        originalSize: file.size,
-        originalDims: `${bitmap.width}x${bitmap.height}`,
-        targetDims: `${width}x${height}`,
-        outType,
-        outSize: blob?.size,
-      });
       if (!blob || blob.size >= file.size) return uncompressed;
       return { blob, compressed: true, originalSize: file.size, compressedSize: blob.size };
     } catch (err) {
@@ -2402,11 +2395,11 @@ export class JournalCaptureView extends ItemView {
    * it. Only asks once per pending-image batch (guarded by the two
    * `pending*` fields already being set); a "yes" applies whichever of the
    * two pieces of information was actually found:
-   *   - time: anchors this entry to the *earliest* capture time across the
-   *     batch (including its calendar date), but only when it differs from
+   *   - time: anchors this entry to the *first* selected image's capture
+   *     time (including its calendar date), but only when it differs from
    *     "now" by more than 5 minutes — otherwise there's nothing to ask
    *     about time.
-   *   - location: taken from the first JPEG in the batch that carries GPS,
+   *   - location: taken from the first selected image's GPS (JPEG only),
    *     reverse-geocoded to a place name on a best-effort basis (a network
    *     failure just means the pill/tag falls back to raw coordinates).
    */
@@ -2414,26 +2407,25 @@ export class JournalCaptureView extends ItemView {
     if (!this.plugin.settings.imageTimeCheck) return;
     if (this.pendingCaptureOverride || this.pendingLocation) return;
 
-    const capturedTimes = (await Promise.all(files.map(f => getImageCaptureTime(f))))
-      .filter((d): d is Date => d !== null);
-    const earliest = capturedTimes.length > 0 ? capturedTimes.reduce((a, b) => (a < b ? a : b)) : null;
-    const diffMinutes = earliest ? Math.abs(Date.now() - earliest.getTime()) / 60000 : 0;
-    const timeFound = earliest !== null && diffMinutes > 5;
+    const firstFile = files[0];
+    if (!firstFile) return;
+
+    const firstTime = await getImageCaptureTime(firstFile);
+    const diffMinutes = firstTime ? Math.abs(Date.now() - firstTime.getTime()) / 60000 : 0;
+    const timeFound = firstTime !== null && diffMinutes > 5;
 
     let gpsCoord: { latitude: number; longitude: number } | null = null;
-    for (const file of files) {
-      if (file.type !== 'image/jpeg' && file.type !== 'image/jpg') continue;
+    if (firstFile.type === 'image/jpeg' || firstFile.type === 'image/jpg') {
       try {
-        gpsCoord = readExifGpsLocation(await file.arrayBuffer());
+        gpsCoord = readExifGpsLocation(await firstFile.arrayBuffer());
       } catch {
         gpsCoord = null;
       }
-      if (gpsCoord) break;
     }
 
     if (!timeFound && !gpsCoord) return;
 
-    await this.confirmAndApplyMetadata(timeFound ? earliest : null, diffMinutes, gpsCoord);
+    await this.confirmAndApplyMetadata(timeFound ? firstTime : null, diffMinutes, gpsCoord);
   }
 
   /**
@@ -3540,7 +3532,7 @@ export class JournalCaptureView extends ItemView {
     if (!data) return;
 
     this.selectedLocationCity = city;
-    this.locationBackBtn.style.display = '';
+    this.locationBackBtn.show();
     this.locationTitleEl.setText(city);
 
     this.disposeDays();
@@ -3583,7 +3575,7 @@ export class JournalCaptureView extends ItemView {
   /** Return from a city's memo list back to the "all locations" list. */
   private backToLocationList() {
     this.selectedLocationCity = null;
-    this.locationBackBtn.style.display = 'none';
+    this.locationBackBtn.hide();
     this.locationTitleEl.setText(t('location.all'));
     this.renderLocationList();
   }
@@ -4026,7 +4018,7 @@ export class JournalCaptureView extends ItemView {
     if (!data) return;
 
     this.selectedTag = tag;
-    this.tagAggBackBtn.style.display = '';
+    this.tagAggBackBtn.show();
     this.tagAggTitleEl.setText(tag);
 
     this.disposeDays();
@@ -4069,7 +4061,7 @@ export class JournalCaptureView extends ItemView {
   /** Return from a tag's memo list back to the "all tags" list. */
   private backToTagList() {
     this.selectedTag = null;
-    this.tagAggBackBtn.style.display = 'none';
+    this.tagAggBackBtn.hide();
     this.tagAggTitleEl.setText(t('tag.all'));
     this.renderTagList();
   }

@@ -1,213 +1,58 @@
 # Spark Memo
 
-一款陪你写日记的 Obsidian 插件。自动识别并高亮 Memo 区域的时间戳，让每一条记录的时间一目了然；配套一个**快速记录**侧边栏，让你随时把想法、图片、语音丢进今天的日记；并在同一个面板里集成**全量统计**，用热力图回顾一年的坚持。
+> **Catch every spark, before it fades.**
+
+An Obsidian plugin for journaling — built around two ideas:
+
+1. **Shoot first, write later.** Drop a photo into the sidebar and Spark Memo reads its EXIF capture time and GPS location, then writes the memo as if you'd jotted it down back then, at that place — the same experience Day One gave you, now inside your Obsidian vault.
+2. **Never lose the thought.** The quick-capture sidebar is always one click away: type, dictate, paste an image, or hit record — the memo lands in today's daily note before the moment passes.
+
+Under the hood it highlights `HH:MM` timestamps inside a designated Memo section, and rolls up everything you've written into a **yearly heatmap** so you can look back on the whole year at a glance.
 
 ![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7c3aed?style=flat-square&logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/github/manifest-json/v/houjoe0829/sparkmemo?style=flat-square&color=7c3aed&label=version)
 ![License](https://img.shields.io/github/license/houjoe0829/sparkmemo?style=flat-square&color=7c3aed)
 
-> 本项目 fork 自 [zhaohongxuan/journal-partner](https://github.com/zhaohongxuan/journal-partner)，在其时间戳高亮能力的基础上扩展了快速记录侧边栏、地点聚合、年度统计、多语言等功能。感谢原作者的开源工作。
+> Originally forked from [zhaohongxuan/journal-partner](https://github.com/zhaohongxuan/journal-partner). Thanks to the original author for the timestamp-highlighting core.
 
 ---
 
-## 效果预览
-
-在 `## Memo` 区域下，每行行首的 `HH:MM` 时间戳会被渲染为醒目的胶囊徽标：
-
-```
-## Memo
-
-- 06:42 把我的工作笔记从 Obsidian 工作流中移出去
-- 07:31 成功安装并配置了 OpenClaw！
-- 08:10 多花点时间做自己的事情，跑步、读书、练字都行
-```
-
-↓ 渲染后时间戳高亮显示，颜色可自定义。
-
-> 截图待补充（界面近期改动较多，旧截图已移除）。
+<p align="center">
+  <img src="docs/screenshots/capture-input.png" alt="Quick-capture sidebar" width="420" />
+  &nbsp;
+  <img src="docs/screenshots/stats.png" alt="Yearly heatmap and stats" width="420" />
+</p>
 
 ---
 
-## 功能
+## Features
 
-### ✍️ 时间戳与编辑增强
+- **Timestamp highlighting** in the `## Memo` section — pill badges in Source, Live Preview, and Reading view, with customizable colors and an optional read-only mode
+- **Quick-capture sidebar** — write, dictate, paste images, or record audio; entries are appended to today's daily note under `## Memo`
+- **Photo-driven memos** — pasted or uploaded images with EXIF time / GPS are turned into memos at the original moment and place, stored as `[Name](geo:lat,lon)` links
+- **Tag & location roll-ups** — every `#tag` and every geo-tagged memo grouped for review, with rename / merge / delete for tags
+- **Yearly heatmap** — GitHub-style grid per year, with total words, writing days, entry count, and longest streak
+- **Random rewind** — open the Search tab and a random past memo greets you, so old thoughts get another moment in the light
+- **Multi-language** — follows Obsidian's UI language (English / 简体中文)
 
-- **时间戳高亮**：在编辑器（Source / Live Preview）和阅读视图中均生效
-- **自定义颜色**：在设置中用拾色器分别设置文字色和背景色，改动实时生效
-- **自定义作用范围**：指定目标标题名称（如 `Memo`）和层级（如 `##`），插件只在该区域内生效
-- **时间戳只读**：开启后无法在编辑器中修改已有时间戳，防止误删或误改
-- **回车自动插入时间戳**：在 Memo 区块内按回车时，新行自动以当前 `HH:MM` 起头
-- **Tab 缩进保留时间戳**：在条目首部按 Tab 时，时间戳与内容一起缩进，光标停在新位置
-- **自定义正则**：默认匹配 `HH:MM` 格式，可修改为任意正则表达式以适配其他时间格式
-
-### 🌐 多语言
-
-- **跟随 Obsidian 界面语言**：设置面板、快速记录侧边栏（记录 / 搜索 / 标签 / 地点 / 统计）、所有 Notice 提示均支持中英文，自动匹配 Obsidian「Language」设置，无需单独配置
-- **数字与日期本地化**：年度统计的字数展示按语言切换计数习惯（中文「万」分组 / 英文紧凑记数），日历与热力图的月份、星期标签同步适配
-
-### 🪶 快速记录侧边栏
-
-打开「快速记录」侧边栏（羽毛笔图标或命令面板），即可在同一个面板里完成**速记**、**搜索**、**标签回顾**、**地点回顾**和**统计回顾**。顶部胶囊 Tab 居中切换：`记录` / `搜索` / `标签` / `地点` / `统计`。
-
-#### 📝 记录 Tab
-
-- **基于 Daily Notes**：自动写入今天日记的 `## Memo` 区段；若文件或区段不存在则自动创建（依赖 Obsidian 内置「Daily Notes」核心插件）
-- **多行输入框**：支持系统语音输入法、回车换行；点击圆形提交按钮写入，自动保留 markdown 软换行结构。按钮在有内容可提交时高亮为强调色，无内容时置灰不可点击，提交中显示加载动效
-- **加号按钮**：输入框下方的「+」按钮点击后弹出下拉菜单，可选择「上传图片」或「录音」
-- **# 标签快捷输入**：「+」按钮右侧的「#」按钮会在光标处插入 `#`（等同手动敲键盘），随即弹出标签建议下拉框；候选标签来自全库已有的 `#tag`，按「精确匹配 > 整体前缀匹配 > 某一层级前缀匹配 > 普通子串匹配」排序（再按使用频率），嵌套标签的父级路径会以浅色显示、匹配的那一段加粗，支持中/英文过滤、方向键选择、Enter/Tab 确认、Esc 取消
-- **粘贴图片**：在输入框内直接 `⌘V` 粘贴剪贴板里的图片，插件自动保存到 Vault 附件目录，以缩略图卡片的形式显示在输入框上方（输入区域随之下移，暂不插入正文）；也支持把图片文件**拖拽**到输入框，或从「+」菜单的「上传图片」选择本地文件。每次操作仅处理一张图片，可重复添加，点击缩略图可弹出大图预览，点击右上角 × 可移除
-- **提交时合并**：点击提交按钮时，所有待发送的图片和录音会以 `![[path]]` 嵌入语法统一追加到正文末尾
-- **麦克风录音**：从「+」菜单选择「录音」，录音时实时显示对称胶囊波形 + 时长；停止后自动保存为附件（优先 `m4a`，不支持则 `webm`），以「麦克风图标 + 时长」的卡片形式显示在输入框上方（暂不插入正文，转写文字仍会写入输入框），点击卡片右上角 × 可移除（移入回收站，可恢复）
-- **图片拍摄时间/位置校正**：粘贴/上传的图片若携带拍摄时间（EXIF 或文件修改时间，与当前时间相差超过 5 分钟）或 GPS 位置，会弹窗询问是否使用图片里的信息记录这条 memo；确认后「+」按钮右侧会出现对应的时间胶囊和/或位置胶囊，可随时点击 × 移除。位置会调用免费的 OpenStreetMap Nominatim 接口反向地理编码为区县级地名（如「鹿城区」），写入笔记时以 `[地名](geo:纬度,经度)` 的标准链接格式保存——地名可能模糊，但坐标始终精确；若地理编码失败，胶囊会显示原始坐标并带一个重试按钮，时间线里已提交记录的位置胶囊同样支持重试补全地名
-- **气泡时间线**：每条记录以「时间胶囊 + 内容气泡」呈现，带有平滑的连接弧线，颜色与时间戳样式同源
-- **按天导航**：默认展示当天；日期标题右侧提供「前一天 / 日历选择 / 后一天」，翻到 365 天前的上限或已是今天时按钮自动置灰；内容区滚动到底部也有「查看前一天」入口，延续原来向下滚动看更早内容的习惯
-- **日历跳转**：点击日历图标弹出月历，有记录的日期会用实心圆底标出，今天用描边圆圈标出，点任意一天即可直接跳转
-- **实时同步**：在主编辑器里改动当天日记，侧边栏对应日的时间线会就地刷新
-- **Markdown 渲染**：支持双向链接、嵌入图片、加粗斜体等，所有原生 Obsidian 渲染特性均可用
-- **日期栏排序按钮**：每个日期标题卡片的右上角都有排序切换按钮，按当日时间正序 / 倒序展示
-- **右键管理 memo**：右键（或移动端长按）任意气泡，可复制原文、删除当前 memo；若该条 memo 附带录音，还会出现「删除 memo 和录音文件」与「仅删除录音文件」两个选项，删除前会弹出确认对话框，录音走 Obsidian 回收站可恢复
-
-> 截图待补充（界面近期改动较多，旧截图已移除）。
-
-#### 🏷️ 标签 Tab
-
-和记录 Tab 共享同一个侧边栏，位于搜索和地点之间，点击标签图标切换。首次打开会全量扫描所有 Daily Notes，把 Memo 正文里出现的 `#标签` 按标签名聚合（标签识别规则与输入框的 `#` 建议一致：支持任意语言文字，排除纯数字标签）。
-
-- **父子层级分组**：标签支持 Obsidian 原生的 `#父标签/子标签` 嵌套写法，聚合页会按 `/` 自动分组成可展开/折叠的树状列表，父节点显示自身 + 所有子标签的汇总 memo 数
-- **标签列表**：展示所有出现过的标签，按「最近一次使用」时间倒序排列，每个标签显示对应的 memo 条数
-- **标签详情**：点击某个标签，下方按天分组展示带有该标签的所有 memo（时间倒序），与地点 Tab、搜索 Tab 结果同源渲染
-- **标签管理**：桌面端右键（长按无效，仅桌面）任意标签行可打开管理菜单，支持**重命名**（仅改自身这一段名字）、**移到子标签下**（拖到另一个标签下面，作为其子标签）、**合并到另一个标签**（所有出现全部替换成目标标签）、**删除**（可选是否连同子标签一起删除）。四个操作都会真实批量改写所有 Daily Notes 里的 Memo 正文，重命名/移动/合并会级联处理子标签路径
-- **跳转原文**：点击 memo 的时间戳，直接打开对应日记文件并将光标定位到该条记录所在行
-- 任意日记文件发生增删改后，标签索引会失效，下次切入该 Tab 时自动重新扫描；标签管理操作完成后会主动刷新
-
-#### 📍 地点 Tab
-
-和记录 Tab 共享同一个侧边栏，点击地图钉图标切换。首次打开会全量扫描所有 Daily Notes，把带 `[地名](geo:...)` 标记的 memo 按城市名聚合。
-
-- **地点列表**：以标签形式展示所有出现过的城市，宽度随文字自适应、自动换行，按「最近一次出现」时间倒序排列，每个标签显示该城市的 memo 条数
-- **城市详情**：点击某个城市标签，下方按天分组展示该城市所有相关 memo（时间倒序），与搜索 Tab 结果同源渲染
-- **跳转原文**：点击 memo 的时间戳，直接打开对应日记文件并将光标定位到该条记录所在行；每天分组标题上的按钮可打开当天整篇日记
-- **空状态**：还没有任何带地点标记的 memo 时，随机展示一句英文提示语
-- 任意日记文件发生增删改后，地点索引会失效，下次切入该 Tab 时自动重新扫描
-
-#### 📊 统计 Tab
-
-和记录 Tab 共享同一个侧边栏，点击「统计」胶囊即可切换。第一次打开会扫描所有 Daily Notes，之后改动日记会自动 300ms 防抖刷新。
-
-- **全量 Hero**：顶部一张紧凑卡片展示**全部年份累计**的总字数（万位自动转换），副标题显示覆盖年份范围（如「2022–2026 年」）
-- **4 项核心 KPI**：写作天数 / 总条数 / 录音数 / 最长连续，与 Hero 卡片内嵌显示，不再独立成卡
-- **按年热力图**：每年一张 GitHub-style 热力图，7×53 网格、周一开头，5 档紫色浓度（按当日 memo 条数），鼠标悬停显示「YYYY年M月D日 · X 条 · Y 字」，点击非空格子在新 Tab 打开对应 Daily Note
-- **兼容无时间戳日记**：用纯段落写的旧日记同样会被统计进字数 / 条数 / 写作天数 —— 不依赖 `- HH:MM` 格式
-- **优雅降级**：没有时间戳时，「写作天数」仍能正确计数；「最常记录时段」类的指标仅在有时间戳的日记中显示
+Requires Obsidian's built-in **Daily Notes** core plugin.
 
 ---
 
-## 安装
+## Installation
 
-🚧 **自测中，暂未发布正式 release。** 目前只能本地构建后手动部署：
+Once the plugin is accepted into the community catalog, install it from **Settings → Community plugins → Browse → "Spark Memo"**.
 
-```bash
-npm install
-npm run deploy   # 需先在 deploy.sh 里配置好你自己的 VAULT_PATH
-```
-
-（快速记录功能需要确保 Obsidian 内置「Daily Notes」核心插件已启用）
-
-等功能稳定、发布第一个 GitHub Release 后，会在这里补充通过 BRAT 或手动下载安装的说明。
+Manual install: download `main.js`, `manifest.json`, and `styles.css` from the latest [GitHub Release](https://github.com/houjoe0829/sparkmemo/releases) into `<vault>/.obsidian/plugins/spark-memo/`, then enable it in Settings → Community plugins.
 
 ---
 
-## 使用快速记录
+## Usage
 
-1. 点击左侧栏的羽毛笔图标，或在命令面板（⌘P）中执行 **「打开快速记录侧边栏」**
-2. 默认进入「记录」Tab：在输入框中写下任何想法，点击圆形提交按钮
-3. 内容会以 `- HH:MM 文字` 的形式追加到今天日记的 `## Memo` 区段
-4. 时间线默认展示今天；用「前一天 / 后一天」按钮或日历图标切换到其他日子，切换后自动回到当天内容顶部
-5. 切到「统计」Tab 查看全量累计 + 每年热力图
-
-> 多行输入会被保存为带 markdown 软换行的列表项，渲染时保持段落结构。粘贴图片 / 录音后会自动保存到 Vault 附件目录（路径取自 Obsidian「附件文件夹」设置）。
-
----
-
-## 设置说明
-
-打开 Obsidian 设置 → 插件选项 → **Spark Memo**：
-
-### 📍 作用范围
-
-| 设置项 | 说明 | 默认值 |
-|---|---|---|
-| 目标标题名称 | 插件生效的标题文字（不含 `#`） | `Memo` |
-| 标题层级 | 目标标题的层级 | `H2` |
-
-### 🎨 时间戳样式
-
-| 设置项 | 说明 | 默认值 |
-|---|---|---|
-| 文字颜色 | 时间戳徽标的前景色（同时影响时间线弧线、内容气泡底色） | `#7c3aed` |
-| 背景颜色 | 时间戳徽标的背景色 | `#ede9fe` |
-
-### ⚙️ 行为
-
-| 设置项 | 说明 | 默认值 |
-|---|---|---|
-| 时间戳只读 | 防止在编辑器中修改已有时间戳 | 开启 |
-| 回车自动插入时间戳 | 在 Memo 区块内按回车时自动插入当前时间 | 开启 |
-
-### 🖼️ 图片压缩
-
-| 设置项 | 说明 | 默认值 |
-|---|---|---|
-| 图片压缩 | 添加图片时自动压缩后再存入 Vault（所有图片含 PNG 统一转为 WebP，使用内置 WASM 编码器，桌面端与 iOS 压缩效果一致）；GIF 不受影响（保留动画） | 开启 |
-| 压缩质量 | WebP 重新编码的质量（0.1–1.0） | `0.8` |
-| 压缩最大边长 | 图片长边超过该像素值时等比缩小，`0` 表示不限制尺寸 | `1920` |
-
-### 🔧 高级
-
-| 设置项 | 说明 | 默认值 |
-|---|---|---|
-| 时间戳匹配正则 | 识别时间戳的正则表达式 | `\d{2}:\d{2}` |
-
----
-
-## 开发
-
-```bash
-# 安装依赖
-npm install
-
-# 开发模式（保存自动重建）
-npm run dev
-
-# 生产构建
-npm run build
-
-# 部署到本地 Obsidian Vault（需在 deploy.sh 中配置 VAULT_PATH）
-npm run deploy
-```
-
-构建产物为 `main.js`，与 `manifest.json`、`styles.css` 一起复制到插件目录即可。
-
-### 📢 Notice 提示规范
-
-所有用户可见的提示统一走 `src/notice.ts` 里的 `notice(...)` 帮助函数（而不是直接 `new Notice()`）。它会识别 i18n 文案开头的 emoji 前缀，映射成对应的 lucide 图标，用 DocumentFragment 组装出「图标 + 文字」的 Toast，避免不同平台 emoji 渲染风格不一致的问题。
-
-i18n 文案里的 emoji 只作为「选哪个图标」的来源，按语义分类：
-
-| Emoji 前缀 | Lucide 图标 | 场景 | 示例 |
-|---|---|---|---|
-| ✅ | `check` | 操作成功 | `✅ 已更新地名为 xxx` |
-| ❌ | `x` | 操作失败 / 报错 | `❌ 写入失败：xxx` |
-| ⚠️ | `alert-triangle` | 警告 / 操作被拦截 | `⚠️ 最多添加 9 张图片` |
-| 🗑️ | `trash-2` | 删除相关 | `🗑️ 已删除` |
-| 📋 | `clipboard` | 复制 | `📋 已复制` |
-| ✏️ | `pencil` | 编辑相关 | `✏️ 已更新` |
-| 📅 | `calendar` | 日期 / 日记跳转相关 | `📅 已记录到 xxx 的日记` |
-| 🎙️ | `mic` | 录音相关 | `🎙️ 已删除 1 个录音文件` |
-| 🕒 / ⏰ | `clock` | 时间设置 / 只读时间戳 | `🕒 已改回使用当前时间记录` |
-| 🗜️ | `archive` | 图片压缩相关 | `🗜️ 已压缩 3 张图片` |
-
-新增提示时优先复用上表已有的 emoji 前缀，自动就会带正确的图标；确实不匹配再在 `src/notice.ts` 的 `EMOJI_ICON_MAP` 里补一对新的 emoji → 图标映射，不要在文案里留裸 emoji（那样会原样显示）。
+1. Click the feather-pen icon in the ribbon (or run **"Open Quick Capture sidebar"** from the Command Palette) to open the sidebar
+2. Type into the input, then click submit — the memo is written to today's daily note as `- HH:MM text`
+3. Paste an image or hit record to attach media; images with EXIF time / GPS will prompt you to use their moment and place
+4. Switch to the `Search` / `Tags` / `Locations` / `Stats` tabs to browse across days
 
 ---
 
