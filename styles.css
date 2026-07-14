@@ -1269,16 +1269,38 @@
 /* ── Image preview modal ──────────────────────────────────────────────────
    Chrome-free, dark-backdrop full-size preview of a pending thumbnail. */
 .jp-image-preview-modal {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: none;
+  border: none;
+  border-radius: 0;
   padding: 0;
-  max-width: 90vw;
-  max-height: 90vh;
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  top: 0;
+  left: 0;
+  transform: none;
   display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.jp-image-preview-modal .modal-close-button {
+  color: #fff;
+  z-index: 2;
 }
 .jp-image-preview-modal .modal-content {
   padding: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 /* ── Calendar picker modal ────────────────────────────────────────────────
@@ -1422,11 +1444,16 @@
 }
 .jp-image-preview-img {
   display: block;
-  max-width: 90vw;
-  max-height: 90vh;
+  max-width: 96vw;
+  max-height: 96vh;
   object-fit: contain;
   border-radius: 8px;
   cursor: zoom-out;
+  transform-origin: center center;
+  transition: transform 0.05s linear;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .jp-image-time-confirm {

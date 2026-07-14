@@ -5785,6 +5785,17 @@ class CalendarPickerModal extends Modal {
 
 /** Full-size, chrome-free preview of a pending image thumbnail. */
 class ImagePreviewModal extends Modal {
+  private scale = 1;
+  private tx = 0;
+  private ty = 0;
+  private img!: HTMLImageElement;
+  private dragging = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private txStart = 0;
+  private tyStart = 0;
+  private moved = false;
+
   constructor(app: import('obsidian').App, private src: string, private alt: string) {
     super(app);
   }
@@ -5795,7 +5806,95 @@ class ImagePreviewModal extends Modal {
       cls: 'jp-image-preview-img',
       attr: { src: this.src, alt: this.alt },
     });
-    img.addEventListener('click', () => this.close());
+    this.img = img;
+    this.applyTransform();
+
+    // Click on the backdrop (anywhere outside the image itself) closes.
+    this.contentEl.addEventListener('click', (ev) => {
+      if (ev.target === img) return;
+      this.close();
+    });
+
+    // Trackpad pinch on macOS is delivered as wheel + ctrlKey; deltaY < 0 means
+    // fingers apart (zoom in). Fall back to plain wheel for mouse wheel zoom.
+    img.addEventListener(
+      'wheel',
+      (ev: WheelEvent) => {
+        ev.preventDefault();
+        const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.015 : 0.003));
+        this.zoomAt(ev.clientX, ev.clientY, factor);
+      },
+      { passive: false },
+    );
+
+    // Drag to pan when zoomed.
+    img.addEventListener('pointerdown', (ev: PointerEvent) => {
+      if (this.scale <= 1) return;
+      this.dragging = true;
+      this.moved = false;
+      this.dragStartX = ev.clientX;
+      this.dragStartY = ev.clientY;
+      this.txStart = this.tx;
+      this.tyStart = this.ty;
+      img.setPointerCapture(ev.pointerId);
+    });
+    img.addEventListener('pointermove', (ev: PointerEvent) => {
+      if (!this.dragging) return;
+      const dx = ev.clientX - this.dragStartX;
+      const dy = ev.clientY - this.dragStartY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) this.moved = true;
+      this.tx = this.txStart + dx;
+      this.ty = this.tyStart + dy;
+      this.applyTransform();
+    });
+    const endDrag = (ev: PointerEvent) => {
+      if (this.dragging) {
+        this.dragging = false;
+        img.releasePointerCapture(ev.pointerId);
+      }
+    };
+    img.addEventListener('pointerup', endDrag);
+    img.addEventListener('pointercancel', endDrag);
+
+    // Double-click resets zoom. Single click (no drag, no zoom) closes.
+    img.addEventListener('dblclick', (ev) => {
+      ev.preventDefault();
+      this.scale = 1;
+      this.tx = 0;
+      this.ty = 0;
+      this.applyTransform();
+    });
+    img.addEventListener('click', () => {
+      if (this.moved) {
+        this.moved = false;
+        return;
+      }
+      if (this.scale === 1) this.close();
+    });
+  }
+
+  private zoomAt(clientX: number, clientY: number, factor: number): void {
+    const prev = this.scale;
+    const next = Math.min(8, Math.max(1, prev * factor));
+    if (next === prev) return;
+    // Keep the point under the cursor stationary while scaling.
+    const rect = this.img.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const ratio = next / prev;
+    this.tx = clientX - ratio * (clientX - cx) - cx + this.tx * ratio;
+    this.ty = clientY - ratio * (clientY - cy) - cy + this.ty * ratio;
+    this.scale = next;
+    if (next === 1) {
+      this.tx = 0;
+      this.ty = 0;
+    }
+    this.applyTransform();
+  }
+
+  private applyTransform(): void {
+    this.img.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
+    this.img.style.cursor = this.scale > 1 ? (this.dragging ? 'grabbing' : 'grab') : 'zoom-out';
   }
 
   onClose(): void {
