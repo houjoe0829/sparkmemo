@@ -46,6 +46,7 @@ import {
   extractImageEmbeds,
   findSection,
   formatTimeHHMM,
+  generateTimestamp,
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
   replaceEntryTextInSection,
@@ -246,6 +247,16 @@ export class JournalCaptureView extends ItemView {
    */
   private editingEntry: { day: DaySection; entry: JournalEntry } | null = null;
   private editingPillEl!: HTMLElement;
+  /**
+   * Marks the entry (identified by day + timestamp) that was just written by
+   * `handleSubmit`. On the next `renderDayContent` pass, the matching row
+   * gets scrolled into view and briefly highlighted so the user sees where
+   * the new memo landed — even when it's backdated to a past daily note.
+   * Cleared once applied.
+   */
+  private pendingHighlight: { dateKey: string; timestamp: string } | null = null;
+  /** setTimeout handle that clears `pendingHighlight` after the flash animation window. */
+  private highlightClearTimer: number | null = null;
   /** Wrapper above the textarea that holds editing / capture-time / location / metadata-hint pills side by side. */
   private topPillRowEl!: HTMLElement;
   /** The 📍 button (mobile only). Kept as a ref so it can be disabled while a `pendingLocation` is already set. */
@@ -3385,8 +3396,32 @@ export class JournalCaptureView extends ItemView {
     });
 
     const sourcePath = day.filePath ?? '';
+    const dayKey = day.date.format('YYYY-MM-DD');
+    const highlight = this.pendingHighlight;
+    let highlightTargetRow: HTMLElement | null = null;
+    // Only the *latest-lineIndex* match wins when timestamps collide — an
+    // append lands at the largest lineIndex, and `sorted` puts that row
+    // first among ties (see the tie-break above).
+    let highlightMatched = false;
     for (const entry of sorted) {
       const row = day.el.createDiv({ cls: 'jp-timeline-entry' });
+
+      if (
+        !highlightMatched &&
+        highlight &&
+        highlight.dateKey === dayKey &&
+        highlight.timestamp === entry.timestamp
+      ) {
+        row.addClass('jp-timeline-entry--just-added');
+        highlightTargetRow = row;
+        highlightMatched = true;
+        // Restart the flash animation if this row is being re-rendered
+        // (e.g. a `create`-event rebuild fires right after ours) — otherwise
+        // the second render lands with the class already applied and the
+        // animation looks stuck at its final frame.
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        row.offsetWidth;
+      }
 
       const dot = row.createDiv({ cls: 'jp-timeline-dot' });
       // "Latest" highlight only applies on today's section (otherwise every
@@ -3422,6 +3457,26 @@ export class JournalCaptureView extends ItemView {
       };
       head.addEventListener('contextmenu', openMenu);
       bubble.addEventListener('contextmenu', openMenu);
+    }
+
+    if (highlightTargetRow) {
+      const target = highlightTargetRow;
+      // rAF lets layout settle before scroll — otherwise scrollIntoView can
+      // race the markdown render inside the bubble and land off-position.
+      // We also defer clearing `pendingHighlight` so a debounced rebuild
+      // (e.g. the vault 'create' event's own scheduleFullRebuild) that fires
+      // right after our own rebuild can still find + highlight + scroll to
+      // the row instead of wiping the state on first paint.
+      window.requestAnimationFrame(() => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      if (this.highlightClearTimer !== null) {
+        window.clearTimeout(this.highlightClearTimer);
+      }
+      this.highlightClearTimer = window.setTimeout(() => {
+        this.pendingHighlight = null;
+        this.highlightClearTimer = null;
+      }, 1500);
     }
   }
 
@@ -5035,15 +5090,23 @@ export class JournalCaptureView extends ItemView {
       }
 
       const targetDate = this.pendingCaptureOverride?.date;
+      const stamp = this.pendingCaptureOverride?.time ?? generateTimestamp();
       const ok = await this.plugin.writeJournalEntry(
         raw,
-        this.pendingCaptureOverride?.time,
+        stamp,
         undefined,
         targetDate,
       );
       if (!ok) return;
 
       const writtenDay = (targetDate ?? moment()).clone().startOf('day');
+      // Flag the new entry so the next renderDayContent pass scrolls to it
+      // and paints a brief highlight — done for today's entries and
+      // backdated ones alike.
+      this.pendingHighlight = {
+        dateKey: writtenDay.format('YYYY-MM-DD'),
+        timestamp: stamp,
+      };
 
       this.textareaEl.value = '';
       this.textareaEl.placeholder = this.pickRandomPlaceholder();
@@ -5060,19 +5123,20 @@ export class JournalCaptureView extends ItemView {
       this.autoResizeTextarea();
 
       // vault.modify will catch-up an already-loaded day's section
-      // automatically; if the written day wasn't mounted (e.g. plugin just
-      // opened with no file, or the entry was backdated to an image's
-      // capture date beyond the loaded window), trigger a full rebuild so
-      // it appears.
+      // automatically. But the capture pane only mounts one day at a time
+      // (`currentDate`), so a backdated write into a different day won't
+      // appear until we switch the view to that day and rebuild.
       const loadedDay = this.days.find(d => d.date.isSame(writtenDay, 'day'));
       if (!loadedDay) {
+        this.currentDate = writtenDay.clone();
         await this.fullRebuild();
       }
 
+      // Scrolling + brief highlight of the new row happens inside
+      // renderDayContent as it renders the entry matching `pendingHighlight`.
+      // A toast confirms the write for both today's and backdated entries.
       if (writtenDay.isSame(moment(), 'day')) {
-        // Scroll to top so user sees the new entry land
-        const scroller = this.containerEl.children[1] as HTMLElement;
-        scroller.scrollTo({ top: 0, behavior: 'smooth' });
+        notice(t('notice.recorded'));
       } else {
         notice(t('notice.recordedToDate', { date: writtenDay.format('YYYY-MM-DD') }));
       }

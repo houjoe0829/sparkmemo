@@ -686,6 +686,40 @@
 .jp-timeline-entry:last-child {
   margin-bottom: 0;
 }
+
+/* Freshly-written entry: brief pulse so the eye lands on it after submit.
+   Applied by renderDayContent when the row matches `pendingHighlight`. */
+.jp-timeline-entry--just-added .jp-timeline-bubble {
+  animation: jp-timeline-entry-flash 2.2s ease-out 1;
+}
+.jp-timeline-entry--just-added .jp-timeline-dot {
+  animation: jp-timeline-dot-flash 2.2s ease-out 1;
+}
+@keyframes jp-timeline-entry-flash {
+  0% {
+    background: color-mix(in srgb, var(--jp-tl-dot) 22%, var(--background-primary));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--jp-tl-dot) 45%, transparent);
+    transform: translateY(-2px);
+  }
+  60% {
+    background: color-mix(in srgb, var(--jp-tl-dot) 10%, var(--background-primary));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--jp-tl-dot) 20%, transparent);
+    transform: translateY(0);
+  }
+  100% {
+    background: inherit;
+    box-shadow: none;
+    transform: translateY(0);
+  }
+}
+@keyframes jp-timeline-dot-flash {
+  0%, 40% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--jp-tl-dot) 35%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 1px var(--jp-tl-dot-ring);
+  }
+}
 .jp-timeline-dot {
   position: absolute;
   left: -22px;

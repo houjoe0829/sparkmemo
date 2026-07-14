@@ -221,6 +221,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'notice.audioDeleted': '🎙️ Deleted {{count}} recording(s) (memo kept)',
     'notice.audioLinkRemovedPartial': '🎙️ Link removed; {{trashed}}/{{total}} recording(s) moved to trash',
     'notice.memoUpdated': '✏️ Updated',
+    'notice.recorded': '✅ Recorded',
     'notice.recordedToDate': '📅 Recorded to {{date}}\'s journal',
     'notice.updateFailed': '❌ Update failed: {{error}}',
 
@@ -463,6 +464,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'notice.audioDeleted': '🎙️ 已删除 {{count}} 个录音文件（memo 保留）',
     'notice.audioLinkRemovedPartial': '🎙️ 链接已移除；{{trashed}}/{{total}} 个录音文件移入回收站',
     'notice.memoUpdated': '✏️ 已更新',
+    'notice.recorded': '✅ 已记录',
     'notice.recordedToDate': '📅 已记录到 {{date}} 的日记',
     'notice.updateFailed': '❌ 更新失败：{{error}}',
 
