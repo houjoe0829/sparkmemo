@@ -692,7 +692,7 @@ export class JournalCaptureView extends ItemView {
     const queue: Array<{ date: moment.Moment; file: TFile }> = [];
     for (const file of Object.values(allNotes)) {
       if (!(file instanceof TFile)) continue;
-      const date = getDateFromFile(file as TFile, 'day');
+      const date = getDateFromFile(file, 'day');
       if (date) queue.push({ date: date.clone().startOf('day'), file });
     }
     queue.sort((a, b) => (a.date.isBefore(b.date) ? 1 : -1));
@@ -868,7 +868,7 @@ export class JournalCaptureView extends ItemView {
       const between = elementChildren.slice(first, last + 1);
       if (between.some(el => !group.includes(el) && el.tagName !== 'BR')) continue;
 
-      const wrapper = document.createElement('div');
+      const wrapper = activeDocument.createElement('div');
       wrapper.className = 'jp-timeline-image-grid';
       wrapper.setAttribute('data-count', String(group.length));
       parent.insertBefore(wrapper, group[0]);
@@ -930,7 +930,7 @@ export class JournalCaptureView extends ItemView {
   /** Walk DOM text nodes and wrap keyword occurrences in highlight spans. */
   private highlightKeyword(el: HTMLElement, query: string) {
     const lower = query.toLowerCase();
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const walker = activeDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const nodes: Text[] = [];
     let node: Node | null;
     while ((node = walker.nextNode())) nodes.push(node as Text);
@@ -940,19 +940,19 @@ export class JournalCaptureView extends ItemView {
       const idx = text.toLowerCase().indexOf(lower);
       if (idx === -1) continue;
 
-      const frag = document.createDocumentFragment();
+      const frag = activeDocument.createDocumentFragment();
       let cursor = 0;
       let pos = text.toLowerCase().indexOf(lower, cursor);
       while (pos !== -1) {
-        if (pos > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, pos)));
-        const mark = document.createElement('mark');
+        if (pos > cursor) frag.appendChild(activeDocument.createTextNode(text.slice(cursor, pos)));
+        const mark = activeDocument.createElement('mark');
         mark.className = 'jp-search-highlight';
         mark.textContent = text.slice(pos, pos + query.length);
         frag.appendChild(mark);
         cursor = pos + query.length;
         pos = text.toLowerCase().indexOf(lower, cursor);
       }
-      if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+      if (cursor < text.length) frag.appendChild(activeDocument.createTextNode(text.slice(cursor)));
       textNode.parentNode?.replaceChild(frag, textNode);
     }
   }
@@ -1080,7 +1080,7 @@ export class JournalCaptureView extends ItemView {
       const items = e.clipboardData?.items;
       if (!items) return;
       // Only intercept if focus is inside our textarea
-      if (!this.inputCardEl.contains(document.activeElement)) return;
+      if (!this.inputCardEl.contains(activeDocument.activeElement)) return;
       const images: File[] = [];
       for (const item of Array.from(items)) {
         if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
@@ -1287,7 +1287,7 @@ export class JournalCaptureView extends ItemView {
       }
 
       recTime.setText(formatDuration(performance.now() - recordStartedAt));
-      rafId = requestAnimationFrame(drawWaveform);
+      rafId = window.requestAnimationFrame(drawWaveform);
     };
 
     const stopRecording = async () => {
@@ -1585,7 +1585,7 @@ export class JournalCaptureView extends ItemView {
           recCanvas.width = Math.max(1, recCanvas.clientWidth) * dpr;
           recCanvas.height = Math.max(1, recCanvas.clientHeight) * dpr;
           recordStartedAt = performance.now();
-          rafId = requestAnimationFrame(drawWaveform);
+          rafId = window.requestAnimationFrame(drawWaveform);
         } catch {
           // Analyser/realtime are optional — recording still works without them.
         }
@@ -2373,7 +2373,7 @@ export class JournalCaptureView extends ItemView {
         height = Math.max(1, Math.round(height * scale));
       }
 
-      const canvas = document.createElement('canvas');
+      const canvas = activeDocument.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
@@ -2904,7 +2904,7 @@ export class JournalCaptureView extends ItemView {
   /** Positions the popup just below the line containing `charIndex`, using a hidden mirror div to measure caret pixel position. */
   private positionTagSuggest(charIndex: number) {
     const ta = this.textareaEl;
-    const mirror = document.createElement('div');
+    const mirror = activeDocument.createElement('div');
     const style = window.getComputedStyle(ta);
     const props: string[] = [
       'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
@@ -2920,13 +2920,13 @@ export class JournalCaptureView extends ItemView {
     mirror.addClass('jp-caret-mirror');
     mirror.setCssStyles(copied as Partial<CSSStyleDeclaration>);
     mirror.textContent = ta.value.slice(0, charIndex);
-    const marker = document.createElement('span');
+    const marker = activeDocument.createElement('span');
     marker.textContent = '​';
     mirror.appendChild(marker);
-    document.body.appendChild(mirror);
+    activeDocument.body.appendChild(mirror);
     const markerTop = marker.offsetTop;
     const lineHeight = parseFloat(style.lineHeight) || marker.offsetHeight;
-    document.body.removeChild(mirror);
+    activeDocument.body.removeChild(mirror);
 
     // inputWrapper (tagSuggestEl's offsetParent) shares its top-left with the
     // textarea, so the mirror's local offsets translate directly, minus the
@@ -3087,7 +3087,7 @@ export class JournalCaptureView extends ItemView {
   /** Positions the popup just below the line containing `charIndex` — reuses the tag popup's mirror-div measurement approach. */
   private positionMentionSuggest(charIndex: number) {
     const ta = this.textareaEl;
-    const mirror = document.createElement('div');
+    const mirror = activeDocument.createElement('div');
     const style = window.getComputedStyle(ta);
     const props: string[] = [
       'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
@@ -3103,13 +3103,13 @@ export class JournalCaptureView extends ItemView {
     mirror.addClass('jp-caret-mirror');
     mirror.setCssStyles(copied as Partial<CSSStyleDeclaration>);
     mirror.textContent = ta.value.slice(0, charIndex);
-    const marker = document.createElement('span');
+    const marker = activeDocument.createElement('span');
     marker.textContent = '​';
     mirror.appendChild(marker);
-    document.body.appendChild(mirror);
+    activeDocument.body.appendChild(mirror);
     const markerTop = marker.offsetTop;
     const lineHeight = parseFloat(style.lineHeight) || marker.offsetHeight;
-    document.body.removeChild(mirror);
+    activeDocument.body.removeChild(mirror);
 
     this.mentionSuggestEl.style.left = `${ta.offsetLeft}px`;
     this.mentionSuggestEl.style.top = `${ta.offsetTop + markerTop + lineHeight - ta.scrollTop}px`;
@@ -4474,7 +4474,7 @@ export class JournalCaptureView extends ItemView {
 
       for (const file of Object.values(all)) {
         if (!(file instanceof TFile)) continue;
-        const d = getDateFromFile(file as TFile, 'day');
+        const d = getDateFromFile(file, 'day');
         if (!d) continue;
         const year = d.year();
         // Cheap to determine (no disk read) — only years actually touched
@@ -4836,7 +4836,7 @@ export class JournalCaptureView extends ItemView {
   }
 
   private setToolbarHidden(hidden: boolean) {
-    document.body.toggleClass('jp-hide-mobile-toolbar', hidden);
+    activeDocument.body.toggleClass('jp-hide-mobile-toolbar', hidden);
   }
 
   // ── Entry context menu (copy / edit / delete) ────────────────────────────
@@ -5867,7 +5867,7 @@ class ImagePreviewModal extends Modal {
       this.updateNavState();
     }
 
-    document.addEventListener('keydown', this.keyHandler);
+    activeDocument.addEventListener('keydown', this.keyHandler);
 
     // Click on the backdrop (anywhere outside the image itself) closes.
     this.contentEl.addEventListener('click', (ev) => {
@@ -5995,7 +5995,7 @@ class ImagePreviewModal extends Modal {
   }
 
   onClose(): void {
-    document.removeEventListener('keydown', this.keyHandler);
+    activeDocument.removeEventListener('keydown', this.keyHandler);
     this.contentEl.empty();
   }
 }

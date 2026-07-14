@@ -90,7 +90,7 @@ export default class SparkMemoPlugin extends Plugin {
   async activateCaptureView() {
     const existing = this.app.workspace.getLeavesOfType(CAPTURE_VIEW_TYPE);
     if (existing.length > 0) {
-      this.app.workspace.revealLeaf(existing[0]);
+      void this.app.workspace.revealLeaf(existing[0]);
       return;
     }
     const leaf: WorkspaceLeaf | null = Platform.isMobile
@@ -98,7 +98,7 @@ export default class SparkMemoPlugin extends Plugin {
       : this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
     await leaf.setViewState({ type: CAPTURE_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    void this.app.workspace.revealLeaf(leaf);
   }
 
   // ── Quick-capture write path (shared) ─────────────────────────────────────
@@ -146,9 +146,14 @@ export default class SparkMemoPlugin extends Plugin {
     const day = targetDate ?? moment();
 
     try {
-      let file = getDailyNote(day, getAllDailyNotes()) as TFile | null;
+      const existing: unknown = getDailyNote(day, getAllDailyNotes());
+      let file: TFile | null = existing instanceof TFile ? existing : null;
       if (!file) {
-        file = (await createDailyNote(day)) as TFile;
+        const created: unknown = await createDailyNote(day);
+        if (!(created instanceof TFile)) {
+          throw new Error('createDailyNote did not return a TFile');
+        }
+        file = created;
       }
       await this.app.vault.process(file, content =>
         appendToJournalSection(content, this.settings, line),
@@ -164,7 +169,7 @@ export default class SparkMemoPlugin extends Plugin {
   // ── Editor extension (source + live-preview) ───────────────────────────────
 
   private createEditorExtensions(): Extension[] {
-    const plugin = this;
+    const getSettings = (): SparkMemoSettings => this.settings;
 
     // ViewPlugin renders timestamp decorations
     const viewPlugin = ViewPlugin.fromClass(
@@ -174,7 +179,7 @@ export default class SparkMemoPlugin extends Plugin {
         constructor(view: EditorView) {
           this.decorations = buildDecorations(
             view.state.doc.toString(),
-            plugin.settings,
+            getSettings(),
           );
         }
 
@@ -188,7 +193,7 @@ export default class SparkMemoPlugin extends Plugin {
           if (needsRebuild) {
             this.decorations = buildDecorations(
               update.state.doc.toString(),
-              plugin.settings,
+              getSettings(),
             );
           }
         }
@@ -199,11 +204,12 @@ export default class SparkMemoPlugin extends Plugin {
     // Transaction filter: reject changes that overlap a timestamp range
     const readonlyFilter = EditorState.transactionFilter.of(
       (tr: Transaction) => {
-        if (!plugin.settings.readonlyTimestamps || !tr.docChanged) return tr;
+        const settings = getSettings();
+        if (!settings.readonlyTimestamps || !tr.docChanged) return tr;
 
         const timestamps = getTimestampRanges(
           tr.startState.doc.toString(),
-          plugin.settings,
+          settings,
         );
         let blocked = false;
 
@@ -234,21 +240,19 @@ export default class SparkMemoPlugin extends Plugin {
    * target section.
    */
   private createEnterKeymap(): Extension {
-    const plugin = this;
-
     return Prec.high(
       keymap.of([
         {
           key: 'Enter',
-          run(view: EditorView): boolean {
-            if (!plugin.settings.autoTimestamp) return false;
+          run: (view: EditorView): boolean => {
+            if (!this.settings.autoTimestamp) return false;
 
             const state = view.state;
             const doc = state.doc.toString();
             const section = findSection(
               doc,
-              plugin.settings.targetHeading,
-              plugin.settings.headingLevel,
+              this.settings.targetHeading,
+              this.settings.headingLevel,
             );
             if (!section) return false;
 
@@ -297,19 +301,17 @@ export default class SparkMemoPlugin extends Plugin {
    * target section.
    */
   private createTabKeymap(): Extension {
-    const plugin = this;
-
     return Prec.high(
       keymap.of([
         {
           key: 'Tab',
-          run(view: EditorView): boolean {
+          run: (view: EditorView): boolean => {
             const state = view.state;
             const doc = state.doc.toString();
             const section = findSection(
               doc,
-              plugin.settings.targetHeading,
-              plugin.settings.headingLevel,
+              this.settings.targetHeading,
+              this.settings.headingLevel,
             );
             if (!section) return false;
 
@@ -327,7 +329,7 @@ export default class SparkMemoPlugin extends Plugin {
             if (!isTopLevel) return false;
 
             const timestampMatch = line.text.match(
-              new RegExp(`^([-*+]\\s+)(${plugin.settings.timestampPattern})\\s+`),
+              new RegExp(`^([-*+]\\s+)(${this.settings.timestampPattern})\\s+`),
             );
 
             if (!timestampMatch) return false;
@@ -336,7 +338,7 @@ export default class SparkMemoPlugin extends Plugin {
             const timestampText = timestampMatch[2];
 
             const afterTimestampMatch = line.text.match(
-              new RegExp(`^([-*+]\\s+)(${plugin.settings.timestampPattern})\\s+(.*)`),
+              new RegExp(`^([-*+]\\s+)(${this.settings.timestampPattern})\\s+(.*)`),
             );
             const contentAfterTimestamp = afterTimestampMatch?.[3] ?? '';
 
@@ -397,7 +399,7 @@ export default class SparkMemoPlugin extends Plugin {
   }
 
   private highlightTimestampsInElement(el: HTMLElement) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const walker = activeDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
     let node: Node | null;
     while ((node = walker.nextNode())) textNodes.push(node as Text);
@@ -412,9 +414,9 @@ export default class SparkMemoPlugin extends Plugin {
       const span = createEl('span', { cls: 'jp-timestamp', text: m[0] });
 
       const parent = textNode.parentNode!;
-      if (before) parent.insertBefore(document.createTextNode(before), textNode);
+      if (before) parent.insertBefore(activeDocument.createTextNode(before), textNode);
       parent.insertBefore(span, textNode);
-      if (after) parent.insertBefore(document.createTextNode(after), textNode);
+      if (after) parent.insertBefore(activeDocument.createTextNode(after), textNode);
       parent.removeChild(textNode);
     }
   }
@@ -422,7 +424,7 @@ export default class SparkMemoPlugin extends Plugin {
   // ── CSS variables & settings plumbing ─────────────────────────────────────
 
   applyCSSVariables() {
-    const root = document.documentElement;
+    const root = activeDocument.documentElement;
     root.style.setProperty('--jp-ts-color', this.settings.timestampColor);
     root.style.setProperty('--jp-ts-bg', this.settings.timestampBgColor);
   }

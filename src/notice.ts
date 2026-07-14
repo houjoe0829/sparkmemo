@@ -27,7 +27,7 @@ export function notice(message: string, timeout?: number): Notice {
   const { icon, text } = parseLeadingIcon(message);
   if (!icon) return new Notice(message, timeout);
 
-  const frag = document.createDocumentFragment();
+  const frag = activeDocument.createDocumentFragment();
   const wrap = frag.createSpan({ cls: 'jp-notice' });
   const iconEl = wrap.createSpan({ cls: 'jp-notice__icon' });
   setIcon(iconEl, icon);
