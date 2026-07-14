@@ -887,15 +887,20 @@ export class JournalCaptureView extends ItemView {
    * one out.
    */
   private attachImagePreviews(bubble: HTMLElement) {
-    for (const embed of Array.from(bubble.querySelectorAll('.internal-embed'))) {
-      const img = embed.querySelector('img');
-      if (!img) continue;
-      (embed as HTMLElement).addEventListener('click', evt => {
+    const embeds = Array.from(bubble.querySelectorAll('.internal-embed')).filter(
+      (el): el is HTMLElement => !!el.querySelector('img'),
+    );
+    const items: ImagePreviewItem[] = embeds.map(el => {
+      const img = el.querySelector('img')!;
+      return { src: img.getAttribute('src') ?? '', alt: img.getAttribute('alt') ?? '' };
+    });
+    embeds.forEach((embed, idx) => {
+      embed.addEventListener('click', evt => {
         evt.preventDefault();
         evt.stopPropagation();
-        new ImagePreviewModal(this.app, img.getAttribute('src') ?? '', img.getAttribute('alt') ?? '').open();
+        new ImagePreviewModal(this.app, items, idx).open();
       });
-    }
+    });
   }
 
   /**
@@ -1853,14 +1858,18 @@ export class JournalCaptureView extends ItemView {
       // Plain horizontal row of thumbnails — the grid layout is for the
       // submitted timeline entry, not this pending preview.
       const grid = this.attachmentListEl.createDiv({ cls: 'jp-capture-image-grid' });
-      for (const file of this.pendingImages) {
+      const items: ImagePreviewItem[] = this.pendingImages.map(f => ({
+        src: this.app.vault.getResourcePath(f),
+        alt: f.name,
+      }));
+      this.pendingImages.forEach((file, idx) => {
+        const src = items[idx].src;
         const thumb = grid.createDiv({ cls: 'jp-capture-attachment-thumb' });
         const imgWrap = thumb.createDiv({ cls: 'jp-capture-attachment-thumb-img' });
-        const src = this.app.vault.getResourcePath(file);
         const img = imgWrap.createEl('img', { attr: { src } });
         img.alt = file.name;
         imgWrap.addEventListener('click', () => {
-          new ImagePreviewModal(this.app, src, file.name).open();
+          new ImagePreviewModal(this.app, items, idx).open();
         });
         const removeBtn = thumb.createEl('button', {
           cls: 'jp-capture-attachment-remove',
@@ -1881,7 +1890,7 @@ export class JournalCaptureView extends ItemView {
             this.renderMetadataHintPill();
           }
         });
-      }
+      });
     }
 
     for (const audio of this.pendingAudio) {
@@ -5783,35 +5792,87 @@ class CalendarPickerModal extends Modal {
 
 // ── Image preview modal ──────────────────────────────────────────────────
 
+/** One entry in the preview carousel. */
+interface ImagePreviewItem { src: string; alt: string; }
+
 /** Full-size, chrome-free preview of a pending image thumbnail. */
 class ImagePreviewModal extends Modal {
   private scale = 1;
   private tx = 0;
   private ty = 0;
   private img!: HTMLImageElement;
+  private prevBtn: HTMLButtonElement | null = null;
+  private nextBtn: HTMLButtonElement | null = null;
+  private counterEl: HTMLElement | null = null;
   private dragging = false;
   private dragStartX = 0;
   private dragStartY = 0;
   private txStart = 0;
   private tyStart = 0;
   private moved = false;
+  private items: ImagePreviewItem[];
+  private index: number;
+  private keyHandler = (ev: KeyboardEvent) => this.onKeyDown(ev);
 
-  constructor(app: import('obsidian').App, private src: string, private alt: string) {
+  constructor(
+    app: import('obsidian').App,
+    itemsOrSrc: ImagePreviewItem[] | string,
+    startIndexOrAlt: number | string = 0,
+  ) {
     super(app);
+    // Backwards-compatible: single string + alt still works.
+    if (typeof itemsOrSrc === 'string') {
+      this.items = [{ src: itemsOrSrc, alt: typeof startIndexOrAlt === 'string' ? startIndexOrAlt : '' }];
+      this.index = 0;
+    } else {
+      this.items = itemsOrSrc;
+      const i = typeof startIndexOrAlt === 'number' ? startIndexOrAlt : 0;
+      this.index = Math.max(0, Math.min(i, this.items.length - 1));
+    }
   }
 
   onOpen(): void {
     this.modalEl.addClass('jp-image-preview-modal');
+    const current = this.items[this.index];
     const img = this.contentEl.createEl('img', {
       cls: 'jp-image-preview-img',
-      attr: { src: this.src, alt: this.alt },
+      attr: { src: current.src, alt: current.alt },
     });
     this.img = img;
     this.applyTransform();
 
+    if (this.items.length > 1) {
+      this.prevBtn = this.contentEl.createEl('button', {
+        cls: 'jp-image-preview-nav jp-image-preview-nav--prev',
+        attr: { 'aria-label': 'Previous' },
+      });
+      setIcon(this.prevBtn, 'chevron-left');
+      this.prevBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.step(-1);
+      });
+
+      this.nextBtn = this.contentEl.createEl('button', {
+        cls: 'jp-image-preview-nav jp-image-preview-nav--next',
+        attr: { 'aria-label': 'Next' },
+      });
+      setIcon(this.nextBtn, 'chevron-right');
+      this.nextBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.step(1);
+      });
+
+      this.counterEl = this.contentEl.createDiv({ cls: 'jp-image-preview-counter' });
+      this.updateCounter();
+      this.updateNavState();
+    }
+
+    document.addEventListener('keydown', this.keyHandler);
+
     // Click on the backdrop (anywhere outside the image itself) closes.
     this.contentEl.addEventListener('click', (ev) => {
       if (ev.target === img) return;
+      if (ev.target instanceof HTMLElement && ev.target.closest('.jp-image-preview-nav')) return;
       this.close();
     });
 
@@ -5897,7 +5958,44 @@ class ImagePreviewModal extends Modal {
     this.img.style.cursor = this.scale > 1 ? (this.dragging ? 'grabbing' : 'grab') : 'zoom-out';
   }
 
+  private step(delta: number): void {
+    if (this.items.length <= 1) return;
+    const next = this.index + delta;
+    if (next < 0 || next >= this.items.length) return;
+    this.index = next;
+    const item = this.items[this.index];
+    this.img.setAttribute('src', item.src);
+    this.img.setAttribute('alt', item.alt);
+    // Reset zoom/pan when switching photos.
+    this.scale = 1;
+    this.tx = 0;
+    this.ty = 0;
+    this.applyTransform();
+    this.updateCounter();
+    this.updateNavState();
+  }
+
+  private updateNavState(): void {
+    if (this.prevBtn) this.prevBtn.toggleClass('is-disabled', this.index === 0);
+    if (this.nextBtn) this.nextBtn.toggleClass('is-disabled', this.index === this.items.length - 1);
+  }
+
+  private updateCounter(): void {
+    if (this.counterEl) this.counterEl.setText(`${this.index + 1} / ${this.items.length}`);
+  }
+
+  private onKeyDown(ev: KeyboardEvent): void {
+    if (ev.key === 'ArrowLeft') {
+      ev.preventDefault();
+      this.step(-1);
+    } else if (ev.key === 'ArrowRight') {
+      ev.preventDefault();
+      this.step(1);
+    }
+  }
+
   onClose(): void {
+    document.removeEventListener('keydown', this.keyHandler);
     this.contentEl.empty();
   }
 }
