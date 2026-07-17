@@ -1753,7 +1753,6 @@ export class JournalCaptureView extends ItemView {
 
     this.submitBtn = actions.createEl('button', {
       cls: 'jp-capture-submit',
-      attr: { 'aria-label': t('capture.submit') },
     });
     setIcon(this.submitBtn, 'arrow-up');
     this.submitBtn.addEventListener('click', () => {
