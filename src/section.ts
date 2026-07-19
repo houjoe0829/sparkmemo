@@ -382,16 +382,55 @@ export function extractImageEmbeds(text: string): string[] {
 }
 
 /**
- * Strip all audio/image wiki-embed tokens out of a standalone piece of entry
+ * Recognized "generic file" extensions — anything the file picker accepts
+ * as an attachment card (PDF, docs, archives, video, etc.). Note embeds
+ * (`.md`, no extension) are intentionally excluded so `![[SomeNote]]` stays
+ * a note embed, not an attachment card.
+ */
+const FILE_EXT_RE = /\.[a-z0-9]{1,8}$/i;
+
+/**
+ * True when a path should be treated as a "generic file" attachment
+ * (i.e. not audio, not image, and not a note embed).
+ */
+function isFileAttachmentPath(path: string): boolean {
+  if (path.length === 0) return false;
+  if (AUDIO_EXT_RE.test(path)) return false;
+  if (IMAGE_EXT_RE.test(path)) return false;
+  if (/\.md$/i.test(path)) return false;
+  return FILE_EXT_RE.test(path);
+}
+
+/**
+ * Extract vault-relative paths of "generic file" embeds — anything that is
+ * neither audio nor image nor a note (PDF, docx, zip, mp4, etc.). Used to
+ * rebuild the pending-attachment strip on edit and to render file cards in
+ * the timeline.
+ */
+export function extractFileEmbeds(text: string): string[] {
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  EMBED_RE.lastIndex = 0;
+  while ((m = EMBED_RE.exec(text)) !== null) {
+    const path = m[1].trim();
+    if (isFileAttachmentPath(path)) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * Strip all audio/image/file wiki-embed tokens out of a standalone piece of entry
  * text (not the whole document), collapsing whitespace left behind. Used to
  * populate the input box for "编辑" — the embeds themselves are restored as
  * pending attachment previews instead, so the raw `![[...]]` text shouldn't
- * also show up for editing.
+ * also show up for editing. Note embeds (`![[SomeNote]]`) are preserved.
  */
 export function stripAttachmentEmbeds(text: string): string {
-  const stripped = text.replace(EMBED_RE, (full, path: string) =>
-    AUDIO_EXT_RE.test(path.trim()) || IMAGE_EXT_RE.test(path.trim()) ? '' : full,
-  );
+  const stripped = text.replace(EMBED_RE, (full, path: string) => {
+    const p = path.trim();
+    if (AUDIO_EXT_RE.test(p) || IMAGE_EXT_RE.test(p) || isFileAttachmentPath(p)) return '';
+    return full;
+  });
   return stripped
     .split('\n')
     .map(line => line.trim())

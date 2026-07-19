@@ -405,6 +405,108 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Pending-file card: shown in the composer's attachment strip for
+   non-image, non-audio files. Same silhouette as the audio card so the row
+   stays visually consistent, but wider to fit the file name and size. */
+.jp-capture-attachment-file {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 260px;
+  height: 56px;
+  padding: 0 34px 0 12px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.jp-capture-attachment-file:hover {
+  background: var(--background-modifier-hover);
+}
+.jp-capture-attachment-file-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--jp-tl-dot);
+  flex-shrink: 0;
+}
+.jp-capture-attachment-file-icon svg {
+  width: 20px !important;
+  height: 20px !important;
+}
+.jp-capture-attachment-file-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.jp-capture-attachment-file-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jp-capture-attachment-file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Timeline file card: replaces the raw `![[file.pdf]]` embed in rendered
+   bubbles. Slightly larger + block-level so it lays out on its own line
+   inside the memo body. */
+.jp-timeline-file-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 10px 14px;
+  margin: 4px 0;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  text-decoration: none;
+  cursor: pointer;
+}
+.jp-timeline-file-card:hover {
+  background: var(--background-modifier-hover);
+  text-decoration: none;
+}
+.jp-timeline-file-card-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--jp-tl-dot);
+  flex-shrink: 0;
+}
+.jp-timeline-file-card-icon svg {
+  width: 22px !important;
+  height: 22px !important;
+}
+.jp-timeline-file-card-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.jp-timeline-file-card-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.jp-timeline-file-card-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Capture-time override pill: shown next to the image/mic buttons once the
    user opts into an image's capture time instead of "now". */
 .jp-capture-time-pill {
@@ -958,6 +1060,16 @@
 }
 .jp-timeline-bubble .internal-embed {
   display: block;
+}
+/* Non-image / non-audio embeds (PDF、视频、通用文件等) 会被 renderFileEmbedCards
+   替换成紧凑的文件卡片。替换发生在 MarkdownRenderer.render 的 .then 回调里，
+   在此之前 Obsidian 会先渲染出一个很大的默认预览（PDF iframe、视频播放器等），
+   导致气泡瞬间被撑高。这里先把这些原始 embed 藏起来，等替换后的 .jp-timeline-file-card
+   出现即可，避免 memo 列表在提交后闪一下变形。 */
+.jp-timeline-bubble .internal-embed.pdf-embed:not(.image-embed),
+.jp-timeline-bubble .internal-embed.file-embed:not(.image-embed),
+.jp-timeline-bubble .internal-embed.video-embed:not(.image-embed) {
+  display: none;
 }
 /* Embedded audio recording — same top gap as an embedded image, so a memo
    ending in a voice note doesn't sit noticeably closer to its text than one

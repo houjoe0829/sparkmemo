@@ -43,6 +43,7 @@ import {
   TAG_TOKEN_RE,
   deleteEntryFromSection,
   extractAudioEmbeds,
+  extractFileEmbeds,
   extractImageEmbeds,
   findSection,
   formatTimeHHMM,
@@ -196,8 +197,14 @@ export class JournalCaptureView extends ItemView {
   /** Hard cap on pending images per entry — keeps the preview grid to a single row/2×2 square. */
   private static readonly MAX_PENDING_IMAGES = 9;
   private static readonly MAX_PENDING_AUDIO = 1;
+  /** Hard cap on pending files (non-image, non-audio attachments) per entry. */
+  private static readonly MAX_PENDING_FILES = 9;
+  /** Per-file size cap (bytes). Images can exceed this if compression brings them under. */
+  private static readonly MAX_FILE_BYTES = 10 * 1024 * 1024;
   /** Recordings made but not yet appended to the note text; flushed on submit. */
   private pendingAudio: { file: TFile; duration: string }[] = [];
+  /** Files (non-image, non-audio) picked but not yet appended; flushed on submit. */
+  private pendingFiles: TFile[] = [];
   /**
    * Date + HH:MM taken from a photo's capture time, overriding "today, now"
    * for the next submit — the entry is written into `date`'s daily note
@@ -817,6 +824,7 @@ export class JournalCaptureView extends ItemView {
         this.highlightKeyword(bubble, query);
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
+        this.renderFileEmbedCards(bubble);
         this.attachTagClickHandlers(bubble);
       });
 
@@ -904,6 +912,50 @@ export class JournalCaptureView extends ItemView {
   }
 
   /**
+   * Replace generic-file `![[...]]` embeds (PDFs, docs, archives, video —
+   * anything that isn't image/audio/note) in a rendered bubble with a
+   * compact file card. Clicking the card defers to Obsidian's default open
+   * behaviour — matches the pending-attachment strip's click handler so the
+   * timeline and composer feel consistent.
+   */
+  private renderFileEmbedCards(bubble: HTMLElement): void {
+    const embeds = Array.from(bubble.querySelectorAll<HTMLElement>('.internal-embed'));
+    for (const embed of embeds) {
+      if (embed.querySelector('img')) continue; // handled by image code path
+      const src = embed.getAttribute('src') ?? '';
+      const path = src.split('#')[0].split('|')[0].trim();
+      if (path.length === 0) continue;
+      const abstract = this.app.metadataCache.getFirstLinkpathDest(path, '');
+      if (!(abstract instanceof TFile)) continue;
+      const ext = abstract.extension.toLowerCase();
+      // Audio still needs Obsidian's own player; notes are legitimate embeds;
+      // images are handled above. Only intercept the "generic file" shape.
+      if (/^(m4a|mp3|wav|ogg|flac|opus|aac|webm)$/.test(ext)) continue;
+      if (ext === 'md' || ext === '') continue;
+      if (/^(png|jpe?g|gif|webp|bmp|svg|heic|heif|tiff?)$/.test(ext)) continue;
+
+      const card = activeDocument.createElement('a');
+      card.className = 'jp-timeline-file-card';
+      card.setAttribute('href', '#');
+      card.setAttribute('aria-label', t('capture.openFile'));
+      const iconEl = card.createSpan({ cls: 'jp-timeline-file-card-icon' });
+      setIcon(iconEl, fileIconName(ext));
+      const meta = card.createDiv({ cls: 'jp-timeline-file-card-meta' });
+      meta.createSpan({ cls: 'jp-timeline-file-card-name', text: abstract.name });
+      meta.createSpan({
+        cls: 'jp-timeline-file-card-size',
+        text: formatBytes(abstract.stat.size),
+      });
+      card.addEventListener('click', evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.openFileWithDefaultApp(abstract);
+      });
+      embed.replaceWith(card);
+    }
+  }
+
+  /**
    * Redirects clicks on rendered `#tag` links (Obsidian's own `a.tag`
    * anchors) away from core's default tag search and into this plugin's
    * tag aggregation tab instead.
@@ -917,6 +969,44 @@ export class JournalCaptureView extends ItemView {
         if (tag) void this.openTagAggregation(tag);
       });
     }
+    // 在侧栏里渲染出来的 wikilink（`.internal-link`），Obsidian 全局委托
+    // 不总能可靠触发（点了没反应）。手动接管：把点击派发到主编辑区，
+    // 而不是在侧栏内部打开。
+    for (const a of Array.from(bubble.querySelectorAll<HTMLAnchorElement>('a.internal-link'))) {
+      a.addEventListener('click', evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        const href = a.getAttribute('data-href') || a.getAttribute('href') || '';
+        if (!href) return;
+        const newLeaf = evt.metaKey || evt.ctrlKey;
+        this.openInternalLink(href, newLeaf);
+      });
+    }
+  }
+
+  /**
+   * 打开 wikilink 指向的笔记。若已经有 tab 打开了这个文件，直接激活该 tab；
+   * 否则再新开。按住 ⌘/Ctrl 时强制新开一个 tab。
+   */
+  private openInternalLink(href: string, forceNewLeaf: boolean): void {
+    if (!forceNewLeaf) {
+      const target = this.app.metadataCache.getFirstLinkpathDest(href, '');
+      if (target) {
+        let existing: import('obsidian').WorkspaceLeaf | null = null;
+        this.app.workspace.iterateAllLeaves(leaf => {
+          if (existing) return;
+          const state = leaf.getViewState();
+          if (state.type === 'markdown' && (state.state as { file?: string })?.file === target.path) {
+            existing = leaf;
+          }
+        });
+        if (existing) {
+          this.app.workspace.setActiveLeaf(existing, { focus: true });
+          return;
+        }
+      }
+    }
+    void this.app.workspace.openLinkText(href, '', forceNewLeaf);
   }
 
   /** Switches to the tag aggregation tab and drills straight into `tag`. */
@@ -1075,33 +1165,42 @@ export class JournalCaptureView extends ItemView {
     this.registerEvent(this.app.vault.on('create', () => { this.mentionCache = null; }));
     this.registerEvent(this.app.vault.on('delete', () => { this.mentionCache = null; }));
     this.registerEvent(this.app.vault.on('rename', () => { this.mentionCache = null; }));
-    // Image paste: intercept at document level (capture phase) for reliability
+    // Attachment paste (images + generic files): intercept at document level
+    // (capture phase) for reliability
     this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
       // Only intercept if focus is inside our textarea
       if (!this.inputCardEl.contains(activeDocument.activeElement)) return;
       const images: File[] = [];
+      const others: File[] = [];
       for (const item of Array.from(items)) {
-        if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+        if (item.kind !== 'file') continue;
         const blob = item.getAsFile();
-        if (blob) images.push(blob);
+        if (!blob) continue;
+        if (item.type.startsWith('image/')) images.push(blob);
+        else others.push(blob);
       }
-      if (images.length === 0) return;
+      if (images.length === 0 && others.length === 0) return;
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      await this.addImageFiles(images);
+      if (images.length > 0) await this.addImageFiles(images);
+      if (others.length > 0) await this.addFiles(others);
     }, true);
-    // Image drag & drop
+    // Attachment drag & drop (images route to image pipeline for compression;
+    // non-image files go through the file pipeline with the 10MB cap).
     this.textareaEl.addEventListener('drop', async (e) => {
       const files = e.dataTransfer?.files;
       if (!files) return;
-      const images = Array.from(files).filter(f => f.type.startsWith('image/'));
-      if (images.length === 0) return;
+      const all = Array.from(files);
+      const images = all.filter(f => f.type.startsWith('image/'));
+      const others = all.filter(f => !f.type.startsWith('image/'));
+      if (images.length === 0 && others.length === 0) return;
       e.preventDefault();
       e.stopPropagation();
-      await this.addImageFiles(images);
+      if (images.length > 0) await this.addImageFiles(images);
+      if (others.length > 0) await this.addFiles(others);
     });
     this.textareaEl.addEventListener('dragover', (e) => {
       if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
@@ -1124,6 +1223,28 @@ export class JournalCaptureView extends ItemView {
       fileInput.value = '';
       if (images.length === 0) return;
       await this.addImageFiles(images);
+    });
+
+    // Hidden file input for generic-file upload. Accepts any type; images
+    // picked through here still get routed to the image pipeline (with
+    // compression) so users don't lose that automatically.
+    const genericFileInput = this.inputCardEl.createEl('input', {
+      cls: 'jp-capture-image-input',
+      attr: {
+        type: 'file',
+        multiple: 'true',
+      },
+    });
+    genericFileInput.hide();
+    genericFileInput.addEventListener('change', async () => {
+      const files = genericFileInput.files;
+      if (!files || files.length === 0) return;
+      const arr = Array.from(files);
+      genericFileInput.value = '';
+      const images = arr.filter(f => f.type.startsWith('image/'));
+      const others = arr.filter(f => !f.type.startsWith('image/'));
+      if (images.length > 0) await this.addImageFiles(images);
+      if (others.length > 0) await this.addFiles(others);
     });
 
     // Hidden file input for image upload
@@ -1461,6 +1582,10 @@ export class JournalCaptureView extends ItemView {
         notice(t('notice.imageAddedNoRecording'));
         return;
       }
+      if (this.pendingFiles.length > 0) {
+        notice(t('notice.fileAddedNoRecording'));
+        return;
+      }
       if (this.pendingAudio.length >= JournalCaptureView.MAX_PENDING_AUDIO) {
         notice(t('notice.maxOneRecording'));
         return;
@@ -1638,9 +1763,13 @@ export class JournalCaptureView extends ItemView {
       const end = textarea.selectionEnd;
       const before = textarea.value.substring(0, start);
       const after = textarea.value.substring(end);
+      // Obsidian 只在 '#' 前是空白/行首时才把它当作标签触发。若光标在词中间，
+      // 先补一个空格，避免 '#' 粘在前一个字符上失效。
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? ' #' : '#';
       textarea.focus();
-      textarea.value = before + '#' + after;
-      const newPos = start + 1;
+      textarea.value = before + insert + after;
+      const newPos = start + insert.length;
       textarea.setSelectionRange(newPos, newPos);
       textarea.dispatchEvent(new Event('input'));
     });
@@ -1697,24 +1826,35 @@ export class JournalCaptureView extends ItemView {
     };
 
     plusBtn.addEventListener('click', (evt: MouseEvent) => {
-      // Images and audio are mutually exclusive per entry — once one kind
-      // has a pending attachment, the other option is grayed out. Images
-      // additionally gray out once the 4-image cap is reached.
+      // Audio is the exclusive kind: once a recording is pending, images and
+      // files are blocked, and vice versa. Images and files can freely
+      // combine with each other. Per-kind caps still apply.
       const hasAudio = this.pendingAudio.length > 0;
       const hasImages = this.pendingImages.length > 0;
+      const hasFiles = this.pendingFiles.length > 0;
       const imageMaxedOut = this.pendingImages.length >= JournalCaptureView.MAX_PENDING_IMAGES;
+      const fileMaxedOut = this.pendingFiles.length >= JournalCaptureView.MAX_PENDING_FILES;
       const audioMaxedOut = this.pendingAudio.length >= JournalCaptureView.MAX_PENDING_AUDIO;
       const imageDisabled = hasAudio || imageMaxedOut;
-      const micDisabled = hasImages || audioMaxedOut;
+      const fileDisabled = hasAudio || fileMaxedOut;
+      const micDisabled = hasImages || hasFiles || audioMaxedOut;
 
       const menu = new Menu();
       menu.addItem(item => item
-        .setTitle(t('capture.uploadImage', { max: String(JournalCaptureView.MAX_PENDING_IMAGES) }))
+        .setTitle(t('capture.uploadImage'))
         .setIcon('image')
         .setDisabled(imageDisabled)
         .onClick(() => {
           if (imageDisabled) return;
           fileInput.click();
+        }));
+      menu.addItem(item => item
+        .setTitle(t('capture.uploadFile'))
+        .setIcon('paperclip')
+        .setDisabled(fileDisabled)
+        .onClick(() => {
+          if (fileDisabled) return;
+          genericFileInput.click();
         }));
       menu.addItem(item => item
         .setTitle(t('capture.recordAudio'))
@@ -1847,10 +1987,12 @@ export class JournalCaptureView extends ItemView {
     this.refreshSubmitState();
   }
 
-  /** Re-renders the attachment strip from `pendingImages` and `pendingAudio`. */
+  /** Re-renders the attachment strip from `pendingImages`, `pendingFiles` and `pendingAudio`. */
   private renderAttachmentList() {
     this.attachmentListEl.empty();
-    const isEmpty = this.pendingImages.length === 0 && this.pendingAudio.length === 0;
+    const isEmpty = this.pendingImages.length === 0
+      && this.pendingAudio.length === 0
+      && this.pendingFiles.length === 0;
     this.attachmentListEl.toggleClass('jp-capture-attachments--empty', isEmpty);
 
     if (this.pendingImages.length > 0) {
@@ -1913,6 +2055,55 @@ export class JournalCaptureView extends ItemView {
         }
       });
     }
+
+    for (const file of this.pendingFiles) {
+      const card = this.attachmentListEl.createDiv({ cls: 'jp-capture-attachment-file' });
+      const iconEl = card.createSpan({ cls: 'jp-capture-attachment-file-icon' });
+      setIcon(iconEl, fileIconName(file.extension));
+      const meta = card.createDiv({ cls: 'jp-capture-attachment-file-meta' });
+      meta.createSpan({ cls: 'jp-capture-attachment-file-name', text: file.name });
+      meta.createSpan({
+        cls: 'jp-capture-attachment-file-size',
+        text: formatBytes(file.stat.size),
+      });
+      card.addEventListener('click', (evt) => {
+        // Ignore clicks on the remove button — its own handler takes over.
+        if ((evt.target as HTMLElement).closest('.jp-capture-attachment-remove')) return;
+        this.openFileWithDefaultApp(file);
+      });
+      const removeBtn = card.createEl('button', {
+        cls: 'jp-capture-attachment-remove',
+        attr: { 'aria-label': t('capture.removeFile') },
+      });
+      setIcon(removeBtn, 'x');
+      removeBtn.addEventListener('click', async (evt) => {
+        evt.stopPropagation();
+        this.pendingFiles = this.pendingFiles.filter(f => f !== file);
+        this.renderAttachmentList();
+        this.refreshSubmitState();
+        try {
+          await this.app.fileManager.trashFile(file);
+        } catch (err) {
+          console.error('[Spark Memo] trash pending file failed', err);
+        }
+      });
+    }
+  }
+
+  /**
+   * Open an attachment with Obsidian's default handling — internal preview
+   * (PDF/Markdown/etc.) when supported, otherwise the OS default app.
+   * Matches how the standard `![[file.pdf]]` embed reacts to a click.
+   */
+  private openFileWithDefaultApp(file: TFile): void {
+    // `openWithDefaultApp` is untyped on older Obsidian typings — cast
+    // through unknown so this compiles without a `@ts-ignore`.
+    const api = this.app as unknown as { openWithDefaultApp?: (path: string) => Promise<void> };
+    if (typeof api.openWithDefaultApp === 'function') {
+      void api.openWithDefaultApp(file.path);
+      return;
+    }
+    void this.app.workspace.openLinkText(file.path, '', false);
   }
 
   /**
@@ -2163,6 +2354,7 @@ export class JournalCaptureView extends ItemView {
     const { text: textWithoutLocation, location } = extractLocationTag(entry.text);
     const audioPaths = extractAudioEmbeds(textWithoutLocation);
     const imagePaths = extractImageEmbeds(textWithoutLocation);
+    const filePaths = extractFileEmbeds(textWithoutLocation);
 
     this.textareaEl.value = stripAttachmentEmbeds(textWithoutLocation);
     this.pendingLocation = location
@@ -2173,6 +2365,11 @@ export class JournalCaptureView extends ItemView {
       .map(p => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TFile => f instanceof TFile);
     this.pendingImages = imageFiles;
+
+    const fileAttachments = filePaths
+      .map(p => this.app.vault.getAbstractFileByPath(p))
+      .filter((f): f is TFile => f instanceof TFile);
+    this.pendingFiles = fileAttachments;
 
     this.pendingAudio = [];
     const audioFile = audioPaths
@@ -2186,7 +2383,9 @@ export class JournalCaptureView extends ItemView {
       this.pendingAudio = [{ file: audioFile, duration }];
     }
 
-    const missingCount = (audioPaths.length - (audioFile ? 1 : 0)) + (imagePaths.length - imageFiles.length);
+    const missingCount = (audioPaths.length - (audioFile ? 1 : 0))
+      + (imagePaths.length - imageFiles.length)
+      + (filePaths.length - fileAttachments.length);
     if (missingCount > 0) {
       notice(t('notice.attachmentsMissing', { count: String(missingCount) }));
     }
@@ -2210,6 +2409,7 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.placeholder = this.pickRandomPlaceholder();
     this.pendingImages = [];
     this.pendingAudio = [];
+    this.pendingFiles = [];
     this.pendingLocation = null;
     this.pendingMetadataHint = null;
     this.lastAppliedMetadata = null;
@@ -2543,6 +2743,68 @@ export class JournalCaptureView extends ItemView {
     notice(t('notice.metadataApplied', { parts: appliedParts.join(t('capture.metadataJoiner')) }));
   }
 
+  /**
+   * Save picked/pasted/dropped generic files (non-image, non-audio) to the
+   * vault and add them to the pending strip. Enforces `MAX_FILE_BYTES` per
+   * file (images that exceed this are handled by the image pipeline, which
+   * can compress under the limit).
+   */
+  private async addFiles(files: File[]): Promise<void> {
+    if (this.pendingAudio.length > 0) {
+      notice(t('notice.audioAddedNoFile'));
+      return;
+    }
+    const room = JournalCaptureView.MAX_PENDING_FILES - this.pendingFiles.length;
+    if (room <= 0) {
+      notice(t('notice.maxFiles', { max: String(JournalCaptureView.MAX_PENDING_FILES) }));
+      return;
+    }
+    const accepted = files.slice(0, room);
+    if (files.length > accepted.length) {
+      notice(t('notice.maxFilesIgnored', {
+        max: String(JournalCaptureView.MAX_PENDING_FILES),
+        ignored: String(files.length - accepted.length),
+      }));
+    }
+
+    const sizeLimit = JournalCaptureView.MAX_FILE_BYTES;
+    const oversized = accepted.filter(f => f.size > sizeLimit);
+    const withinLimit = accepted.filter(f => f.size <= sizeLimit);
+
+    if (oversized.length === 1) {
+      notice(t('notice.fileTooLarge', {
+        name: oversized[0].name,
+        limit: formatBytes(sizeLimit),
+      }));
+    } else if (oversized.length > 1) {
+      notice(t('notice.filesTooLarge', {
+        count: String(oversized.length),
+        limit: formatBytes(sizeLimit),
+      }));
+    }
+
+    try {
+      for (const file of withinLimit) {
+        const saved = await this.saveFileToVault(file);
+        this.pendingFiles.push(saved);
+      }
+      this.renderAttachmentList();
+      this.refreshSubmitState();
+    } catch (err) {
+      notice(t('notice.fileSaveFailed', { error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
+  /**
+   * Write a picked file into the vault under the configured attachment
+   * folder. Preserves the original base name (de-duped by `resolveAttachmentPath`).
+   */
+  private async saveFileToVault(file: File): Promise<TFile> {
+    const filePath = await this.resolveAttachmentPath(this.plugin.settings.imageFolder, file.name);
+    const buffer = await file.arrayBuffer();
+    return this.app.vault.createBinary(filePath, buffer);
+  }
+
   private async saveAudioToVault(blob: Blob): Promise<TFile> {
     const ext = blob.type === 'audio/mp4' ? 'm4a' : 'webm';
     const now = new Date();
@@ -2753,7 +3015,8 @@ export class JournalCaptureView extends ItemView {
   private refreshSubmitState() {
     const hasContent = this.textareaEl.value.trim().length > 0
       || this.pendingImages.length > 0
-      || this.pendingAudio.length > 0;
+      || this.pendingAudio.length > 0
+      || this.pendingFiles.length > 0;
     this.submitBtn.toggleClass('jp-capture-submit--disabled', !hasContent);
     this.submitBtn.disabled = !hasContent;
   }
@@ -3453,6 +3716,7 @@ export class JournalCaptureView extends ItemView {
         .then(() => {
           this.applyImageGrid(bubble);
           this.attachImagePreviews(bubble);
+          this.renderFileEmbedCards(bubble);
           this.attachTagClickHandlers(bubble);
         });
 
@@ -3675,6 +3939,7 @@ export class JournalCaptureView extends ItemView {
       void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
+        this.renderFileEmbedCards(bubble);
         this.attachTagClickHandlers(bubble);
       });
 
@@ -4161,6 +4426,7 @@ export class JournalCaptureView extends ItemView {
       void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
+        this.renderFileEmbedCards(bubble);
         this.attachTagClickHandlers(bubble);
       });
 
@@ -4368,6 +4634,7 @@ export class JournalCaptureView extends ItemView {
     void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
       this.applyImageGrid(bubble);
       this.attachImagePreviews(bubble);
+      this.renderFileEmbedCards(bubble);
       this.attachTagClickHandlers(bubble);
     });
 
@@ -5048,7 +5315,12 @@ export class JournalCaptureView extends ItemView {
 
   private async handleSubmit(): Promise<void> {
     const text = this.textareaEl.value;
-    if (text.trim().length === 0 && this.pendingImages.length === 0 && this.pendingAudio.length === 0) return;
+    if (
+      text.trim().length === 0
+      && this.pendingImages.length === 0
+      && this.pendingAudio.length === 0
+      && this.pendingFiles.length === 0
+    ) return;
 
     const locationTag = this.pendingLocation
       ? ` [${this.pendingLocation.name ?? t('location.placeholder')}](geo:${this.pendingLocation.latitude.toFixed(6)},${this.pendingLocation.longitude.toFixed(6)})`
@@ -5057,6 +5329,7 @@ export class JournalCaptureView extends ItemView {
 
     const embeds = [
       ...this.pendingImages.map(file => `![[${file.path}]]`),
+      ...this.pendingFiles.map(file => `![[${file.path}]]`),
       ...this.pendingAudio.map(a => `![[${a.file.path}]]`),
     ].join(' ');
     const raw = embeds
@@ -5083,6 +5356,7 @@ export class JournalCaptureView extends ItemView {
         this.textareaEl.placeholder = this.pickRandomPlaceholder();
         this.pendingImages = [];
         this.pendingAudio = [];
+        this.pendingFiles = [];
         this.pendingCaptureOverride = null;
         this.pendingLocation = null;
         this.pendingMetadataHint = null;
@@ -5120,6 +5394,7 @@ export class JournalCaptureView extends ItemView {
       this.textareaEl.placeholder = this.pickRandomPlaceholder();
       this.pendingImages = [];
       this.pendingAudio = [];
+      this.pendingFiles = [];
       this.pendingCaptureOverride = null;
       this.pendingLocation = null;
       this.pendingMetadataHint = null;
@@ -5214,6 +5489,24 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Pick a Lucide icon name that roughly matches a file's extension. Kept
+ * small and forgiving — anything unrecognized falls back to a generic
+ * "file" icon so we never fail to render a card.
+ */
+function fileIconName(ext: string): string {
+  const e = ext.toLowerCase();
+  if (['pdf'].includes(e)) return 'file-text';
+  if (['doc', 'docx', 'rtf', 'odt', 'pages'].includes(e)) return 'file-text';
+  if (['xls', 'xlsx', 'csv', 'numbers'].includes(e)) return 'file-spreadsheet';
+  if (['ppt', 'pptx', 'key'].includes(e)) return 'file-presentation';
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(e)) return 'file-video';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(e)) return 'file-archive';
+  if (['epub', 'mobi', 'azw', 'azw3'].includes(e)) return 'book-open';
+  if (['json', 'xml', 'yaml', 'yml', 'toml', 'txt', 'log'].includes(e)) return 'file-code';
+  return 'file';
 }
 
 // ── Location tag helpers ────────────────────────────────────────────────────
