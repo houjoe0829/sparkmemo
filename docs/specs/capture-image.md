@@ -27,6 +27,11 @@
   - 关闭 `imageCompressionEnabled` 后按原格式保存
 - 图片文件写入 `imageFolder`（vault 相对路径，空则用 Obsidian 的附件目录），文件名基于时间戳。
 - 条目最终以 Markdown 图片语法插入 Memo section。
+- 点击缩略图（待提交的附件条、时间线里已提交的条目）打开全屏预览：
+  - 滚轮 / 触控板双指缩放（1×–8×），放大后可拖拽平移，双击复位
+  - 未缩放时单击图片或点背景关闭
+  - 同一条目有多张图时显示左右切换按钮和「当前 / 总数」计数，也可用 ← → 方向键切换，切换后缩放与位移重置
+  - 右键图片弹出菜单：「下载到本地」把图片存到系统下载目录，「复制图片」把图片放进剪贴板
 
 ## 实现要点
 
@@ -36,6 +41,9 @@
 - **确认弹窗**：capture-view 里对比 `exif.dateTimeOriginal` 与 `Date.now()`，差值超过阈值才弹；文案走 [i18n.ts](../../src/i18n.ts) 的 `capture.*` / `notice.*`。
 - **保存路径**：`imageFolder` 为空时调用 Obsidian 的 `getAttachmentFolder()` 得到默认目录；文件名用当前时间戳 + 随机后缀避免冲突。
 - **GPS 落地**：坐标写成 `[地名占位](geo:lat,lon)`，先用占位文本（如 `位置`），后续由 [locations.md](locations.md) 描述的地点 Tab 逆地理解码为城市名并可选回填。
+- **预览弹窗**：`ImagePreviewModal`（[capture-view.ts](../../src/capture-view.ts)）。缩放 / 平移用 CSS `transform` 实现，缩放以光标位置为锚点；多图以 `ImagePreviewItem[]` + 当前下标驱动，切图只改 `src` 不重建 DOM。
+- **右键下载**：`fetch(src)` 取回 Blob，用 `URL.createObjectURL` + `<a download>` 触发浏览器下载流程，文件名从 src 路径解析，解析不出时回退 `image.png`。
+- **右键复制**：剪贴板基本只可靠接受 PNG，非 PNG（WebP / JPEG）先经 canvas 重编码为 PNG，再用 `navigator.clipboard.write` 写入。
 
 ## 已知约束与遗留
 

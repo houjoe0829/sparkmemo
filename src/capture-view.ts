@@ -6224,6 +6224,99 @@ class ImagePreviewModal extends Modal {
       }
       if (this.scale === 1) this.close();
     });
+
+    // Right-click on the image → save / copy.
+    img.addEventListener('contextmenu', (ev: MouseEvent) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const menu = new Menu();
+      menu.addItem(i => i
+        .setTitle(t('preview.saveImage'))
+        .setIcon('download')
+        .onClick(() => void this.saveCurrentImage()));
+      menu.addItem(i => i
+        .setTitle(t('preview.copyImage'))
+        .setIcon('copy')
+        .onClick(() => void this.copyCurrentImage()));
+      menu.showAtMouseEvent(ev);
+    });
+  }
+
+  /** Fetch the currently displayed image as a Blob. */
+  private async currentBlob(): Promise<Blob> {
+    const res = await fetch(this.items[this.index].src);
+    return await res.blob();
+  }
+
+  /** Best-effort file name for the current image (falls back to `image.png`). */
+  private currentFileName(): string {
+    const src = this.items[this.index].src;
+    try {
+      const path = decodeURIComponent(new URL(src, 'file:///').pathname);
+      const base = path.split('/').pop() ?? '';
+      if (base && /\.[a-z0-9]+$/i.test(base)) return base;
+    } catch { /* not a parseable URL — fall through */ }
+    const alt = this.items[this.index].alt;
+    if (alt && /\.[a-z0-9]+$/i.test(alt)) return alt;
+    return 'image.png';
+  }
+
+  /** Download the current image through the browser's save flow. */
+  private async saveCurrentImage(): Promise<void> {
+    try {
+      const blob = await this.currentBlob();
+      const url = URL.createObjectURL(blob);
+      const a = activeDocument.createElement('a');
+      a.href = url;
+      a.download = this.currentFileName();
+      activeDocument.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Give the download a tick to start before revoking.
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      notice(t('notice.imageSaved'));
+    } catch (e) {
+      notice(t('notice.imageSaveFailed', { error: String(e) }));
+    }
+  }
+
+  /**
+   * Copy the current image to the clipboard. The clipboard only reliably
+   * accepts PNG, so anything else (WebP/JPEG) is re-encoded via canvas first.
+   */
+  private async copyCurrentImage(): Promise<void> {
+    try {
+      const blob = await this.currentBlob();
+      const png = blob.type === 'image/png' ? blob : await this.toPng(blob);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      notice(t('notice.imageCopied'));
+    } catch (e) {
+      notice(t('notice.imageCopyFailed', { error: String(e) }));
+    }
+  }
+
+  /** Re-encode an arbitrary image blob to PNG via an offscreen canvas. */
+  private async toPng(blob: Blob): Promise<Blob> {
+    const url = URL.createObjectURL(blob);
+    try {
+      const bitmap = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error('decode failed'));
+        im.src = url;
+      });
+      const canvas = activeDocument.createElement('canvas');
+      canvas.width = bitmap.naturalWidth;
+      canvas.height = bitmap.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('canvas unavailable');
+      ctx.drawImage(bitmap, 0, 0);
+      return await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/png');
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   private zoomAt(clientX: number, clientY: number, factor: number): void {
