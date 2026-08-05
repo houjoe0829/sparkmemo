@@ -4138,6 +4138,12 @@ export class JournalCaptureView extends ItemView {
       if (this.mapResizeTimer !== null) window.clearTimeout(this.mapResizeTimer);
       this.mapResizeTimer = window.setTimeout(() => {
         this.mapResizeTimer = null;
+        // Obsidian hides a sidebar leaf rather than unmounting it, so switching
+        // away fires a resize with every measurement collapsed to zero. Redrawing
+        // on that would rebuild the map at the floor height, and switching back
+        // would visibly grow it again. Skip while hidden; the sizes still match
+        // on return, so no redraw happens at all.
+        if (!wrap.isShown() || wrap.clientWidth === 0) return;
         const h = Math.round(this.measureMapHeight(wrap));
         if (Math.abs(h - lastH) < 8) return;
         lastH = h;
