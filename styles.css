@@ -1769,39 +1769,47 @@
   font-weight: 600;
   color: var(--text-normal);
 }
-/* List/map switch, pinned to the right of the location bar */
+/* Map/list switch, pinned to the right of the location bar. Borrows the tab
+   bar's round icon-button language instead of a segmented control, so it reads
+   as part of the same UI rather than a second, competing frame. */
 .jp-location-view-toggle {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   margin-left: auto;
-  padding: 2px;
-  border-radius: 6px;
-  background: var(--background-modifier-border);
 }
 .jp-location-view-btn {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 20px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  border: none;
-  border-radius: 4px;
+  border: 1px solid transparent;
+  border-radius: 50%;
   background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
   cursor: pointer;
-  box-shadow: none;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .jp-location-view-btn:hover {
   color: var(--text-normal);
+  background: var(--background-modifier-hover);
 }
 .jp-location-view-btn.is-active {
-  background: var(--background-primary);
-  color: var(--text-accent);
+  background: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 14%, transparent);
+  border-color: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 22%, transparent);
+  color: var(--jp-ts-color, #7c3aed);
+}
+.theme-dark .jp-location-view-btn.is-active {
+  background: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 22%, transparent);
+  border-color: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 32%, transparent);
 }
 .jp-location-view-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 
 /* Map view: fixed vertical extent, horizontally scrollable and wrapping */
