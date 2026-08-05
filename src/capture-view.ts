@@ -3754,7 +3754,7 @@ export class JournalCaptureView extends ItemView {
         // (e.g. a `create`-event rebuild fires right after ours) — otherwise
         // the second render lands with the class already applied and the
         // animation looks stuck at its final frame.
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- read offsetWidth to force a reflow so the CSS animation restarts
         row.offsetWidth;
       }
 
