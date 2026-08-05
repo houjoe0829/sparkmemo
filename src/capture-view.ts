@@ -4017,6 +4017,7 @@ export class JournalCaptureView extends ItemView {
       window.clearTimeout(this.mapResizeTimer);
       this.mapResizeTimer = null;
     }
+    this.sentinelEl.show();
   }
 
   /**
@@ -4044,6 +4045,12 @@ export class JournalCaptureView extends ItemView {
     }
 
     const wrap = this.timelineEl.createDiv({ cls: 'jp-map-wrap' });
+    // The infinite-scroll sentinel sits below .jp-timeline with 12px vertical
+    // margins on each side. In the map view we don't paginate, so that 25px of
+    // dead height is pure overflow — it makes the timeline scroll allow a small
+    // vertical drift even though the map itself fits exactly. Hide it here and
+    // restore in teardownMap().
+    this.sentinelEl.hide();
     let worldPx = 0;
 
     const draw = () => {
@@ -4156,10 +4163,12 @@ export class JournalCaptureView extends ItemView {
 
   /** Remaining height between the top of the map and the bottom of the scroll pane. */
   private measureMapHeight(wrap: HTMLElement): number {
-    const scroller = this.containerEl.children[1] as HTMLElement | undefined;
-    if (!scroller) return 400;
-    const top = wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-    return Math.max(240, scroller.clientHeight - top - 8);
+    // The map sits inside .jp-timeline-scroll — measure against that directly
+    // so paddings and gaps above don't matter. Floor to defeat sub-pixel
+    // rounding that would otherwise let the map overshoot by a hair.
+    const scroll = wrap.closest('.jp-timeline-scroll') as HTMLElement | null;
+    if (!scroll) return 400;
+    return Math.max(240, Math.floor(scroll.clientHeight));
   }
 
   /** Render one day's entries for a selected city — same shape as search results, no keyword highlight. */
