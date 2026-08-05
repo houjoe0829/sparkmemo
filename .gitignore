@@ -5,3 +5,5 @@ main.js
 .superpowers/
 .claude/
 release/
+
+.DS_Store
