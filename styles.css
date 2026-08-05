@@ -89,14 +89,39 @@
   gap: 12px;
   padding: var(--jp-pane-pad);
   height: 100%;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   background: var(--background-secondary);
+}
 
+/* Only the timeline list scrolls; the input card (and tab / search / location
+   bars above it) stay pinned so the user always has the composer in view. */
+.jp-timeline-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* overflow-y:auto forces overflow-x to clip too. The day-header dot has a
+     2px outer ring that would otherwise get clipped on the left edge, so we
+     nudge the scroll box 4px into the root's left padding. */
+  padding-left: 4px;
+  margin-left: -4px;
   /* Scroll still works via trackpad/wheel — just hide the visible scrollbar. */
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* old Edge/IE */
 }
-.jp-capture-root::-webkit-scrollbar {
+
+/* Day header stays pinned to the top of the scroll area while its entries
+   scroll underneath — the user always sees which day they're looking at,
+   and the prev/calendar/next controls stay reachable. */
+.jp-timeline-entry--header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--background-secondary);
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.jp-timeline-scroll::-webkit-scrollbar {
   display: none; /* Chromium (Obsidian's Electron shell) */
 }
 
@@ -2047,6 +2072,11 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.jp-pane-stats {
+  overflow-y: auto;
 }
 
 /* ── Yearly stats view ────────────────────────────────────────────────────

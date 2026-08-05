@@ -211,6 +211,7 @@ export class JournalCaptureView extends ItemView {
   private prevDayBtn!: HTMLButtonElement;
   private nextDayBtn!: HTMLButtonElement;
   private calendarBtn!: HTMLButtonElement;
+  private timelineScrollEl!: HTMLElement;
   private timelineEl!: HTMLElement;
   private sentinelEl!: HTMLElement;
   private textareaEl!: HTMLTextAreaElement;
@@ -2462,8 +2463,7 @@ export class JournalCaptureView extends ItemView {
     this.refreshSubmitState();
     // Input card sits at the top of the scroller, timeline below it — scroll
     // up so the user lands on the input box, not down into old entries.
-    const scroller = this.containerEl.children[1] as HTMLElement;
-    scroller.scrollTo({ top: 0, behavior: 'smooth' });
+    this.timelineScrollEl.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   /** Discards the in-progress edit and clears the input box + attachments. */
@@ -2979,8 +2979,9 @@ export class JournalCaptureView extends ItemView {
   }
 
   private buildTimeline(root: HTMLElement) {
-    this.timelineEl = root.createDiv({ cls: 'jp-timeline' });
-    this.sentinelEl = root.createDiv({ cls: 'jp-timeline-sentinel' });
+    this.timelineScrollEl = root.createDiv({ cls: 'jp-timeline-scroll' });
+    this.timelineEl = this.timelineScrollEl.createDiv({ cls: 'jp-timeline' });
+    this.sentinelEl = this.timelineScrollEl.createDiv({ cls: 'jp-timeline-sentinel' });
   }
 
   /** Build the prev/calendar/next controls, inline with the day header title. */
@@ -3531,8 +3532,7 @@ export class JournalCaptureView extends ItemView {
 
     // Land on the top of the day (its date header) rather than wherever the
     // previous day happened to leave the scroll position.
-    const scroller = this.containerEl.children[1] as HTMLElement | undefined;
-    if (scroller) scroller.scrollTop = 0;
+    if (this.timelineScrollEl) this.timelineScrollEl.scrollTop = 0;
   }
 
   /**
@@ -4758,7 +4758,7 @@ export class JournalCaptureView extends ItemView {
 
   private setupIntersectionObserver() {
     if (this.intersectionObs) this.intersectionObs.disconnect();
-    const root = this.containerEl.children[1] as HTMLElement;
+    const root = this.timelineScrollEl;
     this.intersectionObs = new IntersectionObserver(
       entries => {
         for (const e of entries) {
@@ -5318,7 +5318,7 @@ export class JournalCaptureView extends ItemView {
    */
   private setupMobileToolbarAutoHide() {
     if (!Platform.isMobile) return;
-    const scroller = this.containerEl.children[1] as HTMLElement;
+    const scroller = this.timelineScrollEl;
     if (!scroller) return;
 
     this.scrollEl = scroller;
