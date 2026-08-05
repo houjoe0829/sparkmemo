@@ -55,6 +55,19 @@ import {
   stripAttachmentEmbeds,
   updateEntryLocationName,
 } from './section';
+import {
+  CLUSTER_RADIUS_PX,
+  VIEW_H,
+  VIEW_TOP,
+  WORLD_ASPECT,
+  WORLD_W,
+  buildSites,
+  clusterSites,
+  dotRadius,
+  hoverRadius,
+  pickCenterLon,
+} from './map-view';
+import { LAND_PATH } from './land-data';
 import { readExifCaptureDate, readExifGpsLocation } from './exif';
 import { reverseGeocodeCity } from './geocode';
 import { encodeWebp } from './webp-encoder';
@@ -107,6 +120,16 @@ interface DaySection {
   filePath: string | null;
 }
 
+/** One geo-tagged memo, as held by the location index and plotted on the map. */
+interface LocatedEntry {
+  file: TFile;
+  date: moment.Moment;
+  entry: JournalEntry;
+  location: EntryLocation;
+  /** Epoch ms of the entry's timestamp, used for newest-first ordering. */
+  ts: number;
+}
+
 export class JournalCaptureView extends ItemView {
   private plugin: SparkMemoPlugin;
 
@@ -141,11 +164,29 @@ export class JournalCaptureView extends ItemView {
   /** City name → aggregated memo data, built by a one-time full scan. Invalidated on any md file change. */
   private locationIndex: Map<
     string,
-    { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+    { count: number; lastTs: number; entries: Array<LocatedEntry> }
   > | null = null;
   private locationLoading = false;
   /** Non-null while viewing a single city's memo list; null while viewing the city list. */
   private selectedLocationCity: string | null = null;
+  /** Which of the two top-level location views is showing. Drill-downs sit on top of it. */
+  private locationViewMode: 'list' | 'map' = 'map';
+  /**
+   * True while a memo list is open on top of either view. Distinct from
+   * `selectedLocationCity`, which stays empty for map drill-downs (they have no
+   * city name), so a late-finishing index scan can still tell that the user has
+   * navigated and must not repaint underneath them.
+   */
+  private locationDrilled = false;
+  private locationViewToggleEl!: HTMLElement;
+  private locationListBtn!: HTMLButtonElement;
+  private locationMapBtn!: HTMLButtonElement;
+  /** Where the current drill-down was opened from, so Back returns to the right place. */
+  private locationDrillSource: 'list' | 'map' = 'list';
+  /** Horizontal scroll offset of the map, remembered across drill-downs. */
+  private mapScrollLeft: number | null = null;
+  private mapResizeObserver: ResizeObserver | null = null;
+  private mapResizeTimer: number | null = null;
 
   // Tag-aggregation tab state
   private tagAggBarEl!: HTMLElement;
@@ -442,6 +483,7 @@ export class JournalCaptureView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.teardownMap();
     if (this.rerenderTimer !== null) {
       window.clearTimeout(this.rerenderTimer);
       this.rerenderTimer = null;
@@ -535,9 +577,26 @@ export class JournalCaptureView extends ItemView {
     });
     setIcon(this.locationBackBtn, 'arrow-left');
     this.locationBackBtn.hide();
-    this.locationBackBtn.addEventListener('click', () => this.backToLocationList());
+    this.locationBackBtn.addEventListener('click', () => this.backFromLocationDrill());
 
     this.locationTitleEl = this.locationBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('location.all') });
+
+    // Map/list switch — hidden while drilled into a memo list, where neither applies.
+    // Map sits first because it is the default view.
+    this.locationViewToggleEl = this.locationBarEl.createDiv({ cls: 'jp-location-view-toggle' });
+    this.locationMapBtn = this.locationViewToggleEl.createEl('button', {
+      cls: 'jp-location-view-btn is-active',
+      attr: { 'aria-label': t('location.viewMap'), title: t('location.viewMap') },
+    });
+    setIcon(this.locationMapBtn, 'map');
+    this.locationMapBtn.addEventListener('click', () => this.setLocationViewMode('map'));
+
+    this.locationListBtn = this.locationViewToggleEl.createEl('button', {
+      cls: 'jp-location-view-btn',
+      attr: { 'aria-label': t('location.viewList'), title: t('location.viewList') },
+    });
+    setIcon(this.locationListBtn, 'list');
+    this.locationListBtn.addEventListener('click', () => this.setLocationViewMode('list'));
   }
 
   /** Build one icon-only tab button. */
@@ -555,6 +614,7 @@ export class JournalCaptureView extends ItemView {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
+    if (prevTab === 'location' && tab !== 'location') this.teardownMap();
 
     this.captureTabBtn.toggleClass('is-active', tab === 'capture');
     this.searchTabBtn.toggleClass('is-active', tab === 'search');
@@ -616,12 +676,16 @@ export class JournalCaptureView extends ItemView {
         this.disposeDays();
         this.timelineEl.empty();
         this.selectedLocationCity = null;
+        this.locationDrilled = false;
         this.locationBackBtn.hide();
+        this.locationViewToggleEl.show();
+        this.mapScrollLeft = null;
         this.locationTitleEl.setText(t('location.all'));
         void this.loadLocationIndex().then(() => {
           // Bail if the user already navigated away or picked a city while scanning
-          if (this.currentTab === 'location' && this.selectedLocationCity === null) {
-            this.renderLocationList();
+          if (this.currentTab === 'location' && !this.locationDrilled) {
+            if (this.locationViewMode === 'map') this.renderLocationMap();
+            else this.renderLocationList();
           }
         });
       }
@@ -3771,10 +3835,7 @@ export class JournalCaptureView extends ItemView {
       }
 
       const all = getAllDailyNotes() as Record<string, TFile>;
-      const index = new Map<
-        string,
-        { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
-      >();
+      const index = new Map<string, { count: number; lastTs: number; entries: Array<LocatedEntry> }>();
 
       for (const file of Object.values(all)) {
         if (!(file instanceof TFile)) continue;
@@ -3811,7 +3872,7 @@ export class JournalCaptureView extends ItemView {
           }
           data.count++;
           if (ts > data.lastTs) data.lastTs = ts;
-          data.entries.push({ file, date: day, entry });
+          data.entries.push({ file, date: day, entry, location, ts });
         }
       }
 
@@ -3851,20 +3912,39 @@ export class JournalCaptureView extends ItemView {
     this.exhausted = true;
   }
 
-  /** Drill into a single city: render its memos as day-grouped timeline entries, newest first. */
+  /** Drill into a single city from the list view. */
   private selectLocationCity(city: string) {
     const data = this.locationIndex?.get(city);
     if (!data) return;
-
     this.selectedLocationCity = city;
+    this.locationDrillSource = 'list';
+    this.renderEntryList(data.entries, city, t('location.cityNotFound', { city }));
+  }
+
+  /** Drill into one map cluster. Titled by count only — the map shows no place names. */
+  private selectMapCluster(entries: LocatedEntry[]) {
+    if (entries.length === 0) return;
+    this.selectedLocationCity = '';
+    this.locationDrillSource = 'map';
+    this.teardownMap();
+    this.renderEntryList(entries, t('location.memoCount', { count: String(entries.length) }), '');
+  }
+
+  /**
+   * Shared drill-down renderer for both entry points (a city in the list, a
+   * cluster on the map): day-grouped timeline entries, newest first.
+   */
+  private renderEntryList(entries: LocatedEntry[], title: string, emptyMsg: string) {
+    this.locationDrilled = true;
     this.locationBackBtn.show();
-    this.locationTitleEl.setText(city);
+    this.locationViewToggleEl.hide();
+    this.locationTitleEl.setText(title);
 
     this.disposeDays();
     this.timelineEl.empty();
 
     const byDate = new Map<string, { date: moment.Moment; file: TFile; entries: JournalEntry[] }>();
-    for (const e of data.entries) {
+    for (const e of entries) {
       const key = e.date.format('YYYY-MM-DD');
       let bucket = byDate.get(key);
       if (!bucket) {
@@ -3876,7 +3956,7 @@ export class JournalCaptureView extends ItemView {
     const sortedDays = [...byDate.values()].sort((a, b) => (a.date.isBefore(b.date) ? 1 : -1));
 
     if (sortedDays.length === 0) {
-      this.renderTopLevelMessage(t('location.cityNotFound', { city }));
+      this.renderTopLevelMessage(emptyMsg);
       return;
     }
 
@@ -3897,12 +3977,183 @@ export class JournalCaptureView extends ItemView {
     this.markEndOfTimeline();
   }
 
-  /** Return from a city's memo list back to the "all locations" list. */
-  private backToLocationList() {
+  /** Return from a drill-down to whichever top-level view it was opened from. */
+  private backFromLocationDrill() {
+    this.locationDrilled = false;
     this.selectedLocationCity = null;
     this.locationBackBtn.hide();
-    this.locationTitleEl.setText(t('location.all'));
-    this.renderLocationList();
+    this.locationViewToggleEl.show();
+    if (this.locationDrillSource === 'map') {
+      this.renderLocationMap();
+    } else {
+      this.locationTitleEl.setText(t('location.all'));
+      this.renderLocationList();
+    }
+  }
+
+  /** Switch between the two top-level location views. */
+  private setLocationViewMode(mode: 'list' | 'map') {
+    if (this.locationViewMode === mode && this.selectedLocationCity === null) return;
+    this.locationViewMode = mode;
+    this.locationDrilled = false;
+    this.selectedLocationCity = null;
+    this.locationBackBtn.hide();
+    this.locationViewToggleEl.show();
+    this.locationListBtn.toggleClass('is-active', mode === 'list');
+    this.locationMapBtn.toggleClass('is-active', mode === 'map');
+    if (mode === 'map') this.renderLocationMap();
+    else {
+      this.teardownMap();
+      this.locationTitleEl.setText(t('location.all'));
+      this.renderLocationList();
+    }
+  }
+
+  /** Stop watching the map container for resizes and drop any pending re-render. */
+  private teardownMap() {
+    this.mapResizeObserver?.disconnect();
+    this.mapResizeObserver = null;
+    if (this.mapResizeTimer !== null) {
+      window.clearTimeout(this.mapResizeTimer);
+      this.mapResizeTimer = null;
+    }
+  }
+
+  /**
+   * Render every geo-tagged memo onto the bundled offline basemap.
+   *
+   * The map fills the pane's remaining height and derives its scale from that
+   * height alone, so it always shows the full latitude band at the largest size
+   * the window allows. Horizontally it scrolls and wraps: three copies of the
+   * world sit side by side and `scrollLeft` is silently rewound by one world
+   * width whenever it drifts out of the middle copy.
+   */
+  private renderLocationMap() {
+    this.teardownMap();
+    this.disposeDays();
+    this.timelineEl.empty();
+    this.exhausted = true;
+
+    const all: LocatedEntry[] = [];
+    if (this.locationIndex) for (const d of this.locationIndex.values()) all.push(...d.entries);
+
+    this.locationTitleEl.setText(t('location.memoCount', { count: String(all.length) }));
+    if (all.length === 0) {
+      this.renderTopLevelMessage(t('location.mapEmpty'));
+      return;
+    }
+
+    const wrap = this.timelineEl.createDiv({ cls: 'jp-map-wrap' });
+    let worldPx = 0;
+
+    const draw = () => {
+      const height = this.measureMapHeight(wrap);
+      const paneW = wrap.clientWidth || 320;
+      worldPx = height * WORLD_ASPECT;
+      const unitPerPx = WORLD_W / worldPx;
+
+      const sites = buildSites(all, (e) => e.location);
+      const clusters = clusterSites(sites, CLUSTER_RADIUS_PX * unitPerPx);
+
+      wrap.empty();
+      const svg = wrap.createSvg('svg', { cls: 'jp-map-svg' });
+      svg.setAttribute('width', String(worldPx * 3));
+      svg.setAttribute('height', String(height));
+      svg.setAttribute('viewBox', `${-WORLD_W} ${VIEW_TOP} ${WORLD_W * 3} ${VIEW_H}`);
+
+      // One copy of the land geometry, instanced three times — no data duplication.
+      const defs = svg.createSvg('defs');
+      defs.createSvg('path', { attr: { id: 'jp-map-land', d: LAND_PATH } });
+      for (const dx of [-WORLD_W, 0, WORLD_W]) {
+        const use = svg.createSvg('use', { cls: 'jp-map-land' });
+        use.setAttribute('href', '#jp-map-land');
+        use.setAttribute('x', String(dx));
+      }
+
+      // Markers are real elements in all three copies so each stays clickable.
+      // Drawn smallest-first so a dense cluster's number is never covered by a
+      // neighbouring dot where the two overlap.
+      const fontPx = 11 * unitPerPx;
+      const ordered = [...clusters].sort((a, b) => a.count - b.count);
+      for (const dx of [-WORLD_W, 0, WORLD_W]) {
+        for (const c of ordered) {
+          const g = svg.createSvg('g', { cls: 'jp-map-marker' });
+          g.setAttribute('transform', `translate(${(c.x + dx).toFixed(1)} ${c.y.toFixed(1)})`);
+
+          const rest = dotRadius(c.count) * unitPerPx;
+          const grown = hoverRadius(c.count) * unitPerPx;
+          const circle = g.createSvg('circle', { cls: 'jp-map-dot' });
+          circle.setAttribute('r', rest.toFixed(1));
+
+          // The count is only revealed on hover, so resting dots convey scale by
+          // size alone and can sit much closer together.
+          const label = g.createSvg('text', { cls: 'jp-map-count' });
+          label.textContent = String(c.count);
+          label.setAttribute('font-size', fontPx.toFixed(1));
+          label.setAttribute('text-anchor', 'middle');
+          label.setAttribute('dy', (fontPx * 0.35).toFixed(1));
+
+          g.addEventListener('mouseenter', () => {
+            circle.setAttribute('r', grown.toFixed(1));
+            g.addClass('is-hovered');
+            // Move to the end of the paint order so the grown dot is never buried.
+            // Guarded: re-appending an element already last would bounce the
+            // pointer events it is reacting to.
+            if (g.nextSibling) g.parentElement?.appendChild(g);
+          });
+          g.addEventListener('mouseleave', () => {
+            circle.setAttribute('r', rest.toFixed(1));
+            g.removeClass('is-hovered');
+          });
+          g.addEventListener('click', () => this.selectMapCluster(c.items));
+        }
+      }
+
+      // Restore the previous position across drill-downs, else open on the time zone.
+      if (this.mapScrollLeft !== null) {
+        wrap.scrollLeft = this.mapScrollLeft;
+      } else {
+        const lon = pickCenterLon(clusters);
+        wrap.scrollLeft = worldPx + ((lon + 180) / 360) * worldPx - paneW / 2;
+      }
+    };
+
+    draw();
+
+    // Bound once, not per redraw, so resizes don't stack duplicate listeners.
+    wrap.addEventListener(
+      'scroll',
+      () => {
+        // Silent rewind: keep the viewport inside the middle world copy.
+        if (wrap.scrollLeft < worldPx * 0.5) wrap.scrollLeft += worldPx;
+        else if (wrap.scrollLeft > worldPx * 1.5) wrap.scrollLeft -= worldPx;
+        this.mapScrollLeft = wrap.scrollLeft;
+      },
+      { passive: true },
+    );
+
+    // Scale follows the pane height, so clustering has to be recomputed on resize.
+    let lastH = Math.round(this.measureMapHeight(wrap));
+    this.mapResizeObserver = new ResizeObserver(() => {
+      if (this.mapResizeTimer !== null) window.clearTimeout(this.mapResizeTimer);
+      this.mapResizeTimer = window.setTimeout(() => {
+        this.mapResizeTimer = null;
+        const h = Math.round(this.measureMapHeight(wrap));
+        if (Math.abs(h - lastH) < 8) return;
+        lastH = h;
+        this.mapScrollLeft = null;
+        draw();
+      }, 150);
+    });
+    this.mapResizeObserver.observe(this.containerEl);
+  }
+
+  /** Remaining height between the top of the map and the bottom of the scroll pane. */
+  private measureMapHeight(wrap: HTMLElement): number {
+    const scroller = this.containerEl.children[1] as HTMLElement | undefined;
+    if (!scroller) return 400;
+    const top = wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    return Math.max(240, scroller.clientHeight - top - 8);
   }
 
   /** Render one day's entries for a selected city — same shape as search results, no keyword highlight. */

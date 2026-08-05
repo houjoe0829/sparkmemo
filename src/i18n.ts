@@ -123,6 +123,11 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'location.scanFailed': '❌ Failed to scan locations',
     'location.allCount': 'All {{count}} locations',
     'location.cityNotFound': 'No memos found for "{{city}}"',
+    'location.viewList': 'List view',
+    'location.viewMap': 'Map view',
+    'location.backToMap': 'Back to map',
+    'location.memoCount': '{{count}} memos',
+    'location.mapEmpty': 'No memos with a location yet',
 
     'tag.aggregation': 'Tags',
     'tag.backToList': 'Back to tag list',
@@ -381,6 +386,11 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'location.scanFailed': '❌ 扫描地点失败',
     'location.allCount': '全部 {{count}} 个地点',
     'location.cityNotFound': '没有找到「{{city}}」的 memo',
+    'location.viewList': '列表视图',
+    'location.viewMap': '地图视图',
+    'location.backToMap': '返回地图',
+    'location.memoCount': '{{count}} 条记录',
+    'location.mapEmpty': '还没有带位置的 memo',
 
     'tag.aggregation': '标签聚合',
     'tag.backToList': '返回标签列表',

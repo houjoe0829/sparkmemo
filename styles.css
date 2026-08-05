@@ -82,10 +82,12 @@
   --jp-tl-dot: var(--jp-ts-color, #7c3aed);
   --jp-tl-dot-ring: color-mix(in srgb, var(--jp-tl-dot) 35%, transparent);
 
+  --jp-pane-pad: 12px;
+
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
+  padding: var(--jp-pane-pad);
   height: 100%;
   overflow-y: auto;
   background: var(--background-secondary);
@@ -1766,6 +1768,91 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--text-normal);
+}
+/* List/map switch, pinned to the right of the location bar */
+.jp-location-view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--background-modifier-border);
+}
+.jp-location-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+.jp-location-view-btn:hover {
+  color: var(--text-normal);
+}
+.jp-location-view-btn.is-active {
+  background: var(--background-primary);
+  color: var(--text-accent);
+}
+.jp-location-view-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Map view: fixed vertical extent, horizontally scrollable and wrapping */
+.jp-map-wrap {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: var(--background-secondary);
+  /* Bleed past the pane's padding so the map runs edge to edge */
+  margin-left: calc(-1 * var(--jp-pane-pad, 12px));
+  margin-right: calc(-1 * var(--jp-pane-pad, 12px));
+  width: calc(100% + 2 * var(--jp-pane-pad, 12px));
+}
+.jp-map-wrap::-webkit-scrollbar {
+  display: none;
+}
+.jp-map-svg {
+  display: block;
+}
+.jp-map-land {
+  fill: var(--background-modifier-border);
+}
+.jp-map-marker {
+  cursor: pointer;
+}
+.jp-map-dot {
+  fill: var(--text-accent);
+  fill-opacity: 0.8;
+  stroke: var(--background-primary);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transition: r 0.12s ease-out, fill-opacity 0.12s ease-out;
+}
+.jp-map-marker:hover .jp-map-dot,
+.jp-map-marker.is-hovered .jp-map-dot {
+  fill-opacity: 1;
+  stroke-width: 2;
+}
+/* The count is hidden at rest — dot size alone carries the magnitude */
+.jp-map-count {
+  fill: var(--text-on-accent);
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+.jp-map-marker:hover .jp-map-count,
+.jp-map-marker.is-hovered .jp-map-count {
+  opacity: 1;
 }
 .jp-location-list {
   display: flex;
