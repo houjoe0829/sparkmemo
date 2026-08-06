@@ -9,7 +9,7 @@ Spark Memo 已在 Obsidian 社区插件商店上架，每次发新版本都要�
    - `package.json` → `"version"`
    - `versions.json` → 加一行 `"新版本": "1.8.7"`（值是最低 Obsidian 版本）
 3. 构建：`npm run build`
-4. 打包：把 `dist/main.js`、`manifest.json`、`styles.css` 拷到 `release/新版本/`，同时写一份 `RELEASE_NOTES.md` 放在同目录
+4. 打包：把 `dist/main.js`、`manifest.json`、`styles.css` 拷到 `release/新版本/`，同时写一份 `RELEASE_NOTES.md` 放在同目录（**正文用英文**，面向的是社区插件商店的用户）
 5. 提交 + 推送：`chore(release): x.y.z`
 
 ## 二、创建 GitHub Release
