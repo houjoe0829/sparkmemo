@@ -91,7 +91,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: var(--background-secondary);
+  background: var(--background-primary);
 }
 
 /* Only the timeline list scrolls; the input card (and tab / search / location
@@ -117,7 +117,7 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: var(--background-secondary);
+  background: var(--background-primary);
   padding-top: 4px;
   padding-bottom: 4px;
 }
@@ -960,7 +960,7 @@
   left: -24px;
   top: 4px;
   background: var(--jp-tl-dot);
-  border: 3px solid var(--background-secondary);
+  border: 3px solid var(--background-primary);
   box-shadow: 0 0 0 2px var(--jp-tl-dot);
 }
 .jp-timeline-header-card {
