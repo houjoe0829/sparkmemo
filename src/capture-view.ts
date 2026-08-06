@@ -545,14 +545,17 @@ export class JournalCaptureView extends ItemView {
         this.searchDebounceTimer = null;
         void this.runSearch(q.trim());
       }, 300);
+      this.updateSearchActionBtn();
     });
 
     this.randomMemoBtn = this.searchBarEl.createEl('button', {
       cls: 'jp-search-bar-random-btn',
-      attr: { 'aria-label': t('search.randomMemo'), title: t('search.randomMemo') },
     });
-    setIcon(this.randomMemoBtn, 'dice');
-    this.randomMemoBtn.addEventListener('click', () => void this.showRandomMemo());
+    this.updateSearchActionBtn();
+    this.randomMemoBtn.addEventListener('click', () => {
+      if (this.searchInputEl.value.length > 0) this.clearSearchQuery();
+      else void this.showRandomMemo();
+    });
 
     // Tag bar — collapsed by default, shown when the tag tab is active
     this.tagAggBarEl = root.createDiv({ cls: 'jp-location-bar' });
@@ -642,6 +645,7 @@ export class JournalCaptureView extends ItemView {
           void this.showRandomMemo();
         }
         this.searchInputEl.value = this.searchQuery;
+        this.updateSearchActionBtn();
         window.setTimeout(() => this.searchInputEl.focus(), 50);
       }
     } else if (tab === 'capture') {
@@ -4789,6 +4793,30 @@ export class JournalCaptureView extends ItemView {
 
   // ── Random memo (search tab) ────────────────────────────────────────────
 
+  /** Search bar's right-hand button: clear when there's a query, dice when empty. */
+  private updateSearchActionBtn(): void {
+    if (!this.randomMemoBtn) return;
+    const hasQuery = this.searchInputEl.value.length > 0;
+    const label = hasQuery ? t('search.clearQuery') : t('search.randomMemo');
+    this.randomMemoBtn.empty();
+    setIcon(this.randomMemoBtn, hasQuery ? 'x' : 'dice');
+    this.randomMemoBtn.setAttr('aria-label', label);
+    this.randomMemoBtn.setAttr('title', label);
+  }
+
+  /** Clear the query and return the search tab to its empty state. */
+  private clearSearchQuery(): void {
+    if (this.searchDebounceTimer !== null) {
+      window.clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    this.searchInputEl.value = '';
+    this.searchQuery = '';
+    this.updateSearchActionBtn();
+    this.searchInputEl.focus();
+    void this.runSearch('');
+  }
+
   /** Pick a random entry from a random past daily note and render it in the search timeline. */
   private async showRandomMemo(): Promise<void> {
     if (!appHasDailyNotesPluginLoaded()) {
@@ -4816,6 +4844,7 @@ export class JournalCaptureView extends ItemView {
     // Leave normal search mode — clear query/input and switch into random mode
     this.searchQuery = '';
     this.searchInputEl.value = '';
+    this.updateSearchActionBtn();
     this.exhausted = true;
     this.searchFileQueue = [];
     this.searchCursor = 0;
