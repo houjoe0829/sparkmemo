@@ -50,6 +50,21 @@ function buildSystemPrompt(seed: ChatSeed): string {
 /** Models offered in the composer dropdown. */
 const MODEL_CHOICES = ['sonnet', 'opus', 'haiku'];
 
+/**
+ * Display form of a model name. Only the short aliases get capitalised —
+ * a full name like `claude-sonnet-5` reads worse as `Claude-sonnet-5`, so it
+ * is left alone. The stored value stays lowercase either way; this is purely
+ * a label, and the CLI is always handed the original.
+ */
+function modelLabel(model: string): string {
+  if (!/^[a-z]+$/.test(model)) return model;
+  return model.charAt(0).toUpperCase() + model.slice(1);
+}
+
+/** Scroll offsets at which the context card collapses and expands again. */
+const COLLAPSE_COLLAPSE_AT = 12;
+const COLLAPSE_EXPAND_AT = 4;
+
 /** Image types the API accepts. Anything else is skipped rather than sent. */
 const MIME_BY_EXT: Record<string, string> = {
   png: 'image/png',
@@ -97,7 +112,9 @@ export class ChatPane {
   private listEl!: HTMLElement;
   private threadEl!: HTMLElement;
   private contextEl!: HTMLElement;
+  private contextCardEl!: HTMLElement;
   private contextImagesEl!: HTMLElement;
+  private msgListEl!: HTMLElement;
   private messagesEl!: HTMLElement;
   private composerEl!: HTMLElement;
   private attachStripEl!: HTMLElement;
@@ -130,6 +147,8 @@ export class ChatPane {
   private liveText = '';
   /** Pending rAF id, so many deltas collapse into one re-render per frame. */
   private renderFrame: number | null = null;
+  /** Height of the context card while expanded, used by the collapse guard. */
+  private expandedContextHeight = 0;
 
   constructor(app: App, root: HTMLElement, scope: Component, getSettings: () => SparkMemoSettings) {
     this.app = app;
@@ -163,8 +182,15 @@ export class ChatPane {
     this.threadEl = this.root.createDiv({ cls: 'jp-chat-thread' });
     this.threadEl.hide();
 
-    this.contextEl = this.threadEl.createDiv({ cls: 'jp-chat-context' });
+    // The context card lives inside the scroll area so it scrolls away with
+    // the conversation, and sticks to the top in a collapsed form once it
+    // would otherwise be gone. Messages get their own inner container so
+    // re-rendering them never wipes the card.
     this.messagesEl = this.threadEl.createDiv({ cls: 'jp-chat-messages' });
+    this.contextEl = this.messagesEl.createDiv({ cls: 'jp-chat-context' });
+    this.msgListEl = this.messagesEl.createDiv({ cls: 'jp-chat-msg-list' });
+
+    this.messagesEl.addEventListener('scroll', () => this.syncContextCollapse());
 
     this.buildComposer();
   }
@@ -272,7 +298,7 @@ export class ChatPane {
     for (const model of choices) {
       menu.addItem(item =>
         item
-          .setTitle(model)
+          .setTitle(modelLabel(model))
           .setChecked(model === current)
           .onClick(() => {
             const conversation = this.active;
@@ -290,7 +316,7 @@ export class ChatPane {
 
   /** Repaint model label, context readout and send button from current state. */
   private refreshComposerState(): void {
-    this.modelBtn.setText(this.currentModel());
+    this.modelBtn.setText(modelLabel(this.currentModel()));
 
     const used = this.active?.contextTokens ?? 0;
     const window = this.active?.contextWindow ?? 0;
@@ -632,8 +658,9 @@ export class ChatPane {
 
   private renderContextCard(seed: ChatSeed): void {
     this.contextEl.empty();
+    this.contextCardEl = this.contextEl.createDiv({ cls: 'jp-chat-context-card' });
 
-    const meta = this.contextEl.createDiv({ cls: 'jp-chat-context-meta' });
+    const meta = this.contextCardEl.createDiv({ cls: 'jp-chat-context-meta' });
     const icon = meta.createSpan({ cls: 'jp-chat-context-icon' });
     setIcon(icon, 'quote');
     meta.createSpan({
@@ -641,23 +668,63 @@ export class ChatPane {
       text: `${seed.date} ${seed.timestamp}`.trim(),
     });
 
-    const body = this.contextEl.createDiv({ cls: 'jp-chat-context-body' });
+    const body = this.contextCardEl.createDiv({ cls: 'jp-chat-context-body' });
     // Plain text, not markdown: the card is a reference, and rendering the
     // embeds inline would pull full-size images and audio players into what
     // should stay a compact summary. Attachments get thumbnails instead.
     body.setText(seed.text);
 
-    this.contextImagesEl = this.contextEl.createDiv({ cls: 'jp-chat-context-images' });
+    this.contextImagesEl = this.contextCardEl.createDiv({ cls: 'jp-chat-context-images' });
     this.contextImagesEl.hide();
+
+    // A freshly rendered card starts expanded; the scroll position decides.
+    this.syncContextCollapse();
+  }
+
+  /**
+   * Collapse the context card once the thread has scrolled past it, so a long
+   * memo stops eating the height the conversation needs. Scrolling back to the
+   * top restores it.
+   *
+   * The guard below is what keeps this from flickering. Collapsing shortens
+   * the scrollable content, so on a thread that is only just long enough to
+   * scroll, collapsing removes the scroll entirely — the browser clamps
+   * scrollTop back to 0, which expands the card, which makes it scrollable
+   * again. Requiring enough slack that the thread stays scrollable after
+   * collapsing breaks that loop.
+   */
+  private syncContextCollapse(): void {
+    const collapsed = this.contextEl.hasClass('is-collapsed');
+    // Only measurable while expanded, so cache it whenever we can.
+    if (!collapsed) this.expandedContextHeight = this.contextEl.offsetHeight;
+
+    const scrollTop = this.messagesEl.scrollTop;
+
+    if (collapsed) {
+      // Expand a touch earlier than we collapse: the asymmetry stops a
+      // rubber-band overscroll or a one-pixel rounding wobble from toggling
+      // the card back and forth.
+      if (scrollTop <= COLLAPSE_EXPAND_AT) this.contextEl.removeClass('is-collapsed');
+      return;
+    }
+
+    if (scrollTop <= COLLAPSE_COLLAPSE_AT) return;
+
+    const overflow = this.messagesEl.scrollHeight - this.messagesEl.clientHeight;
+    // Collapsing can shorten the content by at most the card's expanded
+    // height, so this bound guarantees the thread is still scrollable after.
+    if (overflow > this.expandedContextHeight + COLLAPSE_COLLAPSE_AT) {
+      this.contextEl.addClass('is-collapsed');
+    }
   }
 
   private renderMessages(conversation: Conversation): void {
-    this.messagesEl.empty();
+    this.msgListEl.empty();
     this.liveEl = null;
     this.liveText = '';
 
     if (conversation.messages.length === 0) {
-      this.messagesEl.createDiv({ cls: 'jp-chat-empty', text: t('chat.threadEmptyHint') });
+      this.msgListEl.createDiv({ cls: 'jp-chat-empty', text: t('chat.threadEmptyHint') });
       return;
     }
 
@@ -668,9 +735,9 @@ export class ChatPane {
 
   private addMessage(role: 'user' | 'assistant', content: string): HTMLElement {
     // Drop the placeholder the moment real content arrives.
-    this.messagesEl.find('.jp-chat-empty')?.remove();
+    this.msgListEl.find('.jp-chat-empty')?.remove();
 
-    const el = this.messagesEl.createDiv({ cls: `jp-chat-msg jp-chat-msg-${role}` });
+    const el = this.msgListEl.createDiv({ cls: `jp-chat-msg jp-chat-msg-${role}` });
     const contentEl = el.createDiv({ cls: 'jp-chat-msg-content' });
     if (content.length > 0) void this.renderMarkdown(contentEl, content);
     this.scrollToBottom();
@@ -711,6 +778,8 @@ export class ChatPane {
 
   private scrollToBottom(): void {
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    // Content just grew or shrank, which can flip whether collapsing is safe.
+    this.syncContextCollapse();
   }
 
   private setSendButtonState(): void {

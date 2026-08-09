@@ -2599,13 +2599,37 @@
   flex-direction: column;
 }
 
+/* Sticky wrapper: opaque so the thread scrolls behind it rather than through
+   it, and full-bleed so the collapsed bar spans the pane. */
 .jp-chat-context {
-  flex: 0 0 auto;
-  margin: 8px 12px 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 12px;
+  background: var(--background-primary);
+  border-bottom: 1px solid transparent;
+  transition: border-color 140ms ease;
+}
+.jp-chat-context.is-collapsed {
+  border-bottom-color: var(--background-modifier-border);
+}
+.jp-chat-context-card {
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--background-secondary);
   border-left: 3px solid var(--jp-ts-color, var(--interactive-accent));
+}
+/* Collapsed: one line of text, no thumbnails, tighter box — just enough to
+   keep track of which memo is under discussion. */
+.jp-chat-context.is-collapsed .jp-chat-context-card {
+  padding: 5px 10px;
+}
+.jp-chat-context.is-collapsed .jp-chat-context-body {
+  -webkit-line-clamp: 1;
+  margin-top: 2px;
+}
+.jp-chat-context.is-collapsed .jp-chat-context-images {
+  display: none;
 }
 .jp-chat-context-meta {
   display: flex;
@@ -2659,10 +2683,15 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
+  /* Padding lives on the children so the sticky context card can sit flush
+     against the top edge of the scrollport. */
+  padding: 0;
+}
+.jp-chat-msg-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 8px 12px 12px;
 }
 .jp-chat-empty {
   margin: auto;
