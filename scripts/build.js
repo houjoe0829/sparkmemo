@@ -26,7 +26,21 @@ if (!watch) {
 const options = {
   entryPoints: [path.join(root, 'src/main.ts')],
   bundle: true,
-  external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*'],
+  // Node builtins are listed so esbuild leaves the `require()` calls in
+  // src/chat-runtime.ts untouched instead of trying to bundle them. Those
+  // requires run only on desktop, inside functions, so keeping them as plain
+  // runtime calls is exactly what we want — a bundled or hoisted version would
+  // throw on mobile and take the whole plugin down at load time.
+  external: [
+    'obsidian',
+    'electron',
+    '@codemirror/*',
+    '@lezer/*',
+    'fs',
+    'os',
+    'path',
+    'child_process',
+  ],
   loader: { '.wasm': 'binary' },
   format: 'cjs',
   target: 'es2018',

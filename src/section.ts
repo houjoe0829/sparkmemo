@@ -48,6 +48,12 @@ export interface SparkMemoSettings {
   imageCompressionQuality: number;
   /** Max long-edge size in pixels; images larger than this are downscaled. 0 disables resizing. */
   imageCompressionMaxSize: number;
+  /** Master switch for the chat tab. Off by default: it depends on a locally installed CLI. */
+  chatEnabled: boolean;
+  /** Absolute path to the `claude` CLI. Empty auto-detects from the usual install locations. */
+  chatCliPath: string;
+  /** Model alias or full name passed to the CLI, e.g. sonnet, opus, claude-sonnet-5. */
+  chatModel: string;
 }
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
@@ -69,6 +75,9 @@ export const DEFAULT_SETTINGS: SparkMemoSettings = {
   imageCompressionEnabled: true,
   imageCompressionQuality: 0.8,
   imageCompressionMaxSize: 1920,
+  chatEnabled: false,
+  chatCliPath: '',
+  chatModel: 'sonnet',
 };
 
 export type Rng = { from: number; to: number };

@@ -2048,6 +2048,11 @@
 .jp-tab-btn-text {
   display: none;
 }
+/* Beats the `display: inline-flex !important` above, which an inline
+   style from hide() cannot. */
+.jp-tab-btn.is-hidden {
+  display: none !important;
+}
 .jp-tab-btn:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
@@ -2472,4 +2477,393 @@
   overflow-wrap: break-word;
   top: 0;
   left: -9999px;
+}
+
+/* ── Chat pane ─────────────────────────────────────────────────────── */
+.jp-pane-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Header shared by both views: back arrow only appears inside a thread. */
+.jp-chat-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.jp-chat-back-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.jp-chat-back-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.jp-chat-bar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85em;
+  font-weight: 500;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Conversation list ── */
+.jp-chat-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 6px 12px;
+}
+.jp-chat-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 8px;
+  /* No rules between rows: whitespace does the separating, and hover supplies
+     the only frame a row ever needs. Hairlines here read as a data table,
+     which is the wrong metaphor for a short list of conversations. */
+}
+.jp-chat-list-item:hover {
+  background: var(--background-modifier-hover);
+}
+.jp-chat-list-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.jp-chat-list-title {
+  font-size: 0.85em;
+  line-height: 1.4;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jp-chat-list-meta {
+  margin-top: 2px;
+  font-size: 0.72em;
+  color: var(--text-faint);
+}
+.jp-chat-list-delete {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  /* Hidden until hover so the row stays quiet; still reachable via
+     right-click, and on touch the row simply always shows it. */
+  opacity: 0;
+}
+.jp-chat-list-item:hover .jp-chat-list-delete {
+  opacity: 1;
+}
+.jp-chat-list-delete:hover {
+  color: var(--text-error);
+}
+.jp-chat-list-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Thread ── */
+.jp-chat-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jp-chat-context {
+  flex: 0 0 auto;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border-left: 3px solid var(--jp-ts-color, var(--interactive-accent));
+}
+.jp-chat-context-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.8em;
+}
+.jp-chat-context-icon {
+  display: flex;
+}
+.jp-chat-context-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.jp-chat-context-body {
+  margin-top: 4px;
+  font-size: 0.88em;
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  /* Long memos stay a summary card rather than pushing the thread off-screen.
+     Line-clamp rather than max-height so the cut lands on a whole line with an
+     ellipsis, instead of slicing a row of glyphs in half. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* Thumbnails of whatever the memo embeds — these belong to the entry, so they
+   sit in the quote card rather than in the user's own attachment strip. */
+.jp-chat-context-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.jp-chat-context-thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+  background: var(--background-primary);
+}
+
+.jp-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.jp-chat-empty {
+  margin: auto;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.6;
+}
+
+.jp-chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+.jp-chat-msg-user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: 12px;
+  background: var(--background-modifier-hover);
+}
+.jp-chat-msg-assistant {
+  align-self: stretch;
+}
+.jp-chat-msg-content > :first-child {
+  margin-top: 0;
+}
+.jp-chat-msg-content > :last-child {
+  margin-bottom: 0;
+}
+.jp-chat-msg-content p {
+  margin: 0.4em 0;
+}
+/* Blinking caret while a reply streams in. */
+.jp-chat-msg-pending .jp-chat-msg-content::after,
+.jp-chat-msg-pending::after {
+  content: '';
+}
+.jp-chat-msg-pending .jp-chat-msg-content:empty::before {
+  content: '…';
+  color: var(--text-faint);
+}
+
+/* A wide table must scroll inside itself — letting it size the message would
+   turn the whole thread into a horizontal scroller. */
+.jp-chat-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.jp-chat-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+.jp-chat-render-error {
+  color: var(--text-error);
+  font-size: 0.85em;
+}
+
+/* One rounded card holds the attachment strip, the textarea and the toolbar,
+   so the composer reads as a single control rather than three siblings. */
+.jp-chat-composer {
+  flex: 0 0 auto;
+  margin: 0 12px 12px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-primary);
+  transition: border-color 120ms ease;
+}
+.jp-chat-composer.is-focused {
+  border-color: var(--interactive-accent);
+}
+
+.jp-chat-attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 6px;
+}
+.jp-chat-attach-chip {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--background-secondary);
+}
+.jp-chat-attach-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.jp-chat-attach-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
+.jp-chat-attach-remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+.jp-chat-input {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  max-height: 160px;
+  resize: none;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+.jp-chat-input:focus,
+.jp-chat-input:active {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.jp-chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+}
+.jp-chat-tool-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.75em;
+}
+.jp-chat-tool-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.jp-chat-tool-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.jp-chat-model-btn {
+  /* Model names vary in length; keep the row from jumping as it changes. */
+  min-width: 52px;
+}
+.jp-chat-toolbar-spacer {
+  flex: 1 1 auto;
+}
+.jp-chat-usage {
+  padding-right: 6px;
+  font-size: 0.72em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.jp-chat-usage:empty {
+  display: none;
+}
+.jp-chat-send {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.jp-chat-send svg {
+  width: 14px;
+  height: 14px;
+}
+.jp-chat-send.is-streaming {
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
 }
