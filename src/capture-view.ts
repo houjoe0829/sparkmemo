@@ -4764,7 +4764,9 @@ export class JournalCaptureView extends ItemView {
 
   private markEndOfTimeline() {
     // Replace sentinel functionality with a static end marker
-    const end = createDiv({ cls: 'jp-timeline-end', text: t('capture.loadedToEarliest') });
+    // No visible text: the panel shows one day at a time, so an
+    // "end of timeline" hint under every day carries no information.
+    const end = createDiv({ cls: 'jp-timeline-end' });
     this.sentinelEl.replaceWith(end);
     this.sentinelEl = end;
   }
