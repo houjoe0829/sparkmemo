@@ -110,16 +110,56 @@
   -ms-overflow-style: none; /* old Edge/IE */
 }
 
+/* Mobile keyboard fix. When the software keyboard opens, Obsidian resizes the
+   app so the leaf already ends exactly at the top of the keyboard — and then
+   *also* pads `.view-content` with a bottom inset the height of the keyboard
+   (measured: 372px on iPhone), the usual trick for views whose content scrolls
+   as a whole. Our root IS that `.view-content`, and it is a fixed-height flex
+   column, so the inset is double compensation: of its 388px only 4px were left
+   for content, `.jp-pane-capture` correctly resolved to 0, and the timeline
+   collapsed with it. Drop the inset back to our own padding; nothing can be
+   hidden behind the keyboard here, because the leaf stops above it.
+   `!important` is required — Obsidian sets the inset as an inline style.
+   Zero rather than the usual pane padding: with the keyboard up every point
+   counts, and a scrolling list running to the edge of the pane is the norm on
+   mobile. The timeline supplies its own breathing room at the bottom. */
+.is-mobile .jp-capture-root {
+  padding-bottom: 0 !important;
+}
+.is-mobile .jp-timeline-scroll {
+  padding-bottom: 8px;
+}
+
 /* Day header stays pinned to the top of the scroll area while its entries
    scroll underneath — the user always sees which day they're looking at,
-   and the prev/calendar/next controls stay reachable. */
-.jp-timeline-entry--header {
+   and the prev/calendar/next controls stay reachable.
+
+   Both classes are written together on purpose: `.jp-timeline-entry` further
+   down sets `position: relative` at the same specificity, and — being later in
+   the file — silently won, which killed the sticky behaviour entirely. */
+.jp-timeline-entry.jp-timeline-entry--header {
   position: sticky;
   top: 0;
   z-index: 2;
   background: var(--background-primary);
   padding-top: 4px;
   padding-bottom: 4px;
+}
+/* The rail (`.jp-timeline-day::before`) is drawn from the day block's top, and
+   isn't sticky — so it kept running up past the header dot, all the way to the
+   top of the scroll area. Mask just the sliver above the dot's centre (dot is
+   top:4px, 14px tall → centre at 11px) so the rail appears to start at the dot
+   and never above it. Everything below the centre is left untouched, keeping
+   the rail continuous down the day. Painted before the dot in DOM order, so the
+   dot still draws on top. */
+.jp-timeline-entry.jp-timeline-entry--header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -24px;
+  width: 24px;
+  height: 11px;
+  background: var(--background-primary);
 }
 .jp-timeline-scroll::-webkit-scrollbar {
   display: none; /* Chromium (Obsidian's Electron shell) */
