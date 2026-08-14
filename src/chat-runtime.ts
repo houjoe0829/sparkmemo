@@ -87,6 +87,15 @@ const CANDIDATE_PATHS = [
  *   instead of silently falling back to some other install.
  * @returns Absolute path, or null when nothing was found.
  */
+/**
+ * How long a finished turn's process may take to exit on its own before we
+ * start killing it, and how long SIGTERM gets before SIGKILL. Generous on
+ * purpose: the CLI writes its session transcript on the way out, and that is
+ * what `--resume` reads back.
+ */
+const REAP_GRACE_MS = 10_000;
+const FORCE_KILL_DELAY_MS = 5_000;
+
 export function resolveClaudePath(configured: string): string | null {
   const fs = require('fs') as typeof import('fs');
   const os = require('os') as typeof import('os');
@@ -260,6 +269,51 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
         const inner = event.event as Record<string, unknown> | undefined;
         if (inner?.type === 'content_block_delta') {
           const delta = inner.delta as Record<string, unknown> | undefined;
+  /** Pending reaper timers, cleared the moment the child actually exits. */
+  let reapTimer: ReturnType<typeof setTimeout> | null = null;
+  let forceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearReapTimers = () => {
+    if (reapTimer !== null) {
+      clearTimeout(reapTimer);
+      reapTimer = null;
+    }
+    if (forceTimer !== null) {
+      clearTimeout(forceTimer);
+      forceTimer = null;
+    }
+  };
+
+  const killChild = (signal: NodeJS.Signals) => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      child.kill(signal);
+    } catch {
+      // Already gone.
+    }
+  };
+
+  /** SIGTERM, then insist if the process is wedged and ignores it. */
+  const killWithForceFallback = () => {
+    killChild('SIGTERM');
+    forceTimer = setTimeout(() => killChild('SIGKILL'), FORCE_KILL_DELAY_MS);
+  };
+
+  /**
+   * The stream is done, but the process may still be flushing its session
+   * transcript, which `--resume` reads back. Killing it here would truncate
+   * that, so give it room to leave on its own and only step in if it doesn't.
+   *
+   * Normally nothing fires: stdin was closed with the turn, so the CLI exits
+   * within moments and 'close' clears these timers. This only matters when
+   * something wedges it open (a hung MCP server, say), which would otherwise
+   * strand the process with no way left to kill it.
+   */
+  const scheduleReap = () => {
+    clearReapTimers();
+    reapTimer = setTimeout(killWithForceFallback, REAP_GRACE_MS);
+  };
+
           if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
             push({ type: 'text', content: delta.text });
           }
@@ -268,6 +322,7 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
       }
 
       if (event.type === 'result') {
+    scheduleReap();
         // Context usage is the sum of fresh input and both cache buckets; the
         // window comes from whichever model actually served the turn.
         const usage = event.usage as Record<string, number> | undefined;
@@ -345,13 +400,13 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
   return {
     chunks: generate(),
     abort() {
-      if (finished) return;
       aborted = true;
-      try {
-        child.kill();
-      } catch {
-        // Already gone.
-      }
+      clearReapTimers();
+      killWithForceFallback();
     },
   };
 }
+    clearReapTimers();
+    // No `finished` guard: the stream ending does not mean the process did,
+    // and this is the only way a caller can reach the child. Bailing out here
+    // once the turn was over used to leave a wedged process unkillable.
