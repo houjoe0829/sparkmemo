@@ -155,6 +155,8 @@ this.addRibbonIcon('clock', '快速记录', () => this.activateCaptureView());
 
   其中续行带 2 空格缩进 + 末尾 2 空格软换行，符合 markdown 标准且保持列表结构
 
+  该行为已扩展：用户敲的空行会被保留，不再过滤，软换行也只加在相邻两个非空行之间。见 [capture-record.md](capture-record.md) 的「多行内容与空行」。
+
 ### `appendToJournalSection(content: string, settings, line: string): string`
 
 在 `## Journal` 区块末尾插入 `line`：

@@ -48,10 +48,12 @@ import {
   findSection,
   formatTimeHHMM,
   generateTimestamp,
+  isContinuationLine,
   parseJournalEntries,
   removeAudioEmbedsFromEntry,
   replaceEntryTextInSection,
   rewriteTagsInSection,
+  splitMarkdownBlocks,
   stripAttachmentEmbeds,
   updateEntryLocationName,
 } from './section';
@@ -937,7 +939,7 @@ export class JournalCaptureView extends ItemView {
 
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
       // Render markdown first, then highlight keywords in the resulting DOM text nodes
-      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
+      void this.renderEntryBody(bodyText, bubble, sourcePath, day.scope).then(() => {
         this.highlightKeyword(bubble, query);
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
@@ -972,6 +974,36 @@ export class JournalCaptureView extends ItemView {
    * `<div>`, leaving any other sibling content (like the list item's text)
    * untouched.
    */
+  /**
+   * Render an entry body into `bubble`, one container per blank-line-separated
+   * block, so the gaps the user typed survive into the card.
+   *
+   * Rendering the text in one pass would lose them: markdown keeps no record
+   * of where a blank line sat inside a list, so no amount of CSS can tell an
+   * item the user spaced out from one they didn't. The trade-off is that a
+   * list broken across blocks becomes several lists — invisible for bullets,
+   * but an ordered list restarts its numbering at each gap.
+   */
+  private renderEntryBody(
+    bodyText: string,
+    bubble: HTMLElement,
+    sourcePath: string,
+    scope: Component,
+  ): Promise<void> {
+    const blocks = splitMarkdownBlocks(bodyText);
+    if (blocks.length <= 1) {
+      return MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, scope);
+    }
+    // Create every holder up front so the blocks keep their order regardless
+    // of which render promise settles first.
+    const holders = blocks.map(() => bubble.createDiv({ cls: 'jp-md-block' }));
+    return Promise.all(
+      blocks.map((block, i) =>
+        MarkdownRenderer.render(this.app, block, holders[i], sourcePath, scope),
+      ),
+    ).then(() => undefined);
+  }
+
   private applyImageGrid(bubble: HTMLElement) {
     const embeds = Array.from(bubble.querySelectorAll('.internal-embed'))
       .filter(el => el.querySelector('img'));
@@ -3828,7 +3860,7 @@ export class JournalCaptureView extends ItemView {
 
       // Body bubble: chat-style rounded card holding the rendered markdown.
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope)
+      void this.renderEntryBody(bodyText, bubble, sourcePath, day.scope)
         .then(() => {
           this.applyImageGrid(bubble);
           this.attachImagePreviews(bubble);
@@ -4254,7 +4286,7 @@ export class JournalCaptureView extends ItemView {
       if (location) this.renderLocationChip(head, day, entry, location);
 
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
-      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
+      void this.renderEntryBody(bodyText, bubble, sourcePath, day.scope).then(() => {
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
         this.renderFileEmbedCards(bubble);
@@ -4741,7 +4773,7 @@ export class JournalCaptureView extends ItemView {
       if (location) this.renderLocationChip(head, day, entry, location);
 
       const bubble = row.createDiv({ cls: 'jp-timeline-bubble jp-search-bubble' });
-      void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
+      void this.renderEntryBody(bodyText, bubble, sourcePath, day.scope).then(() => {
         this.applyImageGrid(bubble);
         this.attachImagePreviews(bubble);
         this.renderFileEmbedCards(bubble);
@@ -4976,7 +5008,7 @@ export class JournalCaptureView extends ItemView {
     const { text: bodyText, location } = extractLocationTag(entry.text);
     if (location) this.renderLocationChip(head, day, entry, location);
     const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
-    void MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, day.scope).then(() => {
+    void this.renderEntryBody(bodyText, bubble, sourcePath, day.scope).then(() => {
       this.applyImageGrid(bubble);
       this.attachImagePreviews(bubble);
       this.renderFileEmbedCards(bubble);
@@ -5002,10 +5034,10 @@ export class JournalCaptureView extends ItemView {
       const m = lines[i].match(/^[-*+]\s+(.+)$/);
       if (!m) continue;
       let text = m[1].trim();
-      // Collect indented continuation lines
+      // Collect continuation lines (indented, plus interior blank lines)
       let j = i + 1;
-      while (j < lines.length && /^\s+\S/.test(lines[j])) {
-        text += '\n' + lines[j].replace(/^\s{0,2}/, '');
+      while (j < lines.length && isContinuationLine(lines, j)) {
+        text += '\n' + (lines[j].trim().length === 0 ? '' : lines[j].replace(/^\s{0,2}/, ''));
         j++;
       }
       result.push({ timestamp: '00:00', text, lineIndex: i });

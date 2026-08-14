@@ -223,6 +223,30 @@ export function buildDecorations(
  *   sees the original structure (soft breaks, lists, etc.)
  * - Lines without a timestamp at the top level are skipped
  */
+/**
+ * Does `lines[i]` still belong to the entry that started on an earlier line?
+ *
+ * An indented, non-empty line always does — that's the continuation indent
+ * `buildEntryLine` writes. A blank line only does when an indented line still
+ * follows it (with at most more blank lines in between); otherwise the blank
+ * lines that separate entries, or that trail the section, would be swallowed
+ * into the preceding entry and deleted along with it.
+ *
+ * Every span-walking caller (parse / delete / edit / retag / relocate) must go
+ * through this, or the parsed entry text and the character range those callers
+ * splice would disagree about where an entry ends.
+ */
+export function isContinuationLine(lines: string[], i: number): boolean {
+  const line = lines[i];
+  if (/^\s+\S/.test(line)) return true;
+  if (line.trim().length > 0) return false;
+  for (let j = i + 1; j < lines.length; j++) {
+    if (/^\s+\S/.test(lines[j])) return true;
+    if (lines[j].trim().length > 0) return false;
+  }
+  return false;
+}
+
 export function parseJournalEntries(
   sectionText: string,
   pattern: string,
@@ -242,8 +266,8 @@ export function parseJournalEntries(
     // continuation indent that buildEntryLine adds, but preserve the rest
     // (including a trailing soft-break "  ") so MarkdownRenderer sees the
     // original line structure.
-    if (entries.length > 0 && /^\s+\S/.test(raw)) {
-      const cont = raw.replace(/^\s{0,2}/, '');
+    if (entries.length > 0 && isContinuationLine(lines, i)) {
+      const cont = raw.trim().length === 0 ? '' : raw.replace(/^\s{0,2}/, '');
       entries[entries.length - 1].text += '\n' + cont;
       continue;
     }
@@ -262,6 +286,55 @@ export function parseJournalEntries(
 }
 
 /**
+ * Split entry text into the blocks the user separated with blank lines.
+ *
+ * Needed because markdown throws that separation away inside a list: a blank
+ * line between two list items doesn't split the list, it only flips the whole
+ * list to "loose" (every item gains a `<p>`), and the result is byte-identical
+ * whether one pair of items was separated or all of them. Rendering each block
+ * into its own container is the only way to put the gap back where it was
+ * typed.
+ *
+ * Blank lines inside a fenced code block are content, not separators, so
+ * fences are kept whole.
+ */
+export function splitMarkdownBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let fence: string | null = null;
+
+  const flush = () => {
+    if (current.length > 0) {
+      blocks.push(current.join('\n'));
+      current = [];
+    }
+  };
+
+  for (const line of text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')) {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+    if (fence !== null) {
+      current.push(line);
+      // A closing fence uses the same character, at least as long as the opener.
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      continue;
+    }
+    if (marker) {
+      fence = marker;
+      current.push(line);
+      continue;
+    }
+    if (line.trim().length === 0) {
+      flush();
+      continue;
+    }
+    current.push(line);
+  }
+  flush();
+
+  return blocks;
+}
+
+/**
  * Construct a journal entry line to append to the section.
  *
  * Single-line input becomes `- HH:MM text`.
@@ -272,26 +345,41 @@ export function parseJournalEntries(
  *     second line
  *     third line
  *
- * Each line (except possibly the last) ends with two spaces to render as a
- * soft break in markdown. Continuation lines are indented with two spaces so
- * they belong to the same list item.
+ * Non-blank lines end with two spaces to render as a soft break, and are
+ * indented two spaces so they belong to the same list item.
+ *
+ * Blank lines the user typed are kept, written as genuinely empty lines. They
+ * are what lets a memo hold a list followed by a standalone paragraph: without
+ * one, a plain line sitting at the same indent as the bullets above it is a
+ * markdown lazy continuation and gets absorbed into the last bullet. Runs of
+ * blank lines collapse to one, and leading/trailing ones are dropped.
  */
 export function buildEntryLine(text: string, ts: string): string {
-  const trimmed = text.trim();
+  const trimmed = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (trimmed.length === 0) return `- ${ts} `;
 
-  const parts = trimmed.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const parts: string[] = [];
+  for (const raw of trimmed.split('\n')) {
+    const line = raw.trim();
+    // Collapse consecutive blanks; a leading blank can't occur after trim().
+    if (line.length === 0 && parts[parts.length - 1] === '') continue;
+    parts.push(line);
+  }
   if (parts.length === 1) {
     return `- ${ts} ${parts[0]}`;
   }
 
-  const head = `- ${ts} ${parts[0]}  `;
-  const tail = parts
-    .slice(1)
-    .map((line, idx) =>
-      idx === parts.length - 2 ? `  ${line}` : `  ${line}  `,
-    );
-  return [head, ...tail].join('\n');
+  return parts
+    .map((line, idx) => {
+      const body =
+        idx === 0 ? `- ${ts} ${line}` : line.length === 0 ? '' : `  ${line}`;
+      // A soft break is only meaningful between two non-blank lines — before a
+      // blank line the paragraph already ends.
+      const next = parts[idx + 1];
+      const softBreak = line.length > 0 && next !== undefined && next.length > 0;
+      return softBreak ? `${body}  ` : body;
+    })
+    .join('\n');
 }
 
 /**
@@ -433,18 +521,33 @@ export function extractFileEmbeds(text: string): string[] {
  * populate the input box for "编辑" — the embeds themselves are restored as
  * pending attachment previews instead, so the raw `![[...]]` text shouldn't
  * also show up for editing. Note embeds (`![[SomeNote]]`) are preserved.
+ *
+ * Blank lines the user typed survive; only lines *emptied* by removing an
+ * embed disappear. Dropping both would silently rewrite the entry on every
+ * edit round-trip: the blank line separating a list from the paragraph after
+ * it would vanish from the input box, and saving would re-glue that paragraph
+ * onto the last bullet.
  */
 export function stripAttachmentEmbeds(text: string): string {
-  const stripped = text.replace(EMBED_RE, (full, path: string) => {
-    const p = path.trim();
-    if (AUDIO_EXT_RE.test(p) || IMAGE_EXT_RE.test(p) || isFileAttachmentPath(p)) return '';
-    return full;
-  });
-  return stripped
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .join('\n');
+  const out: string[] = [];
+  for (const raw of text.split('\n')) {
+    const wasBlank = raw.trim().length === 0;
+    const line = raw
+      .replace(EMBED_RE, (full, path: string) => {
+        const p = path.trim();
+        if (AUDIO_EXT_RE.test(p) || IMAGE_EXT_RE.test(p) || isFileAttachmentPath(p)) return '';
+        return full;
+      })
+      .trim();
+    if (line.length === 0) {
+      if (!wasBlank) continue; // emptied by an embed removal
+      if (out.length === 0) continue; // no leading blank
+      if (out[out.length - 1] === '') continue; // collapse runs
+    }
+    out.push(line);
+  }
+  while (out.length > 0 && out[out.length - 1] === '') out.pop();
+  return out.join('\n');
 }
 
 /**
@@ -486,7 +589,7 @@ export function deleteEntryFromSection(
 
   // Find end (exclusive) of the entry: head + continuation lines.
   let end = lineIndex + 1;
-  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+  while (end < lines.length && isContinuationLine(lines, end)) {
     end++;
   }
 
@@ -551,7 +654,7 @@ export function removeAudioEmbedsFromEntry(
 
   // Find inclusive range of this entry: head + continuation lines.
   let end = lineIndex + 1;
-  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+  while (end < lines.length && isContinuationLine(lines, end)) {
     end++;
   }
 
@@ -631,7 +734,7 @@ export function replaceEntryTextInSection(
   if (!tsRe.test(lines[lineIndex])) return content;
 
   let end = lineIndex + 1;
-  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+  while (end < lines.length && isContinuationLine(lines, end)) {
     end++;
   }
 
@@ -705,7 +808,7 @@ export function rewriteTagsInSection(
     if (newText === entry.text) continue;
 
     let end = entry.lineIndex + 1;
-    while (end < lines.length && /^\s+\S/.test(lines[end])) end++;
+    while (end < lines.length && isContinuationLine(lines, end)) end++;
 
     const marker = lines[entry.lineIndex].match(/^([-*+])\s+/)?.[1] ?? '-';
     const newLine = buildEntryLine(newText, entry.timestamp).replace(/^-/, marker);
@@ -752,7 +855,7 @@ export function updateEntryLocationName(
   if (!tsRe.test(lines[lineIndex])) return content;
 
   let end = lineIndex + 1;
-  while (end < lines.length && /^\s+\S/.test(lines[end])) {
+  while (end < lines.length && isContinuationLine(lines, end)) {
     end++;
   }
 

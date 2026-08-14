@@ -1112,6 +1112,31 @@
 .jp-timeline-bubble li p {
   margin: 0 !important;
 }
+/* Restore the gap for blank lines the user typed. The entry text is
+   de-indented before rendering, so these arrive as sibling blocks of the
+   bubble, not as one list item — the flattening rule above would otherwise
+   erase every paragraph break.
+   Which adjacencies imply a blank line in the source: two paragraphs always
+   need one between them, and a paragraph following a list does too (without
+   it the line is a lazy continuation and gets absorbed into the last bullet).
+   A list *after* a paragraph does not, which is why `p + ul` stays tight —
+   "定位" immediately followed by its bullets is the common case. The cost is
+   that a blank line deliberately placed before a list renders the same as no
+   blank line; telling those apart needs the renderer, not CSS.
+   Soft-breaks are <br> inside one <p>, so multi-line memos stay tight. */
+.jp-timeline-bubble p + p,
+.jp-timeline-bubble ul + p,
+.jp-timeline-bubble ol + p {
+  margin-top: 1em !important;
+}
+/* One holder per blank-line-separated block (see `renderEntryBody`). The gap
+   lives here rather than on the rendered tags, so it lands exactly where the
+   blank line was typed — including between two list items, which markdown
+   alone gives us no way to detect. Needs to out-specify the generic
+   `> div + div` rule above. */
+.jp-timeline-bubble .jp-md-block + .jp-md-block {
+  margin-top: 1em !important;
+}
 /* Embedded images render as a small square thumbnail — same footprint as
    a grid cell — instead of at full width. A tall portrait shot would
    otherwise dominate the timeline entry; full detail is one click away
