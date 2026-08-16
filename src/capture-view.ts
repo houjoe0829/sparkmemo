@@ -6524,16 +6524,21 @@ class CalendarPickerModal extends Modal {
 /** One entry in the preview carousel. */
 interface ImagePreviewItem { src: string; alt: string; }
 
+/** Horizontal distance a swipe must cover before it switches photos. */
+const SWIPE_THRESHOLD_PX = 60;
+
 /** Full-size, chrome-free preview of a pending image thumbnail. */
 class ImagePreviewModal extends Modal {
   private scale = 1;
   private tx = 0;
   private ty = 0;
   private img!: HTMLImageElement;
-  private prevBtn: HTMLButtonElement | null = null;
-  private nextBtn: HTMLButtonElement | null = null;
   private counterEl: HTMLElement | null = null;
   private dragging = false;
+  private swiping = false;
+  private swipeStartX = 0;
+  private swipeStartY = 0;
+  private swipeAxis: 'none' | 'x' | 'y' = 'none';
   private dragStartX = 0;
   private dragStartY = 0;
   private txStart = 0;
@@ -6571,29 +6576,8 @@ class ImagePreviewModal extends Modal {
     this.applyTransform();
 
     if (this.items.length > 1) {
-      this.prevBtn = this.contentEl.createEl('button', {
-        cls: 'jp-image-preview-nav jp-image-preview-nav--prev',
-        attr: { 'aria-label': 'Previous' },
-      });
-      setIcon(this.prevBtn, 'chevron-left');
-      this.prevBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        this.step(-1);
-      });
-
-      this.nextBtn = this.contentEl.createEl('button', {
-        cls: 'jp-image-preview-nav jp-image-preview-nav--next',
-        attr: { 'aria-label': 'Next' },
-      });
-      setIcon(this.nextBtn, 'chevron-right');
-      this.nextBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        this.step(1);
-      });
-
       this.counterEl = this.contentEl.createDiv({ cls: 'jp-image-preview-counter' });
       this.updateCounter();
-      this.updateNavState();
     }
 
     activeDocument.addEventListener('keydown', this.keyHandler);
@@ -6601,7 +6585,6 @@ class ImagePreviewModal extends Modal {
     // Click on the backdrop (anywhere outside the image itself) closes.
     this.contentEl.addEventListener('click', (ev) => {
       if (ev.target === img) return;
-      if (ev.target instanceof HTMLElement && ev.target.closest('.jp-image-preview-nav')) return;
       this.close();
     });
 
@@ -6617,31 +6600,65 @@ class ImagePreviewModal extends Modal {
       { passive: false },
     );
 
-    // Drag to pan when zoomed.
+    // Drag to pan when zoomed; swipe left/right to switch photos when not zoomed.
     img.addEventListener('pointerdown', (ev: PointerEvent) => {
-      if (this.scale <= 1) return;
-      this.dragging = true;
       this.moved = false;
-      this.dragStartX = ev.clientX;
-      this.dragStartY = ev.clientY;
-      this.txStart = this.tx;
-      this.tyStart = this.ty;
+      if (this.scale > 1) {
+        this.dragging = true;
+        this.dragStartX = ev.clientX;
+        this.dragStartY = ev.clientY;
+        this.txStart = this.tx;
+        this.tyStart = this.ty;
+        img.setPointerCapture(ev.pointerId);
+        return;
+      }
+      if (this.items.length <= 1) return;
+      this.swiping = true;
+      this.swipeAxis = 'none';
+      this.swipeStartX = ev.clientX;
+      this.swipeStartY = ev.clientY;
       img.setPointerCapture(ev.pointerId);
     });
     img.addEventListener('pointermove', (ev: PointerEvent) => {
-      if (!this.dragging) return;
-      const dx = ev.clientX - this.dragStartX;
-      const dy = ev.clientY - this.dragStartY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) this.moved = true;
-      this.tx = this.txStart + dx;
-      this.ty = this.tyStart + dy;
+      if (this.dragging) {
+        const dx = ev.clientX - this.dragStartX;
+        const dy = ev.clientY - this.dragStartY;
+        if (Math.abs(dx) + Math.abs(dy) > 3) this.moved = true;
+        this.tx = this.txStart + dx;
+        this.ty = this.tyStart + dy;
+        this.applyTransform();
+        return;
+      }
+      if (!this.swiping) return;
+      const dx = ev.clientX - this.swipeStartX;
+      const dy = ev.clientY - this.swipeStartY;
+      // Lock the axis once the finger has clearly committed to a direction.
+      if (this.swipeAxis === 'none' && Math.abs(dx) + Math.abs(dy) > 10) {
+        this.swipeAxis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      }
+      if (this.swipeAxis !== 'x') return;
+      this.moved = true;
+      // Follow the finger, with resistance at the first/last photo.
+      const atEdge = (dx > 0 && this.index === 0) || (dx < 0 && this.index === this.items.length - 1);
+      this.tx = atEdge ? dx * 0.25 : dx;
       this.applyTransform();
     });
     const endDrag = (ev: PointerEvent) => {
       if (this.dragging) {
         this.dragging = false;
         img.releasePointerCapture(ev.pointerId);
+        return;
       }
+      if (!this.swiping) return;
+      this.swiping = false;
+      img.releasePointerCapture(ev.pointerId);
+      const dx = ev.clientX - this.swipeStartX;
+      if (this.swipeAxis === 'x' && Math.abs(dx) > SWIPE_THRESHOLD_PX) this.step(dx > 0 ? -1 : 1);
+      this.swipeAxis = 'none';
+      // Snap back whether or not the swipe committed.
+      this.tx = 0;
+      this.ty = 0;
+      this.applyTransform();
     };
     img.addEventListener('pointerup', endDrag);
     img.addEventListener('pointercancel', endDrag);
@@ -6794,12 +6811,6 @@ class ImagePreviewModal extends Modal {
     this.ty = 0;
     this.applyTransform();
     this.updateCounter();
-    this.updateNavState();
-  }
-
-  private updateNavState(): void {
-    if (this.prevBtn) this.prevBtn.toggleClass('is-disabled', this.index === 0);
-    if (this.nextBtn) this.nextBtn.toggleClass('is-disabled', this.index === this.items.length - 1);
   }
 
   private updateCounter(): void {

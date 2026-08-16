@@ -129,6 +129,8 @@ All settings are defined in `SparkMemoSettings` (`section.ts`) with defaults in 
 | `chatEnabled` | boolean | `false` | Master switch for the chat tab and its right-click entry. Off by default — it depends on a locally installed CLI |
 | `chatCliPath` | string | `""` | Absolute path to the `claude` binary. Empty auto-detects from the usual install locations |
 | `chatModel` | string | `sonnet` | Default model for new conversations; each thread then keeps its own choice |
+| `chatPermissionMode` | string | `acceptEdits` | Default CLI permission mode for new conversations (`plan` / `acceptEdits` / `bypassPermissions`); each thread then keeps its own. Headless mode never asks before running a tool, so this is the only gate |
+| `chatLoadUserSettings` | boolean | `true` | Load the user's MCP servers, skills and CLAUDE.md into chat. Measured at ~218k input tokens per turn against ~10k when off |
 
 Settings are persisted via Obsidian's `this.saveData()` / `this.loadData()` API.
 

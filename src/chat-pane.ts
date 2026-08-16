@@ -16,8 +16,10 @@ import {
   ChatStore,
   createConversation,
   deriveTitle,
+  flattenBlocks,
   type ChatSeed,
   type Conversation,
+  type MessageBlock,
 } from './chat-store';
 import { t } from './i18n';
 import { extractImageEmbeds, type SparkMemoSettings } from './section';
@@ -28,9 +30,16 @@ export type { ChatSeed } from './chat-store';
  * Base instructions. The memo itself is appended by {@link buildSystemPrompt}
  * so it stays in the system prompt for every turn instead of being re-sent as
  * part of each user message.
+ *
+ * These are *appended* to Claude Code's own system prompt (the runtime passes
+ * `--append-system-prompt`), so they set the register for this pane without
+ * displacing the tool-usage instructions that make the tools work. Written as
+ * an addendum for that reason: they say what kind of conversation this is, and
+ * leave everything else alone.
  */
 const BASE_SYSTEM_PROMPT = [
-  'You are a thinking partner for the user, discussing an entry from their personal journal.',
+  'For this conversation you are a thinking partner for the user, discussing an entry from their personal journal.',
+  'The working directory is the user\'s Obsidian vault: their notes are the material, not a codebase.',
   'Be concrete and concise. Ask a clarifying question when the entry is ambiguous rather than guessing.',
   'Reply in the same language the user writes in.',
 ].join(' ');
@@ -49,6 +58,113 @@ function buildSystemPrompt(seed: ChatSeed): string {
 
 /** Models offered in the composer dropdown. */
 const MODEL_CHOICES = ['sonnet', 'opus', 'haiku'];
+
+/** Lines of a tool's output kept in the row; the rest is summarised away. */
+const TOOL_RESULT_LINES = 20;
+
+/**
+ * Permission modes offered in the composer, narrowest first.
+ *
+ * A subset of what the CLI accepts. The omitted ones (`auto`, `manual`,
+ * `dontAsk`) only differ in how they *ask*, and headless mode never asks, so
+ * offering them would suggest a confirmation step that does not exist here.
+ */
+const PERMISSION_MODES = ['plan', 'acceptEdits', 'bypassPermissions'] as const;
+
+/** Toolbar icon telling the current permission mode apart at a glance. */
+function permissionIcon(mode: string): string {
+  switch (mode) {
+    case 'plan':
+      return 'eye';
+    case 'bypassPermissions':
+      return 'shield-off';
+    default:
+      return 'shield';
+  }
+}
+
+/** Trailing path segment, without pulling in Node's `path` (see chat-runtime). */
+function fileNameOnly(p: string): string {
+  return p.split('/').pop() ?? p;
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/**
+ * Drop the `   12→` gutter Read prefixes every line with. It exists so the
+ * model can cite line numbers; in the row it is noise that eats the width the
+ * actual content needs.
+ */
+function stripLineNumber(line: string): string {
+  return line.replace(/^\s*\d+→/, '');
+}
+
+/** Lucide icon for a tool row, by what the tool does rather than its name. */
+function toolIcon(name: string): string {
+  switch (name) {
+    case 'Read':
+      return 'file-text';
+    case 'Write':
+      return 'file-plus';
+    case 'Edit':
+    case 'NotebookEdit':
+      return 'file-pen';
+    case 'Bash':
+      return 'terminal';
+    case 'Glob':
+      return 'folder-search';
+    case 'Grep':
+      return 'search';
+    case 'WebSearch':
+      return 'globe';
+    case 'WebFetch':
+      return 'download';
+    case 'TodoWrite':
+      return 'list-checks';
+    case 'Task':
+      return 'bot';
+    default:
+      return 'wrench';
+  }
+}
+
+/**
+ * The one-line gist of a tool call, shown beside its name.
+ *
+ * At sidebar width a raw argument dump is unreadable, and a turn can make half
+ * a dozen calls; the useful part is almost always a single field.
+ */
+function toolSummary(name: string, input: Record<string, unknown>): string {
+  const str = (key: string): string =>
+    typeof input[key] === 'string' ? (input[key] as string) : '';
+
+  switch (name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'NotebookEdit':
+      return fileNameOnly(str('file_path'));
+    case 'Bash':
+      return truncate(str('command'), 60);
+    case 'Glob':
+    case 'Grep':
+      return truncate(str('pattern'), 60);
+    case 'WebSearch':
+      return truncate(str('query'), 60);
+    case 'WebFetch':
+      return truncate(str('url'), 60);
+    case 'Task':
+      return truncate(str('description'), 60);
+    default: {
+      // MCP tools and anything unknown: the first string argument is a better
+      // guess than nothing, and is usually the subject of the call.
+      const first = Object.values(input).find(v => typeof v === 'string');
+      return typeof first === 'string' ? truncate(first, 60) : '';
+    }
+  }
+}
 
 /**
  * Display form of a model name. Only the short aliases get capitalised —
@@ -120,6 +236,7 @@ export class ChatPane {
   private attachStripEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private modelBtn!: HTMLButtonElement;
+  private permissionBtn!: HTMLButtonElement;
   private attachBtn!: HTMLButtonElement;
   private usageEl!: HTMLElement;
   private sendBtn!: HTMLButtonElement;
@@ -141,10 +258,25 @@ export class ChatPane {
   private pendingImages: Array<ChatImage & { name: string }> = [];
 
   // ── Streaming render state ──
-  /** Element holding the in-flight assistant reply. */
+  /**
+   * The in-flight reply is an ordered list of blocks rather than one growing
+   * string, because its two sources interleave: text arrives token by token
+   * from `stream_event`, while tool calls arrive whole on the assembled
+   * `assistant` events. A single string cannot record which came first.
+   */
+  /** Container element for the in-flight assistant reply. */
   private liveEl: HTMLElement | null = null;
-  /** Text accumulated so far for the in-flight reply. */
-  private liveText = '';
+  /** Blocks of the in-flight reply, in arrival order. */
+  private liveBlocks: MessageBlock[] = [];
+  /** One element per block, index-aligned with `liveBlocks`. */
+  private liveEls: HTMLElement[] = [];
+  /**
+   * Index of the trailing text block still receiving deltas, or -1 when the
+   * tail is not text. Only this block is re-parsed per frame.
+   */
+  private dirtyTextIndex = -1;
+  /** tool_use id to its index in `liveBlocks`, for matching results back. */
+  private toolIndex = new Map<string, number>();
   /** Pending rAF id, so many deltas collapse into one re-render per frame. */
   private renderFrame: number | null = null;
   /** Height of the context card while expanded, used by the collapse guard. */
@@ -219,6 +351,11 @@ export class ChatPane {
     });
     this.modelBtn.addEventListener('click', evt => this.openModelMenu(evt));
 
+    this.permissionBtn = toolbar.createEl('button', {
+      cls: 'jp-chat-tool-btn jp-chat-permission-btn',
+    });
+    this.permissionBtn.addEventListener('click', evt => this.openPermissionMenu(evt));
+
     this.attachBtn = toolbar.createEl('button', {
       cls: 'jp-chat-tool-btn',
       attr: { 'aria-label': t('chat.attachImage'), title: t('chat.attachImage') },
@@ -289,6 +426,39 @@ export class ChatPane {
     return this.active?.model || this.getSettings().chatModel || 'sonnet';
   }
 
+  private currentPermissionMode(): string {
+    return this.active?.permissionMode || this.getSettings().chatPermissionMode || 'acceptEdits';
+  }
+
+  /**
+   * Pick how much this thread is allowed to do.
+   *
+   * Lives on the toolbar rather than only in settings because it is the one
+   * control that decides whether a reply can rewrite a note: headless mode
+   * never asks before running a tool, so the choice has to be made in advance,
+   * and it has to be visible while making it.
+   */
+  private openPermissionMenu(evt: MouseEvent): void {
+    const menu = new Menu();
+    const current = this.currentPermissionMode();
+
+    for (const mode of PERMISSION_MODES) {
+      menu.addItem(item =>
+        item
+          .setTitle(t(`chat.permission.${mode}` as Parameters<typeof t>[0]))
+          .setChecked(mode === current)
+          .onClick(() => {
+            const conversation = this.active;
+            if (!conversation) return;
+            conversation.permissionMode = mode;
+            this.refreshComposerState();
+            if (conversation.messages.length > 0) void this.persist(conversation);
+          }),
+      );
+    }
+    menu.showAtMouseEvent(evt);
+  }
+
   private openModelMenu(evt: MouseEvent): void {
     const menu = new Menu();
     const current = this.currentModel();
@@ -317,6 +487,13 @@ export class ChatPane {
   /** Repaint model label, context readout and send button from current state. */
   private refreshComposerState(): void {
     this.modelBtn.setText(modelLabel(this.currentModel()));
+
+    const mode = this.currentPermissionMode();
+    setIcon(this.permissionBtn, permissionIcon(mode));
+    const modeLabel = t(`chat.permission.${mode}` as Parameters<typeof t>[0]);
+    this.permissionBtn.setAttr('aria-label', modeLabel);
+    this.permissionBtn.setAttr('title', modeLabel);
+    this.permissionBtn.toggleClass('is-unguarded', mode === 'bypassPermissions');
 
     const used = this.active?.contextTokens ?? 0;
     const window = this.active?.contextWindow ?? 0;
@@ -490,6 +667,7 @@ export class ChatPane {
       seed,
       Date.now(),
       this.getSettings().chatModel || 'sonnet',
+      this.getSettings().chatPermissionMode || 'acceptEdits',
     );
     this.openConversation(conversation);
   }
@@ -720,8 +898,7 @@ export class ChatPane {
 
   private renderMessages(conversation: Conversation): void {
     this.msgListEl.empty();
-    this.liveEl = null;
-    this.liveText = '';
+    this.resetLiveState();
 
     if (conversation.messages.length === 0) {
       this.msgListEl.createDiv({ cls: 'jp-chat-empty', text: t('chat.threadEmptyHint') });
@@ -729,8 +906,30 @@ export class ChatPane {
     }
 
     for (const message of conversation.messages) {
-      this.addMessage(message.role, message.content);
+      const contentEl = this.addMessage(message.role, message.blocks ? '' : message.content);
+      // Replay through the same block renderer the live path uses, so a
+      // reopened thread is identical to the one that was just streamed.
+      if (message.blocks) this.renderBlocks(contentEl, message.blocks);
     }
+  }
+
+  /** Paint a settled list of blocks into `container`. */
+  private renderBlocks(container: HTMLElement, blocks: MessageBlock[]): void {
+    for (const block of blocks) {
+      if (block.kind === 'text') {
+        void this.renderMarkdown(container.createDiv({ cls: 'jp-chat-msg-block' }), block.text);
+      } else {
+        this.renderToolBlock(container, block);
+      }
+    }
+  }
+
+  private resetLiveState(): void {
+    this.liveEl = null;
+    this.liveBlocks = [];
+    this.liveEls = [];
+    this.dirtyTextIndex = -1;
+    this.toolIndex.clear();
   }
 
   private addMessage(role: 'user' | 'assistant', content: string): HTMLElement {
@@ -763,17 +962,133 @@ export class ChatPane {
   }
 
   /**
-   * Queue a re-render of the in-flight reply. Deltas arrive per token; without
-   * this coalescing, each one would trigger a full markdown parse and the pane
-   * would lock up on a long answer.
+   * Queue a re-render of the block currently receiving deltas. Deltas arrive
+   * per token; without this coalescing each one would trigger a markdown parse
+   * and the pane would lock up on a long answer.
+   *
+   * Only the trailing text block is re-parsed. Once a tool call lands the
+   * block before it is final and never touched again, so the per-frame cost is
+   * bounded by the paragraph being typed rather than by everything said so far
+   * — which matters more here than it used to, since a tool-using turn runs far
+   * longer than a plain one.
    */
   private scheduleLiveRender(): void {
     if (this.renderFrame !== null) return;
     this.renderFrame = window.requestAnimationFrame(() => {
       this.renderFrame = null;
-      if (!this.liveEl) return;
-      void this.renderMarkdown(this.liveEl, this.liveText).then(() => this.scrollToBottom());
+      this.renderDirtyBlock();
     });
+  }
+
+  private renderDirtyBlock(): void {
+    const i = this.dirtyTextIndex;
+    if (i < 0) return;
+    const block = this.liveBlocks[i];
+    const el = this.liveEls[i];
+    if (!el || block?.kind !== 'text') return;
+    void this.renderMarkdown(el, block.text).then(() => this.scrollToBottom());
+  }
+
+  /**
+   * Append a block to the in-flight reply and create its element, keeping
+   * `liveBlocks` and `liveEls` index-aligned.
+   */
+  private appendLiveBlock(block: MessageBlock): number {
+    const container = this.liveEl;
+    if (!container) return -1;
+    const index = this.liveBlocks.length;
+    this.liveBlocks.push(block);
+    if (block.kind === 'text') {
+      this.liveEls.push(container.createDiv({ cls: 'jp-chat-msg-block' }));
+      this.dirtyTextIndex = index;
+    } else {
+      this.liveEls.push(this.renderToolBlock(container, block));
+      // The text before a tool call is settled; stop re-parsing it.
+      this.dirtyTextIndex = -1;
+      this.toolIndex.set(block.id, index);
+    }
+    return index;
+  }
+
+  /**
+   * One tool call. Rendered with `setText` throughout, never through
+   * MarkdownRenderer: tool output is whatever a file or a command produced, and
+   * parsing it as markdown would let that content inject headings and links
+   * into the conversation.
+   */
+  private renderToolBlock(
+    container: HTMLElement,
+    block: Extract<MessageBlock, { kind: 'tool' }>,
+  ): HTMLElement {
+    const el = container.createDiv({ cls: 'jp-chat-tool' });
+    if (block.name === 'Bash') el.addClass('jp-chat-tool-bash');
+
+    // The whole header is the toggle, so the hit target matches what the eye
+    // reads as one row.
+    const header = el.createDiv({
+      cls: 'jp-chat-tool-header',
+      attr: { role: 'button', tabindex: '0', 'aria-expanded': 'false' },
+    });
+    setIcon(header.createSpan({ cls: 'jp-chat-tool-chevron' }), 'chevron-right');
+    setIcon(header.createSpan({ cls: 'jp-chat-tool-icon' }), toolIcon(block.name));
+    header.createSpan({ cls: 'jp-chat-tool-name', text: block.name });
+    header.createSpan({ cls: 'jp-chat-tool-summary', text: toolSummary(block.name, block.input) });
+    header.createSpan({ cls: 'jp-chat-tool-status' });
+
+    const toggle = () => {
+      const open = el.hasClass('is-expanded');
+      el.toggleClass('is-expanded', !open);
+      header.setAttr('aria-expanded', String(!open));
+    };
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', evt => {
+      if (evt.key !== 'Enter' && evt.key !== ' ') return;
+      evt.preventDefault();
+      toggle();
+    });
+
+    el.createDiv({ cls: 'jp-chat-tool-content' });
+    this.updateToolBlock(el, block);
+    return el;
+  }
+
+  /** Repaint a tool row's status and result body in place. */
+  private updateToolBlock(
+    el: HTMLElement,
+    block: Extract<MessageBlock, { kind: 'tool' }>,
+  ): void {
+    const status = el.find('.jp-chat-tool-status');
+    const content = el.find('.jp-chat-tool-content');
+    if (!status || !content) return;
+
+    const running = block.result === undefined;
+    el.toggleClass('is-error', block.isError === true);
+    el.toggleClass('is-running', running);
+
+    status.empty();
+    setIcon(status, running ? 'loader-2' : block.isError === true ? 'x' : 'check');
+
+    content.empty();
+
+    // Echo the command itself: for Bash the argument *is* the interesting
+    // part, and the header truncates it.
+    if (block.name === 'Bash' && typeof block.input.command === 'string') {
+      content
+        .createDiv({ cls: 'jp-chat-tool-command' })
+        .setText(`$ ${block.input.command}`);
+    }
+
+    if (running) return;
+    const lines = (block.result ?? '').split('\n').map(stripLineNumber);
+    for (const line of lines.slice(0, TOOL_RESULT_LINES)) {
+      content.createDiv({ cls: 'jp-chat-tool-line' }).setText(line);
+    }
+    if (lines.length > TOOL_RESULT_LINES) {
+      content.createDiv({
+        cls: 'jp-chat-tool-more',
+        text: t('chat.toolMoreLines', { count: String(lines.length - TOOL_RESULT_LINES) }),
+      });
+    }
   }
 
   private scrollToBottom(): void {
@@ -849,7 +1164,7 @@ export class ChatPane {
     this.streaming = true;
     this.setSendButtonState();
 
-    this.liveText = '';
+    this.resetLiveState();
     this.liveEl = this.addMessage('assistant', '');
     this.liveEl.parentElement?.addClass('jp-chat-msg-pending');
 
@@ -859,6 +1174,8 @@ export class ChatPane {
       cwd: vaultPath,
       cliPath,
       model: this.currentModel(),
+      permissionMode: this.currentPermissionMode(),
+      loadUserSettings: this.getSettings().chatLoadUserSettings,
       systemPrompt: buildSystemPrompt(conversation.seed),
       resumeSessionId: conversation.cliSessionId ?? undefined,
       newSessionId: conversation.cliSessionId ? undefined : crypto.randomUUID(),
@@ -886,10 +1203,40 @@ export class ChatPane {
         // First turn only; later turns resume this id.
         if (!conversation.cliSessionId) conversation.cliSessionId = chunk.id;
         break;
-      case 'text':
-        this.liveText += chunk.content;
+      case 'text': {
+        // Extend the trailing text block, or start one if a tool call ended
+        // the last stretch of prose.
+        const tail = this.liveBlocks[this.liveBlocks.length - 1];
+        if (tail?.kind === 'text') {
+          tail.text += chunk.content;
+          this.dirtyTextIndex = this.liveBlocks.length - 1;
+        } else {
+          this.appendLiveBlock({ kind: 'text', text: chunk.content });
+        }
         this.scheduleLiveRender();
         break;
+      }
+      case 'tool_use':
+        this.appendLiveBlock({
+          kind: 'tool',
+          id: chunk.id,
+          name: chunk.name,
+          input: chunk.input,
+        });
+        this.scrollToBottom();
+        break;
+      case 'tool_result': {
+        const index = this.toolIndex.get(chunk.id);
+        if (index === undefined) break;
+        const block = this.liveBlocks[index];
+        const el = this.liveEls[index];
+        if (block?.kind !== 'tool' || !el) break;
+        block.result = chunk.content;
+        block.isError = chunk.isError;
+        this.updateToolBlock(el, block);
+        this.scrollToBottom();
+        break;
+      }
       case 'usage':
         conversation.contextTokens = chunk.contextTokens;
         conversation.contextWindow = chunk.contextWindow;
@@ -911,31 +1258,47 @@ export class ChatPane {
     }
 
     const el = this.liveEl;
-    const finalText = this.liveText;
+    const blocks = this.liveBlocks;
+
+    // A tool still without a result means the turn was stopped mid-call; mark
+    // it so the row settles instead of spinning forever.
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (block.kind !== 'tool' || block.result !== undefined) continue;
+      block.result = t('chat.toolInterrupted');
+      block.isError = true;
+      const toolEl = this.liveEls[i];
+      if (toolEl) this.updateToolBlock(toolEl, block);
+    }
 
     if (el) {
       el.parentElement?.removeClass('jp-chat-msg-pending');
       // Final render happens outside the rAF path so the last deltas, which
       // may have arrived after the most recent frame, are never dropped.
-      void this.renderMarkdown(el, finalText).then(() => {
-        if (error !== null) {
-          el.createDiv({ cls: 'jp-chat-error', text: t('chat.error', { error }) });
-        }
-        this.scrollToBottom();
-      });
+      this.renderDirtyBlock();
+      if (error !== null) {
+        el.createDiv({ cls: 'jp-chat-error', text: t('chat.error', { error }) });
+      }
+      this.scrollToBottom();
     }
 
-    if (finalText.length > 0) {
+    // A turn can be pure tool calls with no prose, so the guard is on blocks
+    // rather than on text — keying it to text would discard such a turn whole.
+    if (blocks.length > 0) {
       conversation.messages.push({
         role: 'assistant',
-        content: finalText,
+        content: flattenBlocks(blocks),
+        blocks,
         timestamp: Date.now(),
       });
     }
     void this.persist(conversation);
 
     this.liveEl = null;
-    this.liveText = '';
+    this.liveBlocks = [];
+    this.liveEls = [];
+    this.dirtyTextIndex = -1;
+    this.toolIndex.clear();
     this.streaming = false;
     this.handle = null;
     this.setSendButtonState();

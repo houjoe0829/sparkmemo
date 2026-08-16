@@ -148,7 +148,7 @@
 /* The rail (`.jp-timeline-day::before`) is drawn from the day block's top, and
    isn't sticky — so it kept running up past the header dot, all the way to the
    top of the scroll area. Mask just the sliver above the dot's centre (dot is
-   top:4px, 14px tall → centre at 11px) so the rail appears to start at the dot
+   top:8px, 14px tall → centre at 15px) so the rail appears to start at the dot
    and never above it. Everything below the centre is left untouched, keeping
    the rail continuous down the day. Painted before the dot in DOM order, so the
    dot still draws on top. */
@@ -158,7 +158,7 @@
   top: 0;
   left: -24px;
   width: 24px;
-  height: 11px;
+  height: 15px;
   background: var(--background-primary);
 }
 .jp-timeline-scroll::-webkit-scrollbar {
@@ -998,7 +998,7 @@
   width: 14px;
   height: 14px;
   left: -24px;
-  top: 4px;
+  top: 8px;
   background: var(--jp-tl-dot);
   border: 3px solid var(--background-primary);
   box-shadow: 0 0 0 2px var(--jp-tl-dot);
@@ -1654,43 +1654,6 @@
   touch-action: none;
   user-select: none;
   -webkit-user-drag: none;
-}
-.jp-image-preview-nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0.75;
-  transition: opacity 0.15s, background 0.15s;
-  z-index: 3;
-}
-.jp-image-preview-nav:hover {
-  opacity: 1;
-  background: rgba(0, 0, 0, 0.65);
-}
-.jp-image-preview-nav.is-disabled {
-  opacity: 0.25;
-  cursor: default;
-  pointer-events: none;
-}
-.jp-image-preview-nav .svg-icon {
-  width: 22px;
-  height: 22px;
-}
-.jp-image-preview-nav--prev {
-  left: 20px;
-}
-.jp-image-preview-nav--next {
-  right: 20px;
 }
 .jp-image-preview-counter {
   position: absolute;
@@ -2657,11 +2620,17 @@
 }
 
 /* ── Thread ── */
+/* Type scale for the whole thread. Without this the messages inherit the
+   vault's reading-view body size, which is sized for a full-width note and
+   reads as oversized in a sidebar. Setting it once on the container (rather
+   than per element) also carries the composer and toolbar along. */
 .jp-chat-thread {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  font-family: var(--font-text);
+  font-size: 13px;
 }
 
 /* Sticky wrapper: opaque so the thread scrolls behind it rather than through
@@ -2712,9 +2681,12 @@
 }
 .jp-chat-context-body {
   margin-top: 4px;
-  font-size: 0.88em;
+  /* Same size as the messages, set apart by color instead. Shrinking the quote
+     made it the smallest text in the pane and hard to read, when all it needs
+     is to sit behind the conversation rather than compete with it. */
+  font-size: 1em;
   line-height: 1.5;
-  color: var(--text-normal);
+  color: var(--text-muted);
   white-space: pre-wrap;
   overflow-wrap: break-word;
   /* Long memos stay a summary card rather than pushing the thread off-screen.
@@ -2774,13 +2746,18 @@
 }
 .jp-chat-msg-user {
   align-self: flex-end;
-  max-width: 85%;
-  padding: 7px 11px;
-  border-radius: 12px;
+  max-width: 95%;
+  padding: 10px 14px;
+  border-radius: 8px;
   background: var(--background-modifier-hover);
 }
 .jp-chat-msg-assistant {
   align-self: stretch;
+}
+.jp-chat-msg-content {
+  line-height: 1.5;
+  min-width: 0;
+  max-width: 100%;
 }
 .jp-chat-msg-content > :first-child {
   margin-top: 0;
@@ -2789,7 +2766,45 @@
   margin-bottom: 0;
 }
 .jp-chat-msg-content p {
-  margin: 0.4em 0;
+  margin: 0 0 8px;
+}
+.jp-chat-msg-content p:last-child {
+  margin-bottom: 0;
+}
+.jp-chat-msg-content ul,
+.jp-chat-msg-content ol {
+  margin: 8px 0;
+  padding-inline-start: 20px;
+}
+/* Headings carry hierarchy through weight and spacing rather than size. The
+   reading-view scale is built for a full-width note; in a sidebar this narrow
+   an h1 three times the body size shouts. `!important` because themes style
+   bare h1-h6 and out-specify a plain class selector here. */
+.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-monospace) !important;
+  font-size: 1em !important;
+  font-weight: 700 !important;
+  line-height: 1.4;
+  letter-spacing: 0;
+  margin: 14px 0 6px;
+  padding: 0 !important;
+  border: none !important;
+}
+.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+/* Theme heading decorations (collapse arrows, prefix glyphs) have no place in
+   a chat bubble. */
+.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6)::before,
+.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6)::after {
+  content: none !important;
+}
+/* Inline code reads as emphasis, not as a boxed chip — a badge per token is
+   noisy at this size. Fenced blocks keep their own background. */
+.jp-chat-msg-content :not(pre) > code {
+  background: none;
+  padding: 0;
+  font-size: 0.95em;
 }
 /* Blinking caret while a reply streams in. */
 .jp-chat-msg-pending .jp-chat-msg-content::after,
@@ -2818,6 +2833,123 @@
 .jp-chat-render-error {
   color: var(--text-error);
   font-size: 0.85em;
+}
+
+/* Unrestricted mode is the one state worth colouring: everything else is a
+   guardrail, this is the absence of one. */
+.jp-chat-permission-btn.is-unguarded {
+  color: var(--text-error);
+}
+
+/* ── Tool calls ──
+   A reply is a run of blocks: prose, then a tool row, then more prose. The
+   rows are deliberately quiet — they are how the answer was reached, not the
+   answer, so they sit at smaller type behind a left rule. */
+.jp-chat-msg-block + .jp-chat-tool,
+.jp-chat-tool + .jp-chat-msg-block,
+.jp-chat-tool + .jp-chat-tool {
+  margin-top: 8px;
+}
+.jp-chat-tool {
+  border-inline-start: 2px solid var(--background-modifier-border);
+  padding-inline-start: 8px;
+}
+.jp-chat-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.jp-chat-tool-header:focus-visible {
+  outline: 1px solid var(--interactive-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.jp-chat-tool-chevron,
+.jp-chat-tool-icon,
+.jp-chat-tool-status {
+  display: flex;
+  flex: 0 0 auto;
+}
+.jp-chat-tool-chevron svg,
+.jp-chat-tool-icon svg,
+.jp-chat-tool-status svg {
+  width: 13px;
+  height: 13px;
+}
+.jp-chat-tool-chevron {
+  transition: transform 120ms ease;
+}
+.jp-chat-tool.is-expanded .jp-chat-tool-chevron {
+  transform: rotate(90deg);
+}
+.jp-chat-tool-icon {
+  color: var(--text-accent);
+}
+.jp-chat-tool-name {
+  flex: 0 0 auto;
+  color: var(--text-normal);
+}
+/* Expanded, the command is echoed in full in the body, so the truncated copy
+   in the header would just be the same string said worse. */
+.jp-chat-tool-bash.is-expanded .jp-chat-tool-summary {
+  visibility: hidden;
+}
+.jp-chat-tool.is-running .jp-chat-tool-status {
+  animation: jp-chat-spin 1s linear infinite;
+  color: var(--text-faint);
+}
+.jp-chat-tool:not(.is-error) .jp-chat-tool-status {
+  color: var(--color-green);
+}
+@keyframes jp-chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* The summary is the part that must give: at sidebar width a long command or
+   path should ellipsize rather than wrap or push the status marker away. */
+.jp-chat-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jp-chat-tool-status {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+.jp-chat-tool.is-error .jp-chat-tool-status {
+  color: var(--text-error);
+}
+/* Collapsed by default: a turn can make half a dozen calls, and the reply is
+   the thing being read. */
+.jp-chat-tool-content {
+  display: none;
+  margin-top: 4px;
+  font-size: 0.85em;
+  font-family: var(--font-monospace);
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.jp-chat-tool.is-expanded .jp-chat-tool-content {
+  display: block;
+}
+.jp-chat-tool-content:empty {
+  display: none;
+}
+.jp-chat-tool-command {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+.jp-chat-tool-more {
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* One rounded card holds the attachment strip, the textarea and the toolbar,
@@ -2886,7 +3018,9 @@
   border: none;
   background: transparent;
   box-shadow: none;
-  font-size: 0.9em;
+  /* Same size as the messages — the composer shouldn't read as finer print
+     than what it produces. */
+  font-size: 1em;
   line-height: 1.5;
 }
 .jp-chat-input:focus,

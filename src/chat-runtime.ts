@@ -21,6 +21,10 @@ export type ChatChunk =
   | { type: 'session'; id: string }
   /** An incremental slice of assistant text. */
   | { type: 'text'; content: string }
+  /** The model invoked a tool. Arrives whole, not streamed. */
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  /** What a tool returned, matched to its call by `id`. */
+  | { type: 'tool_result'; id: string; content: string; isError: boolean }
   /** Context usage, reported once at the end of a turn. */
   | { type: 'usage'; contextTokens: number; contextWindow: number }
   /** Terminal failure for this turn; no 'done' follows. */
@@ -47,8 +51,12 @@ export interface StreamOptions {
   cliPath: string;
   /** Model alias or full name, e.g. 'sonnet'. */
   model: string;
-  /** System prompt replacing Claude Code's coding-agent default. */
+  /** Extra instructions appended to Claude Code's own system prompt. */
   systemPrompt: string;
+  /** CLI permission mode, e.g. 'plan', 'acceptEdits', 'bypassPermissions'. */
+  permissionMode: string;
+  /** Load the user's MCP servers, skills and CLAUDE.md. */
+  loadUserSettings: boolean;
   /**
    * Existing CLI session to continue. Omit on the first turn — the caller then
    * supplies `newSessionId` and the CLI adopts it.
@@ -80,14 +88,6 @@ const CANDIDATE_PATHS = [
 ];
 
 /**
- * Locate the `claude` binary.
- *
- * @param configured Absolute path from settings; when non-empty it wins and is
- *   only checked for existence, so a wrong value surfaces as a clear error
- *   instead of silently falling back to some other install.
- * @returns Absolute path, or null when nothing was found.
- */
-/**
  * How long a finished turn's process may take to exit on its own before we
  * start killing it, and how long SIGTERM gets before SIGKILL. Generous on
  * purpose: the CLI writes its session transcript on the way out, and that is
@@ -96,6 +96,14 @@ const CANDIDATE_PATHS = [
 const REAP_GRACE_MS = 10_000;
 const FORCE_KILL_DELAY_MS = 5_000;
 
+/**
+ * Locate the `claude` binary.
+ *
+ * @param configured Absolute path from settings; when non-empty it wins and is
+ *   only checked for existence, so a wrong value surfaces as a clear error
+ *   instead of silently falling back to some other install.
+ * @returns Absolute path, or null when nothing was found.
+ */
 export function resolveClaudePath(configured: string): string | null {
   const fs = require('fs') as typeof import('fs');
   const os = require('os') as typeof import('os');
@@ -117,20 +125,54 @@ export function resolveClaudePath(configured: string): string | null {
 }
 
 /**
- * Flags that strip Claude Code down to a plain conversational model.
+ * Flags for one turn.
  *
- * Without these the CLI loads the user's full coding setup — MCP servers,
- * skills, hooks, CLAUDE.md — which measured at ~27k input tokens for a
- * three-word prompt. With them it is ~200. Each flag pulls its own weight:
- *   --tools ""                disables every built-in tool
- *   --strict-mcp-config + --mcp-config  drops all MCP servers
- *   --setting-sources ""      skips user/project settings, hooks, CLAUDE.md
- *   --system-prompt           replaces the coding-agent prompt wholesale
+ * Chat runs with the user's full Claude Code setup: every built-in tool, their
+ * MCP servers, and their user/project settings (skills, CLAUDE.md). That costs
+ * roughly 27k input tokens per turn against ~200 for a stripped-down session —
+ * the price of a model that can actually read the vault instead of guessing at
+ * it.
+ *
+ * Two choices here are load-bearing and easy to get wrong:
+ *
+ * `--setting-sources` is passed explicitly rather than omitted. Its default in
+ * headless mode has moved across 2.x releases, and pinning it means a CLI
+ * upgrade cannot silently switch skills and CLAUDE.md back off (or on).
+ *
+ * `--append-system-prompt`, never `--system-prompt`. The latter replaces
+ * Claude Code's prompt wholesale, and that prompt is where the tool-usage
+ * discipline lives (prefer Grep over shelling out to grep, Read takes absolute
+ * paths, never guess at a file's contents). Replacing it while tools are on
+ * yields a model with fifteen tools and no idea how to use them.
+ *
+ * `cwd` is the vault root, which is exactly the boundary tools should stay
+ * inside — so no `--add-dir`, which would only widen it.
  *
  * The message itself goes in over stdin as stream-json rather than as a `-p`
  * argument. That is the only way to attach images, and using one path for
  * every turn keeps text-only and image-bearing turns from drifting apart.
  */
+/**
+ * Reduce a tool_result's `content` to displayable text.
+ *
+ * The CLI sends it either as a plain string or as an array of blocks, so both
+ * shapes have to be handled at every call site otherwise. Images are noted
+ * rather than decoded — the tool row shows text only.
+ */
+function flattenResultContent(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (!Array.isArray(raw)) return '';
+  return raw
+    .map(part => {
+      const p = part as Record<string, unknown>;
+      if (p.type === 'text' && typeof p.text === 'string') return p.text;
+      if (p.type === 'image') return '[image]';
+      return '';
+    })
+    .filter(s => s.length > 0)
+    .join('\n');
+}
+
 function buildArgs(opts: StreamOptions): string[] {
   const args = [
     '-p',
@@ -140,18 +182,22 @@ function buildArgs(opts: StreamOptions): string[] {
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--tools',
-    '',
-    '--strict-mcp-config',
-    '--mcp-config',
-    '{"mcpServers":{}}',
     '--setting-sources',
-    '',
-    '--system-prompt',
+    opts.loadUserSettings ? 'user,project,local' : '',
+    '--permission-mode',
+    opts.permissionMode,
+    '--append-system-prompt',
     opts.systemPrompt,
     '--model',
     opts.model,
   ];
+
+  // With the user's own setup switched off, their MCP servers have to be shut
+  // out explicitly — settings are only one of the places the CLI discovers
+  // them from.
+  if (!opts.loadUserSettings) {
+    args.push('--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}');
+  }
 
   if (opts.resumeSessionId) args.push('--resume', opts.resumeSessionId);
   else if (opts.newSessionId) args.push('--session-id', opts.newSessionId);
@@ -223,52 +269,6 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
     }
   };
 
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    if (resolveNext) {
-      const resolve = resolveNext;
-      resolveNext = null;
-      resolve(null);
-    }
-  };
-
-  // ── stdout: NDJSON, one JSON object per line ──
-  // Chunk boundaries fall anywhere, so hold a remainder between 'data' events.
-  let stdoutBuf = '';
-  let sessionSent = false;
-
-  child.stdout.on('data', (data: Buffer) => {
-    stdoutBuf += data.toString('utf8');
-    const lines = stdoutBuf.split('\n');
-    // Last element is an incomplete line (or '' when the chunk ended on \n).
-    stdoutBuf = lines.pop() ?? '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.length === 0) continue;
-
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(trimmed) as Record<string, unknown>;
-      } catch {
-        // Non-JSON noise on stdout — ignore rather than kill the turn.
-        continue;
-      }
-
-      // Session id shows up on nearly every event; take the first one.
-      if (!sessionSent && typeof event.session_id === 'string') {
-        sessionSent = true;
-        push({ type: 'session', id: event.session_id });
-      }
-
-      // Token-level text arrives as content_block_delta inside stream_event.
-      // We read only these; the fully-assembled `assistant` events that follow
-      // would duplicate the same text.
-      if (event.type === 'stream_event') {
-        const inner = event.event as Record<string, unknown> | undefined;
-        if (inner?.type === 'content_block_delta') {
-          const delta = inner.delta as Record<string, unknown> | undefined;
   /** Pending reaper timers, cleared the moment the child actually exits. */
   let reapTimer: ReturnType<typeof setTimeout> | null = null;
   let forceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -314,6 +314,53 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
     reapTimer = setTimeout(killWithForceFallback, REAP_GRACE_MS);
   };
 
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (resolveNext) {
+      const resolve = resolveNext;
+      resolveNext = null;
+      resolve(null);
+    }
+    scheduleReap();
+  };
+
+  // ── stdout: NDJSON, one JSON object per line ──
+  // Chunk boundaries fall anywhere, so hold a remainder between 'data' events.
+  let stdoutBuf = '';
+  let sessionSent = false;
+
+  child.stdout.on('data', (data: Buffer) => {
+    stdoutBuf += data.toString('utf8');
+    const lines = stdoutBuf.split('\n');
+    // Last element is an incomplete line (or '' when the chunk ended on \n).
+    stdoutBuf = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(trimmed) as Record<string, unknown>;
+      } catch {
+        // Non-JSON noise on stdout — ignore rather than kill the turn.
+        continue;
+      }
+
+      // Session id shows up on nearly every event; take the first one.
+      if (!sessionSent && typeof event.session_id === 'string') {
+        sessionSent = true;
+        push({ type: 'session', id: event.session_id });
+      }
+
+      // Token-level text arrives as content_block_delta inside stream_event.
+      // Text is read only here; the assembled `assistant` events below carry
+      // the same text again and must not re-emit it.
+      if (event.type === 'stream_event') {
+        const inner = event.event as Record<string, unknown> | undefined;
+        if (inner?.type === 'content_block_delta') {
+          const delta = inner.delta as Record<string, unknown> | undefined;
           if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
             push({ type: 'text', content: delta.text });
           }
@@ -321,8 +368,51 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
         continue;
       }
 
+      // Tool calls only exist on the assembled message — there is no
+      // token-level equivalent worth reassembling. Taking `tool_use` blocks
+      // here and nothing else is what keeps text from being emitted twice.
+      if (event.type === 'assistant') {
+        const message = event.message as { content?: unknown } | undefined;
+        const blocks = Array.isArray(message?.content) ? message.content : [];
+        for (const block of blocks) {
+          const b = block as Record<string, unknown>;
+          if (b.type !== 'tool_use') continue;
+          if (typeof b.id !== 'string' || typeof b.name !== 'string') continue;
+          push({
+            type: 'tool_use',
+            id: b.id,
+            name: b.name,
+            input: (b.input as Record<string, unknown>) ?? {},
+          });
+        }
+        continue;
+      }
+
+      // Tool results come back as synthetic `user` events. On resume the CLI
+      // also replays the turn's own user message through this event type; the
+      // `tool_result` check is what separates the two, so don't loosen it.
+      //
+      // The sibling top-level `tool_use_result` field carries a structured
+      // payload (a Read's full file body, for one) that the row never shows.
+      // It is the hook for richer per-tool rendering later; ignoring it now
+      // keeps whole files out of memory.
+      if (event.type === 'user') {
+        const message = event.message as { content?: unknown } | undefined;
+        const blocks = Array.isArray(message?.content) ? message.content : [];
+        for (const block of blocks) {
+          const b = block as Record<string, unknown>;
+          if (b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') continue;
+          push({
+            type: 'tool_result',
+            id: b.tool_use_id,
+            content: flattenResultContent(b.content),
+            isError: b.is_error === true,
+          });
+        }
+        continue;
+      }
+
       if (event.type === 'result') {
-    scheduleReap();
         // Context usage is the sum of fresh input and both cache buckets; the
         // window comes from whichever model actually served the turn.
         const usage = event.usage as Record<string, number> | undefined;
@@ -367,6 +457,7 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
   });
 
   child.on('close', (code: number | null) => {
+    clearReapTimers();
     if (finished) return;
     // A clean 'result' event already finished the turn above; reaching here
     // means the process died without one.
@@ -399,6 +490,9 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
 
   return {
     chunks: generate(),
+    // No `finished` guard: the stream ending does not mean the process did,
+    // and this is the only way a caller can reach the child. Bailing out here
+    // once the turn was over used to leave a wedged process unkillable.
     abort() {
       aborted = true;
       clearReapTimers();
@@ -406,7 +500,3 @@ export function streamClaude(opts: StreamOptions): StreamHandle {
     },
   };
 }
-    clearReapTimers();
-    // No `finished` guard: the stream ending does not mean the process did,
-    // and this is the only way a caller can reach the child. Bailing out here
-    // once the turn was over used to leave a wedged process unkillable.

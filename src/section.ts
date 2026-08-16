@@ -54,6 +54,17 @@ export interface SparkMemoSettings {
   chatCliPath: string;
   /** Model alias or full name passed to the CLI, e.g. sonnet, opus, claude-sonnet-5. */
   chatModel: string;
+  /**
+   * Default permission mode for new conversations; each thread then keeps its
+   * own. Headless mode has no way to ask before running a tool, so this is the
+   * only gate between the model and the vault.
+   */
+  chatPermissionMode: string;
+  /**
+   * Load the user's own Claude Code setup (MCP servers, skills, CLAUDE.md).
+   * Off makes turns dramatically cheaper and narrows what chat can reach.
+   */
+  chatLoadUserSettings: boolean;
 }
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
@@ -78,6 +89,8 @@ export const DEFAULT_SETTINGS: SparkMemoSettings = {
   chatEnabled: false,
   chatCliPath: '',
   chatModel: 'sonnet',
+  chatPermissionMode: 'acceptEdits',
+  chatLoadUserSettings: true,
 };
 
 export type Rng = { from: number; to: number };

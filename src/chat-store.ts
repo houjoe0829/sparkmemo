@@ -21,11 +21,41 @@ export interface ChatSeed {
   text: string;
 }
 
+/**
+ * One piece of an assistant reply: either prose or a tool call.
+ *
+ * Lives here rather than in `chat-runtime` on purpose. This module is
+ * Obsidian-free and already value-imported by `chat-pane`, whereas
+ * `chat-runtime` is desktop-only and may only ever be reached through a
+ * dynamic import — putting a shared type there invites a value-import that
+ * would break the plugin's load on mobile.
+ */
+export type MessageBlock =
+  | { kind: 'text'; text: string }
+  | {
+      kind: 'tool';
+      /** The CLI's tool_use id; matches a call to its result. */
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+      /** Absent while the tool is still running, or if the turn was stopped. */
+      result?: string;
+      isError?: boolean;
+    };
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
+  /**
+   * Plain text of the message. Always present and always a string, including
+   * when `blocks` is set, where it holds their readable flattening — that
+   * invariant is what lets an older build read a newer file without dropping
+   * the message (see `parseConversation`).
+   */
   content: string;
   /** Epoch ms. */
   timestamp: number;
+  /** Structured blocks, on assistant turns that called tools. */
+  blocks?: MessageBlock[];
 }
 
 export interface Conversation {
@@ -46,6 +76,8 @@ export interface Conversation {
   messages: ChatMessage[];
   /** Model this thread uses. Empty means "whatever the setting says". */
   model: string;
+  /** Permission mode this thread uses. Empty means "whatever the setting says". */
+  permissionMode: string;
   /** Context tokens reported by the last completed turn; 0 before any. */
   contextTokens: number;
   /** Context window of the model that served the last turn; 0 before any. */
@@ -79,6 +111,7 @@ export function createConversation(
   seed: ChatSeed,
   now: number,
   model: string,
+  permissionMode = '',
 ): Conversation {
   return {
     id,
@@ -89,9 +122,75 @@ export function createConversation(
     seed,
     messages: [],
     model,
+    permissionMode,
     contextTokens: 0,
     contextWindow: 0,
   };
+}
+
+/** Longest tool result kept on disk; threads live in the synced vault. */
+const MAX_PERSISTED_RESULT = 4096;
+
+/**
+ * Readable plain text for a block list, stored alongside it as `content`.
+ *
+ * Keeping that field a faithful flattening is what lets an older build open a
+ * newer file: it validates as a string, renders sensibly, and `deriveTitle`
+ * keeps working. Tool calls collapse to a one-line marker.
+ */
+export function flattenBlocks(blocks: MessageBlock[]): string {
+  return blocks
+    .map(b => (b.kind === 'text' ? b.text : `\`${b.name}(${firstArg(b.input)})\``))
+    .filter(s => s.length > 0)
+    .join('\n');
+}
+
+function firstArg(input: Record<string, unknown>): string {
+  const first = Object.values(input).find(v => typeof v === 'string');
+  return typeof first === 'string' ? first.slice(0, 60) : '';
+}
+
+/**
+ * Validate a stored `blocks` array, block by block.
+ *
+ * Leniency is the point: a bad block is dropped, the rest of the message
+ * survives, and a malformed array never costs the message — its `content` is
+ * still a valid rendering of the whole turn.
+ */
+function parseBlocks(raw: unknown): MessageBlock[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const blocks: MessageBlock[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const b = item as Record<string, unknown>;
+    if (b.kind === 'text') {
+      if (typeof b.text === 'string') blocks.push({ kind: 'text', text: b.text });
+      continue;
+    }
+    if (b.kind !== 'tool') continue;
+    if (typeof b.id !== 'string' || typeof b.name !== 'string') continue;
+    blocks.push({
+      kind: 'tool',
+      id: b.id,
+      name: b.name,
+      input:
+        typeof b.input === 'object' && b.input !== null
+          ? (b.input as Record<string, unknown>)
+          : {},
+      ...(typeof b.result === 'string' ? { result: b.result } : {}),
+      ...(typeof b.isError === 'boolean' ? { isError: b.isError } : {}),
+    });
+  }
+  return blocks.length > 0 ? blocks : undefined;
+}
+
+/** Shrink oversized tool results before they hit disk. */
+function trimBlocksForDisk(blocks: MessageBlock[]): MessageBlock[] {
+  return blocks.map(b => {
+    if (b.kind !== 'tool' || b.result === undefined) return b;
+    if (b.result.length <= MAX_PERSISTED_RESULT) return b;
+    return { ...b, result: `${b.result.slice(0, MAX_PERSISTED_RESULT)}\n…` };
+  });
 }
 
 /**
@@ -115,11 +214,13 @@ export function parseConversation(raw: unknown): Conversation | null {
         const m = item as Record<string, unknown>;
         if (m.role !== 'user' && m.role !== 'assistant') return [];
         if (typeof m.content !== 'string') return [];
+        const blocks = parseBlocks(m.blocks);
         return [
           {
             role: m.role,
             content: m.content,
             timestamp: typeof m.timestamp === 'number' ? m.timestamp : 0,
+            ...(blocks ? { blocks } : {}),
           },
         ];
       })
@@ -142,6 +243,7 @@ export function parseConversation(raw: unknown): Conversation | null {
     // Absent in files written before per-thread models existed; an empty
     // string falls back to the current setting at send time.
     model: typeof obj.model === 'string' ? obj.model : '',
+    permissionMode: typeof obj.permissionMode === 'string' ? obj.permissionMode : '',
     contextTokens: typeof obj.contextTokens === 'number' ? obj.contextTokens : 0,
     contextWindow: typeof obj.contextWindow === 'number' ? obj.contextWindow : 0,
   };
@@ -172,7 +274,15 @@ export class ChatStore {
   async save(conversation: Conversation, now: number): Promise<void> {
     conversation.updatedAt = now;
     await this.ensureDir();
-    await this.adapter.write(this.pathFor(conversation.id), JSON.stringify(conversation, null, 2));
+    // Trim only the copy being written: the in-memory blocks stay whole so the
+    // open thread keeps showing what it already rendered.
+    const onDisk = {
+      ...conversation,
+      messages: conversation.messages.map(m =>
+        m.blocks ? { ...m, blocks: trimBlocksForDisk(m.blocks) } : m,
+      ),
+    };
+    await this.adapter.write(this.pathFor(conversation.id), JSON.stringify(onDisk, null, 2));
   }
 
   async delete(id: string): Promise<void> {

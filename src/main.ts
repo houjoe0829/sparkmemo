@@ -703,6 +703,33 @@ class SparkMemoSettingTab extends PluginSettingTab {
           );
 
         new Setting(containerEl)
+          .setName(t('settings.chatPermissionName'))
+          .setDesc(t('settings.chatPermissionDesc'))
+          .addDropdown(drop =>
+            drop
+              .addOption('plan', t('chat.permission.plan'))
+              .addOption('acceptEdits', t('chat.permission.acceptEdits'))
+              .addOption('bypassPermissions', t('chat.permission.bypassPermissions'))
+              .setValue(this.plugin.settings.chatPermissionMode)
+              .onChange(async value => {
+                this.plugin.settings.chatPermissionMode = value;
+                await this.plugin.saveSettings();
+              }),
+          );
+
+        new Setting(containerEl)
+          .setName(t('settings.chatUserSettingsName'))
+          .setDesc(t('settings.chatUserSettingsDesc'))
+          .addToggle(toggle =>
+            toggle
+              .setValue(this.plugin.settings.chatLoadUserSettings)
+              .onChange(async value => {
+                this.plugin.settings.chatLoadUserSettings = value;
+                await this.plugin.saveSettings();
+              }),
+          );
+
+        new Setting(containerEl)
           .setName(t('settings.chatModelName'))
           .setDesc(t('settings.chatModelDesc'))
           .addText(text =>
