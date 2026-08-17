@@ -415,7 +415,7 @@ export class ChatPane {
 
   /** Grow the textarea with its content, up to a cap. */
   private autoGrow(): void {
-    this.inputEl.style.height = 'auto';
+    this.inputEl.setCssStyles({ height: 'auto' });
     this.inputEl.style.height = `${Math.min(this.inputEl.scrollHeight, 160)}px`;
   }
 
