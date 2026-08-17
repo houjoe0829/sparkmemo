@@ -213,8 +213,18 @@ export class JournalCaptureView extends ItemView {
   private tagAggLoadPromise: Promise<void> | null = null;
   /** Non-null while viewing a single tag's memo list; null while viewing the tag list. */
   private selectedTag: string | null = null;
+  /**
+   * Tab the user was on when they clicked a `#tag` inside a memo. The back
+   * button returns there instead of to the tag list. Null when the tag was
+   * opened from the tag list itself.
+   */
+  private tagReturnTab: 'capture' | 'search' | 'location' | null = null;
   /** Full paths (e.g. "#parent/child") of tag-tree nodes currently expanded in the tag list. */
   private expandedTagPaths: Set<string> = new Set();
+  private tagSearchBtn!: HTMLButtonElement;
+  private tagSearchInputEl!: HTMLInputElement;
+  /** Current tag-name filter. Empty means the normal tree view; non-empty switches the list to flat matches. */
+  private tagSearchQuery = '';
 
   // DOM references (capture pane)
   private inputCardEl!: HTMLElement;
@@ -605,6 +615,40 @@ export class JournalCaptureView extends ItemView {
 
     this.tagAggTitleEl = this.tagAggBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('tag.all') });
 
+    // Tag name filter. Collapsed to an icon button by default; expanding swaps
+    // the bar title for an input and the tree below for flat matches.
+    this.tagSearchInputEl = this.tagAggBarEl.createEl('input', {
+      cls: 'jp-search-input jp-tag-search-input',
+      attr: { type: 'text', placeholder: t('tag.searchPlaceholder') },
+    });
+    this.tagSearchInputEl.hide();
+    this.tagSearchInputEl.addEventListener('input', () => {
+      this.tagSearchQuery = this.tagSearchInputEl.value.trim();
+      this.renderTagList();
+    });
+    this.tagSearchInputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (this.tagSearchInputEl.value.length > 0) {
+          this.tagSearchInputEl.value = '';
+          this.tagSearchQuery = '';
+          this.renderTagList();
+        } else {
+          this.closeTagSearch();
+        }
+      }
+    });
+
+    this.tagSearchBtn = this.tagAggBarEl.createEl('button', {
+      cls: 'jp-location-view-btn jp-tag-search-btn',
+      attr: { 'aria-label': t('tag.search'), title: t('tag.search') },
+    });
+    setIcon(this.tagSearchBtn, 'search');
+    this.tagSearchBtn.addEventListener('click', () => {
+      if (this.tagSearchInputEl.isShown()) this.closeTagSearch();
+      else this.openTagSearch();
+    });
+
     // Location bar — collapsed by default, shown when location tab is active
     this.locationBarEl = root.createDiv({ cls: 'jp-location-bar' });
     this.locationBarEl.hide();
@@ -653,6 +697,8 @@ export class JournalCaptureView extends ItemView {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
+    // Any navigation other than "into the tag tab" drops the remembered origin.
+    if (tab !== 'tag') this.tagReturnTab = null;
     if (prevTab === 'location' && tab !== 'location') this.teardownMap();
 
     // Chat is the only pane outside the capture/stats pair, so hide it here
@@ -758,6 +804,8 @@ export class JournalCaptureView extends ItemView {
         this.selectedTag = null;
         this.tagAggBackBtn.hide();
         this.tagAggTitleEl.setText(t('tag.all'));
+        this.tagSearchBtn.show();
+        this.closeTagSearch();
         void this.loadTagIndex().then(() => {
           // Bail if the user already navigated away or picked a tag while scanning
           if (this.currentTab === 'tag' && this.selectedTag === null) {
@@ -1161,6 +1209,9 @@ export class JournalCaptureView extends ItemView {
   /** Switches to the tag aggregation tab and drills straight into `tag`. */
   private async openTagAggregation(tag: string) {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
+    const from = this.currentTab;
+    this.tagReturnTab =
+      from === 'capture' || from === 'search' || from === 'location' ? from : null;
     this.switchTab('tag');
     await this.ensureTagIndexAndRenderList();
     this.selectTag(normalized);
@@ -4437,6 +4488,11 @@ export class JournalCaptureView extends ItemView {
       return;
     }
 
+    if (this.tagSearchQuery.length > 0) {
+      this.renderTagSearchResults();
+      return;
+    }
+
     this.tagAggTitleEl.setText(t('tag.allCount', { count: String(this.tagAggIndex.size) }));
 
     const tree = this.buildTagTree();
@@ -4447,6 +4503,82 @@ export class JournalCaptureView extends ItemView {
     }
 
     this.exhausted = true;
+  }
+
+  private openTagSearch() {
+    this.tagAggTitleEl.hide();
+    this.tagSearchInputEl.show();
+    this.tagSearchInputEl.focus();
+  }
+
+  private closeTagSearch() {
+    this.tagSearchInputEl.value = '';
+    this.tagSearchInputEl.hide();
+    this.tagAggTitleEl.show();
+    if (this.tagSearchQuery.length > 0) {
+      this.tagSearchQuery = '';
+      if (this.selectedTag === null) this.renderTagList();
+    }
+  }
+
+  /**
+   * Flat, full-path result list for the tag filter. Deliberately not the tree:
+   * a match three levels deep reads better as "#read/scifi" on one row than as
+   * an auto-expanded branch the user then has to trace back up.
+   */
+  private renderTagSearchResults() {
+    if (!this.tagAggIndex) return;
+
+    const q = this.tagSearchQuery.toLowerCase();
+    const matches = [...this.tagAggIndex.entries()]
+      .filter(([tag]) => tag.toLowerCase().includes(q))
+      .map(([tag, data]) => ({ tag, count: data.count, lastTs: data.lastTs, pos: tag.toLowerCase().indexOf(q) }))
+      // Earlier match position first (a name starting with the query beats one
+      // matching mid-word), then the busier tag, then most recently used.
+      .sort((a, b) => a.pos - b.pos || b.count - a.count || b.lastTs - a.lastTs);
+
+    if (matches.length === 0) {
+      this.renderTopLevelMessage(t('tag.searchNoMatch', { query: this.tagSearchQuery }));
+      this.exhausted = true;
+      return;
+    }
+
+    const listEl = this.timelineEl.createDiv({ cls: 'jp-tag-list' });
+    for (const m of matches) {
+      const item = listEl.createDiv({ cls: 'jp-location-item jp-tag-item' });
+      item.createSpan({ cls: 'jp-tag-item-chevron jp-tag-item-chevron--spacer' });
+      const iconEl = item.createSpan({ cls: 'jp-location-item-icon' });
+      setIcon(iconEl, 'tag');
+      item.createDiv({ cls: 'jp-location-item-name', text: m.tag });
+      item.createDiv({ cls: 'jp-location-item-count', text: `${m.count}` });
+
+      item.addEventListener('click', () => this.selectTag(m.tag));
+
+      if (!Platform.isMobile) {
+        item.addEventListener('contextmenu', (e) => {
+          const node = this.findTagNode(m.tag);
+          if (!node) return;
+          e.preventDefault();
+          this.openTagMenu(e, node);
+        });
+      }
+    }
+
+    this.exhausted = true;
+  }
+
+  /** Locate a tag-tree node by its full path (e.g. "#parent/child"), or null if it isn't in the tree. */
+  private findTagNode(fullPath: string): TagTreeNode | null {
+    const segments = fullPath.slice(1).split('/').filter(s => s.length > 0);
+    let siblings = this.buildTagTree();
+    let node: TagTreeNode | null = null;
+    for (const segment of segments) {
+      const next = siblings.get(segment);
+      if (!next) return null;
+      node = next;
+      siblings = next.children;
+    }
+    return node;
   }
 
   /** Render one tag-tree node (and, if expanded, its children) as a row. */
@@ -4695,7 +4827,17 @@ export class JournalCaptureView extends ItemView {
 
     this.selectedTag = tag;
     this.tagAggBackBtn.show();
-    this.tagAggTitleEl.setText(tag);
+    // The filter applies to the tag list, not to one tag's memos — park it
+    // (query kept, so going back restores the same result list).
+    this.tagSearchBtn.hide();
+    this.tagSearchInputEl.hide();
+    this.tagAggTitleEl.show();
+    // Count matches the tag list's number (includes child tags), so the header
+    // reads the same before and after drilling in.
+    const totalCount = this.findTagNode(tag)?.totalCount ?? data.entries.length;
+    this.tagAggTitleEl.empty();
+    this.tagAggTitleEl.createSpan({ text: tag });
+    this.tagAggTitleEl.createSpan({ cls: 'jp-location-item-count', text: `${totalCount}` });
 
     this.disposeDays();
     this.timelineEl.empty();
@@ -4736,9 +4878,24 @@ export class JournalCaptureView extends ItemView {
 
   /** Return from a tag's memo list back to the "all tags" list. */
   private backToTagList() {
+    // Came in by clicking a #tag inside a memo — go back where the user was.
+    if (this.tagReturnTab) {
+      const target = this.tagReturnTab;
+      this.tagReturnTab = null;
+      this.selectedTag = null;
+      this.switchTab(target);
+      // switchTab keeps the search query but not its result list, so re-run it.
+      if (target === 'search' && this.searchQuery.length > 0) void this.runSearch(this.searchQuery);
+      return;
+    }
     this.selectedTag = null;
     this.tagAggBackBtn.hide();
     this.tagAggTitleEl.setText(t('tag.all'));
+    this.tagSearchBtn.show();
+    if (this.tagSearchQuery.length > 0) {
+      this.tagAggTitleEl.hide();
+      this.tagSearchInputEl.show();
+    }
     this.renderTagList();
   }
 

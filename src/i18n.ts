@@ -138,6 +138,9 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'tag.scanFailed': '❌ Failed to scan tags',
     'tag.allCount': 'All {{count}} tags',
     'tag.tagNotFound': 'No memos found for "{{tag}}"',
+    'tag.search': 'Search tags',
+    'tag.searchPlaceholder': 'Search tags…',
+    'tag.searchNoMatch': 'No tags match "{{query}}"',
 
     'tag.manage.rename': 'Rename',
     'tag.manage.moveUnder': 'Move under…',
@@ -451,6 +454,9 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'tag.scanFailed': '❌ 扫描标签失败',
     'tag.allCount': '全部 {{count}} 个标签',
     'tag.tagNotFound': '没有找到「{{tag}}」的 memo',
+    'tag.search': '搜索标签',
+    'tag.searchPlaceholder': '搜索标签…',
+    'tag.searchNoMatch': '没有匹配「{{query}}」的标签',
 
     'tag.manage.rename': '重命名',
     'tag.manage.moveUnder': '移到子标签下…',

@@ -1814,9 +1814,19 @@
   height: 14px;
 }
 .jp-location-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-normal);
+}
+/* The tag name can be long; let it ellipsize and keep the count pill intact. */
+.jp-location-bar-title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Map/list switch, pinned to the right of the location bar. Borrows the tab
    bar's round icon-button language instead of a segmented control, so it reads
@@ -1859,6 +1869,16 @@
 .jp-location-view-btn svg {
   width: 15px;
   height: 15px;
+}
+
+/* Tag filter: the input takes over the bar's title slot, the button stays pinned right */
+.jp-tag-search-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.jp-tag-search-btn {
+  margin-left: auto;
 }
 
 /* Map view: fixed vertical extent, horizontally scrollable and wrapping */
