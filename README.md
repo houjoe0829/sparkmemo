@@ -18,11 +18,11 @@ Under the hood it highlights `HH:MM` timestamps inside a designated Memo section
 ---
 
 <p align="center">
-  <img src="docs/screenshots/capture-input.png" alt="Quick-capture sidebar" width="275" />
+  <img src="https://raw.githubusercontent.com/houjoe0829/sparkmemo/main/docs/screenshots/capture-input.png" alt="Quick-capture sidebar" width="275" />
   &nbsp;
-  <img src="docs/screenshots/map.png" alt="Offline world map of geo-tagged memos" width="275" />
+  <img src="https://raw.githubusercontent.com/houjoe0829/sparkmemo/main/docs/screenshots/map.png" alt="Offline world map of geo-tagged memos" width="275" />
   &nbsp;
-  <img src="docs/screenshots/stats.png" alt="Yearly heatmap and stats" width="275" />
+  <img src="https://raw.githubusercontent.com/houjoe0829/sparkmemo/main/docs/screenshots/stats.png" alt="Yearly heatmap and stats" width="275" />
 </p>
 
 ---
