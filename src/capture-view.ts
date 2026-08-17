@@ -610,7 +610,7 @@ export class JournalCaptureView extends ItemView {
       attr: { 'aria-label': t('tag.backToList'), title: t('tag.backToList') },
     });
     setIcon(this.tagAggBackBtn, 'arrow-left');
-    this.tagAggBackBtn.hide();
+    this.tagAggBackBtn.classList.add('is-hidden');
     this.tagAggBackBtn.addEventListener('click', () => this.backToTagList());
 
     this.tagAggTitleEl = this.tagAggBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('tag.all') });
@@ -658,7 +658,7 @@ export class JournalCaptureView extends ItemView {
       attr: { 'aria-label': t('location.backToList'), title: t('location.backToList') },
     });
     setIcon(this.locationBackBtn, 'arrow-left');
-    this.locationBackBtn.hide();
+    this.locationBackBtn.classList.add('is-hidden');
     this.locationBackBtn.addEventListener('click', () => this.backFromLocationDrill());
 
     this.locationTitleEl = this.locationBarEl.createDiv({ cls: 'jp-location-bar-title', text: t('location.all') });
@@ -768,7 +768,7 @@ export class JournalCaptureView extends ItemView {
         this.timelineEl.empty();
         this.selectedLocationCity = null;
         this.locationDrilled = false;
-        this.locationBackBtn.hide();
+        this.locationBackBtn.classList.add('is-hidden');
         this.locationViewToggleEl.show();
         this.mapScrollLeft = null;
         this.locationTitleEl.setText(t('location.all'));
@@ -802,9 +802,9 @@ export class JournalCaptureView extends ItemView {
         this.disposeDays();
         this.timelineEl.empty();
         this.selectedTag = null;
-        this.tagAggBackBtn.hide();
+        this.tagAggBackBtn.classList.add('is-hidden');
         this.tagAggTitleEl.setText(t('tag.all'));
-        this.tagSearchBtn.show();
+        this.tagSearchBtn.classList.remove('is-hidden');
         this.closeTagSearch();
         void this.loadTagIndex().then(() => {
           // Bail if the user already navigated away or picked a tag while scanning
@@ -4071,7 +4071,7 @@ export class JournalCaptureView extends ItemView {
    */
   private renderEntryList(entries: LocatedEntry[], title: string, emptyMsg: string) {
     this.locationDrilled = true;
-    this.locationBackBtn.show();
+    this.locationBackBtn.classList.remove('is-hidden');
     this.locationViewToggleEl.hide();
     this.locationTitleEl.setText(title);
 
@@ -4116,7 +4116,7 @@ export class JournalCaptureView extends ItemView {
   private backFromLocationDrill() {
     this.locationDrilled = false;
     this.selectedLocationCity = null;
-    this.locationBackBtn.hide();
+    this.locationBackBtn.classList.add('is-hidden');
     this.locationViewToggleEl.show();
     if (this.locationDrillSource === 'map') {
       this.renderLocationMap();
@@ -4132,7 +4132,7 @@ export class JournalCaptureView extends ItemView {
     this.locationViewMode = mode;
     this.locationDrilled = false;
     this.selectedLocationCity = null;
-    this.locationBackBtn.hide();
+    this.locationBackBtn.classList.add('is-hidden');
     this.locationViewToggleEl.show();
     this.locationListBtn.toggleClass('is-active', mode === 'list');
     this.locationMapBtn.toggleClass('is-active', mode === 'map');
@@ -4826,10 +4826,10 @@ export class JournalCaptureView extends ItemView {
     if (!data) return;
 
     this.selectedTag = tag;
-    this.tagAggBackBtn.show();
+    this.tagAggBackBtn.classList.remove('is-hidden');
     // The filter applies to the tag list, not to one tag's memos — park it
     // (query kept, so going back restores the same result list).
-    this.tagSearchBtn.hide();
+    this.tagSearchBtn.classList.add('is-hidden');
     this.tagSearchInputEl.hide();
     this.tagAggTitleEl.show();
     // Count matches the tag list's number (includes child tags), so the header
@@ -4889,9 +4889,9 @@ export class JournalCaptureView extends ItemView {
       return;
     }
     this.selectedTag = null;
-    this.tagAggBackBtn.hide();
+    this.tagAggBackBtn.classList.add('is-hidden');
     this.tagAggTitleEl.setText(t('tag.all'));
-    this.tagSearchBtn.show();
+    this.tagSearchBtn.classList.remove('is-hidden');
     if (this.tagSearchQuery.length > 0) {
       this.tagAggTitleEl.hide();
       this.tagSearchInputEl.show();

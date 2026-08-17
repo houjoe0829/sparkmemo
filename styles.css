@@ -302,16 +302,22 @@
   box-shadow: none !important;
   color: color-mix(in srgb, var(--jp-tl-dot) 70%, var(--text-muted)) !important;
   cursor: pointer;
-  width: 30px;
-  height: 30px;
+  box-sizing: border-box !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  max-width: 30px !important;
+  max-height: 30px !important;
   padding: 0 !important;
-  border-radius: 50%;
+  border-radius: 50% !important;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
   vertical-align: middle;
   transition: color 0.15s ease, background-color 0.15s ease;
-  flex-shrink: 0;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
   -webkit-appearance: none !important;
   appearance: none !important;
 }
@@ -352,7 +358,10 @@
 .jp-capture-geo-btn svg {
   width: 18px !important;
   height: 18px !important;
-  display: block;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
   color: inherit;
   fill: none;
   stroke: currentColor;
@@ -361,6 +370,8 @@
 .jp-capture-geo-btn svg {
   width: 15px !important;
   height: 15px !important;
+  min-width: 15px !important;
+  min-height: 15px !important;
 }
 .jp-capture-tag-btn,
 .jp-capture-mention-btn,
@@ -419,12 +430,20 @@
   position: absolute;
   top: -6px;
   right: -6px;
-  width: 20px;
-  height: 20px;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  max-width: 20px !important;
+  max-height: 20px !important;
   padding: 0 !important;
   border: none !important;
   outline: none !important;
-  border-radius: 50%;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  border-radius: 50% !important;
   background: rgba(0, 0, 0, 0.65) !important;
   color: white !important;
   display: flex !important;
@@ -626,9 +645,18 @@
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  max-width: 14px !important;
+  max-height: 14px !important;
   padding: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
@@ -726,11 +754,20 @@
 }
 .jp-recording-stop {
   align-self: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  max-width: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   border: none;
-  border-radius: 50%;
+  border-radius: 50% !important;
   background: var(--text-error);
   color: var(--text-on-accent, #fff);
   display: inline-flex;
@@ -762,12 +799,16 @@
 .jp-recording-bar.is-transcribing {
   background: color-mix(in srgb, var(--background-secondary) 70%, var(--background-primary) 30%);
 }
+/* Repeats !important to override the base rule's pinned min/max-height,
+   which exists so Obsidian's mobile `button` styles can't resize the
+   button. Without it the collapse would never take effect. */
 .jp-recording-bar.is-transcribing .jp-recording-stop {
   opacity: 0;
   pointer-events: none;
-  max-height: 0;
+  min-height: 0 !important;
+  max-height: 0 !important;
   margin: 0;
-  padding: 0;
+  padding: 0 !important;
   border: 0;
   overflow: hidden;
 }
@@ -791,16 +832,22 @@
 /* Circular icon submit button — filled/accent when there's content to send,
    flat/muted when the input is empty. */
 .jp-capture-submit {
-  width: 34px;
-  height: 34px;
+  box-sizing: border-box !important;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  max-width: 34px !important;
+  max-height: 34px !important;
   padding: 0 !important;
-  flex-shrink: 0;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
   background: var(--jp-tl-dot) !important;
   color: var(--text-on-accent, #fff) !important;
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
-  border-radius: 50%;
+  border-radius: 50% !important;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -812,6 +859,10 @@
 .jp-capture-submit svg {
   width: 16px !important;
   height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-capture-submit:hover:not(:disabled) {
   background: color-mix(in srgb, var(--jp-tl-dot) 85%, white) !important;
@@ -1043,13 +1094,21 @@
 }
 /* Locate / open-note button in date header */
 .jp-timeline-open-btn {
-  flex-shrink: 0;
-  display: inline-flex;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  max-width: 24px !important;
+  max-height: 24px !important;
+  padding: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   border: none;
   background: transparent;
   color: var(--text-faint);
@@ -1063,8 +1122,12 @@
   background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
 }
 .jp-timeline-open-btn svg {
-  width: 13px;
-  height: 13px;
+  width: 13px !important;
+  height: 13px !important;
+  min-width: 13px !important;
+  min-height: 13px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-timeline-header-title {
   font-size: 16px;
@@ -1529,17 +1592,34 @@
   color: var(--text-normal);
 }
 .jp-cal-nav-btn {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  max-width: 28px !important;
+  max-height: 28px !important;
+  padding: 0 !important;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 6px !important;
   cursor: pointer;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+.jp-cal-nav-btn svg {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-cal-nav-btn:hover {
   background: var(--background-modifier-hover);
@@ -1733,13 +1813,20 @@
   border: 1px solid var(--background-modifier-border);
 }
 .jp-search-bar-icon {
-  display: inline-flex;
-  flex-shrink: 0;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
   color: var(--text-muted);
 }
 .jp-search-bar-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-search-input {
   flex: 1;
@@ -1756,18 +1843,28 @@
   color: var(--text-faint);
 }
 .jp-search-bar-random-btn {
-  flex-shrink: 0;
-  display: inline-flex;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  max-width: 22px !important;
+  max-height: 22px !important;
+  padding: 0 !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 6px !important;
   cursor: pointer;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   transition: color 0.15s ease, background-color 0.15s ease;
 }
 .jp-search-bar-random-btn:hover {
@@ -1775,8 +1872,12 @@
   background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
 }
 .jp-search-bar-random-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 
 /* Location aggregation tab */
@@ -1791,13 +1892,21 @@
   border: 1px solid var(--background-modifier-border);
 }
 .jp-location-back-btn {
-  flex-shrink: 0;
-  display: inline-flex;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  max-width: 22px !important;
+  max-height: 22px !important;
+  padding: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -1809,9 +1918,20 @@
   color: var(--jp-tl-dot);
   background: color-mix(in srgb, var(--jp-tl-dot) 10%, transparent);
 }
+/* Same reason as .jp-tab-btn.is-hidden: the base rule's
+   `display: inline-flex !important` can't be beaten by the inline style that
+   hide() writes, so visibility is toggled with this class instead. */
+.jp-location-back-btn.is-hidden,
+.jp-location-view-btn.is-hidden {
+  display: none !important;
+}
 .jp-location-back-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-location-bar-title {
   display: flex;
@@ -1840,13 +1960,18 @@
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  width: 26px;
-  height: 26px;
-  padding: 0;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  max-width: 26px !important;
+  max-height: 26px !important;
+  padding: 0 !important;
   border: 1px solid transparent;
-  border-radius: 50%;
+  border-radius: 50% !important;
   background: transparent;
   box-shadow: none;
   color: var(--text-muted);
@@ -1867,8 +1992,12 @@
   border-color: color-mix(in srgb, var(--jp-ts-color, #7c3aed) 32%, transparent);
 }
 .jp-location-view-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 15px !important;
+  height: 15px !important;
+  min-width: 15px !important;
+  min-height: 15px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 
 /* Tag filter: the input takes over the bar's title slot, the button stays pinned right */
@@ -2473,14 +2602,19 @@
     padding 0.3s ease;
   overflow: hidden;
 }
+/* Collapse state must repeat !important, because the base rules pin the
+   button's width/min-width with !important to survive Obsidian's mobile
+   `button` styles. Without it, min-width would beat max-width and the
+   button could never collapse. */
 .jp-capture-actions.is-recording .jp-capture-button-row,
 .jp-capture-actions.is-recording .jp-capture-submit {
   opacity: 0;
   transform: translateY(4px);
-  max-width: 0;
+  min-width: 0 !important;
+  max-width: 0 !important;
   pointer-events: none;
   margin: 0;
-  padding: 0;
+  padding: 0 !important;
   border: 0;
 }
 /* When recording, the actions row is empty — collapse its height too. */
@@ -2554,20 +2688,31 @@
 }
 .jp-chat-back-btn {
   flex: 0 0 auto;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+  box-sizing: border-box !important;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  max-width: 24px !important;
+  max-height: 24px !important;
+  padding: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   background: transparent;
   box-shadow: none;
   cursor: pointer;
   color: var(--text-muted);
 }
 .jp-chat-back-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-chat-bar-title {
   flex: 1 1 auto;
@@ -2622,12 +2767,19 @@
 }
 .jp-chat-list-delete {
   flex: 0 0 auto;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+  box-sizing: border-box !important;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  max-width: 24px !important;
+  max-height: 24px !important;
+  padding: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   background: transparent;
   box-shadow: none;
   cursor: pointer;
@@ -2643,8 +2795,12 @@
   color: var(--text-error);
 }
 .jp-chat-list-delete svg {
-  width: 14px;
-  height: 14px;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 
 /* ── Thread ── */
@@ -3019,21 +3175,33 @@
   position: absolute;
   top: 1px;
   right: 1px;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  display: flex;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
+  padding: 0 !important;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 50% !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   cursor: pointer;
   background: var(--background-primary);
   color: var(--text-muted);
   box-shadow: 0 0 0 1px var(--background-modifier-border);
 }
 .jp-chat-attach-remove svg {
-  width: 10px;
-  height: 10px;
+  width: 10px !important;
+  height: 10px !important;
+  min-width: 10px !important;
+  min-height: 10px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 
 .jp-chat-input {
@@ -3064,13 +3232,20 @@
   gap: 4px;
   padding-top: 2px;
 }
+/* Pill with a label, so only the height is pinned — the width has to follow
+   the text. */
 .jp-chat-tool-btn {
   flex: 0 0 auto;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  padding: 0 7px;
+  box-sizing: border-box !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  max-height: 24px !important;
+  padding: 0 7px !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   border-radius: 6px;
   background: transparent;
   box-shadow: none;
@@ -3083,8 +3258,12 @@
   color: var(--text-normal);
 }
 .jp-chat-tool-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 15px !important;
+  height: 15px !important;
+  min-width: 15px !important;
+  min-height: 15px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-chat-model-btn {
   /* Model names vary in length; keep the row from jumping as it changes. */
@@ -3104,20 +3283,31 @@
 }
 .jp-chat-send {
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  display: flex;
+  box-sizing: border-box !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  max-width: 26px !important;
+  max-height: 26px !important;
+  padding: 0 !important;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 50% !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
   cursor: pointer;
   background: var(--interactive-accent);
   color: var(--text-on-accent);
 }
 .jp-chat-send svg {
-  width: 14px;
-  height: 14px;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
 }
 .jp-chat-send.is-streaming {
   background: var(--background-modifier-border);
