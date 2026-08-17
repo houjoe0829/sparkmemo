@@ -2126,6 +2126,14 @@
 }
 .jp-pane-stats {
   overflow-y: auto;
+  /* macOS overlay scrollbars float on top of the content, and this pane's right
+     edge is also the cards' right edge — the bar sat right on their border.
+     Hide it like the timeline does; wheel/trackpad scrolling is unaffected. */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.jp-pane-stats::-webkit-scrollbar {
+  display: none; /* Chromium (Obsidian's Electron shell) */
 }
 
 /* ── Yearly stats view ────────────────────────────────────────────────────
