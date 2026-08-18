@@ -310,7 +310,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'settings.chatHeading': 'Chat (experimental)',
     'settings.chatEnabledName': 'Enable chat',
     'settings.chatEnabledDesc':
-      'Experimental: it may be unstable, and its behaviour and stored conversation format can change in later versions. Adds a chat tab and a "Chat about this" item to the memo right-click menu. Requires Claude Code installed locally; desktop only. Off by default.',
+      'Experimental: it may be unstable, and its behaviour and stored conversation format can change in later versions. Adds a chat tab and a "Chat about this" item to the memo right-click menu. Requires Claude Code installed locally; desktop only. Off by default. It has had limited testing so far — the author is still trying it out day to day, so treat it as a preview.',
     'settings.chatCliPathName': 'Claude CLI path',
     'settings.chatCliPathDesc':
       'Full path to the claude binary. Leave empty to auto-detect. Desktop only.',
@@ -625,7 +625,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
     'settings.chatHeading': '对话（实验性）',
     'settings.chatEnabledName': '启用对话',
     'settings.chatEnabledDesc':
-      '实验性功能：可能不稳定，行为和对话的存储格式在后续版本里都可能变化。打开后会多出一个对话 tab，memo 右键菜单里也会多出「聊聊这条」。需要本机装有 Claude Code，且只在电脑端可用。默认关闭。',
+      '实验性功能：可能不稳定，行为和对话的存储格式在后续版本里都可能变化。打开后会多出一个对话 tab，memo 右键菜单里也会多出「聊聊这条」。需要本机装有 Claude Code，且只在电脑端可用。默认关闭。目前验证有限，作者自己也还在日常试用中，建议你也当成尝鲜功能来用。',
     'settings.chatCliPathName': 'Claude 命令行路径',
     'settings.chatCliPathDesc': 'claude 可执行文件的完整路径。留空则自动探测。仅电脑端有效。',
     'settings.chatPermissionName': '默认权限',
