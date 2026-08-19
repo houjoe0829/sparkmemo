@@ -1013,6 +1013,12 @@
   color: var(--text-normal);
   word-break: break-word;
   overflow-wrap: anywhere;
+  /* Obsidian sets `user-select: none` app-wide and only re-enables it for its
+     own document containers; a custom ItemView inherits "not selectable".
+     Re-enable it here so memo text can be selected and copied. */
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: auto;
 }
 
 /* Code blocks (and any long unbroken token, e.g. a URL or API key, that
