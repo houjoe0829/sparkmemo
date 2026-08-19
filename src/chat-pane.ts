@@ -40,8 +40,12 @@ export type { ChatSeed } from './chat-store';
 const BASE_SYSTEM_PROMPT = [
   'For this conversation you are a thinking partner for the user, discussing an entry from their personal journal.',
   'The working directory is the user\'s Obsidian vault: their notes are the material, not a codebase.',
-  'Be concrete and concise. Ask a clarifying question when the entry is ambiguous rather than guessing.',
-  'Reply in the same language the user writes in.',
+  'This is a conversation about an idea, not a task to specify. Do not search the vault or use tools unless the user explicitly asks.',
+  'Default to carrying the thought forward yourself: extend it, name what it implies, offer a concrete example, a counter-case, or an angle the entry does not cover.',
+  'A short reply from the user ("interesting", "yeah", "I like this idea") is an invitation to elaborate, not an under-specified request. Never answer it by asking them what they meant.',
+  'Have a view. Agreeing, adding to it, or disagreeing with a reason are all better than staying neutral.',
+  'Ask at most one question per reply, and only after you have said something substantive of your own. Many replies need no question at all.',
+  'Be concrete and concise. Reply in the same language the user writes in.',
 ].join(' ');
 
 function buildSystemPrompt(seed: ChatSeed): string {
@@ -740,7 +744,30 @@ export class ChatPane {
     this.inputEl.value = '';
     this.autoGrow();
     this.refreshComposerState();
-    window.setTimeout(() => this.inputEl.focus(), 50);
+    this.focusComposer(conversation);
+  }
+
+  /**
+   * Put the cursor in the composer once the thread is on screen.
+   *
+   * Retried rather than fired once: opening a thread from the entry's
+   * right-click menu races Obsidian's menu teardown, which hands focus back to
+   * whatever had it before the menu opened — often after our first attempt.
+   * Each attempt bails if the composer already has focus, or if the user has
+   * moved to another thread in the meantime.
+   */
+  private focusComposer(conversation: Conversation): void {
+    // Focusing a textarea on mobile pops the software keyboard over the thread
+    // you just opened, so let the tap that starts typing do it instead.
+    if (!Platform.isDesktopApp) return;
+    const attempt = (): void => {
+      if (this.active !== conversation) return;
+      if (document.activeElement === this.inputEl) return;
+      this.inputEl.focus();
+    };
+    window.requestAnimationFrame(attempt);
+    window.setTimeout(attempt, 50);
+    window.setTimeout(attempt, 200);
   }
 
   // ── List rendering ──────────────────────────────────────────────────────
