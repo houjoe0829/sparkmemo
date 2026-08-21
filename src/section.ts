@@ -315,6 +315,8 @@ export function splitMarkdownBlocks(text: string): string[] {
   const blocks: string[] = [];
   let current: string[] = [];
   let fence: string | null = null;
+  let inList = false;
+  const listStart = /^\s*(?:[-*+]|\d+[.)])\s+/;
 
   const flush = () => {
     if (current.length > 0) {
@@ -338,7 +340,18 @@ export function splitMarkdownBlocks(text: string): string[] {
     }
     if (line.trim().length === 0) {
       flush();
+      inList = false;
       continue;
+    }
+    if (listStart.test(line)) {
+      inList = true;
+    } else if (inList && !/^\s{2,}/.test(line)) {
+      // A non-indented, non-list line right after a list is a markdown "lazy
+      // continuation": it gets absorbed into the last list item instead of
+      // standing on its own. The user pressed Enter once and expects a new
+      // paragraph, so break the block here even without a blank line.
+      flush();
+      inList = false;
     }
     current.push(line);
   }
