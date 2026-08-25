@@ -1040,7 +1040,8 @@ export class JournalCaptureView extends ItemView {
   ): Promise<void> {
     const blocks = splitMarkdownBlocks(bodyText);
     if (blocks.length <= 1) {
-      return MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, scope);
+      return MarkdownRenderer.render(this.app, bodyText, bubble, sourcePath, scope)
+        .then(() => this.shortenBareLinks(bubble));
     }
     // Create every holder up front so the blocks keep their order regardless
     // of which render promise settles first.
@@ -1049,7 +1050,36 @@ export class JournalCaptureView extends ItemView {
       blocks.map((block, i) =>
         MarkdownRenderer.render(this.app, block, holders[i], sourcePath, scope),
       ),
-    ).then(() => undefined);
+    ).then(() => this.shortenBareLinks(bubble));
+  }
+
+  /**
+   * Collapse bare URLs in a rendered entry down to their host name.
+   *
+   * A pasted link arrives as its own label — text identical to href — and a
+   * long one can swamp the memo it belongs to. Only that case is rewritten:
+   * a link the user gave a label to (`[title](url)`) already reads short and
+   * is left alone. The href is untouched, so clicking still goes where it
+   * always did, and the full address stays reachable on hover.
+   */
+  private shortenBareLinks(bubble: HTMLElement) {
+    for (const a of Array.from(bubble.querySelectorAll('a'))) {
+      const href = a.getAttribute('href') ?? '';
+      if (!/^https?:\/\//i.test(href)) continue;
+      const text = (a.textContent ?? '').trim();
+      if (text !== href && text !== href.replace(/\/+$/, '')) continue;
+      let host: string;
+      try {
+        host = new URL(href).hostname.replace(/^www\./i, '');
+      } catch {
+        continue;
+      }
+      if (!host) continue;
+      a.setText(host);
+      a.addClass('jp-short-link');
+      a.setAttr('title', href);
+      a.setAttr('aria-label', href);
+    }
   }
 
   private applyImageGrid(bubble: HTMLElement) {
