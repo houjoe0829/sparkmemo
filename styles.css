@@ -2647,8 +2647,10 @@
   flex-shrink: 0;
 }
 .jp-notice__icon .svg-icon {
-  width: 1em;
-  height: 1em;
+  /* 移动端图标尺寸会被更高优先级的规则覆盖成 0，必须硬锁 */
+  width: 1em !important;
+  height: 1em !important;
+  flex: 0 0 auto;
 }
 
 /* ── Settings preview badge ────────────────────────────────────────── */
