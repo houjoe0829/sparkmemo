@@ -36,7 +36,6 @@ Under the hood it highlights `HH:MM` timestamps inside a designated Memo section
 - **Offline world map** — the Locations tab opens on a map of everywhere you've written, drawn from a vector basemap bundled with the plugin: no tile server, no network request, no account. Nearby memos cluster into a single dot sized by how much you wrote there; hover for the count, click to read them, and scroll sideways to wrap around the globe
 - **Yearly heatmap** — GitHub-style grid per year, with total words, writing days, entry count, and longest streak
 - **Random rewind** — open the Search tab and a random past memo greets you, so old thoughts get another moment in the light
-- **Chat about a memo** *(off by default, desktop only)* — right-click any memo and pick "Chat about this" to think it through with Claude, images and all. It drives the [Claude Code](https://claude.com/claude-code) CLI you already have installed, so there is no API key to store and nothing leaves your machine except the conversation itself. The chat gets no tools and no file access — it can only talk. Turn it on in Settings → Chat
 - **Multi-language** — follows Obsidian's UI language (English / 简体中文)
 
 Requires Obsidian's built-in **Daily Notes** core plugin.
@@ -57,7 +56,6 @@ Manual install: download `main.js`, `manifest.json`, and `styles.css` from the l
 2. Type into the input, then click submit — the memo is written to today's daily note as `- HH:MM text`
 3. Paste an image or hit record to attach media; images with EXIF time / GPS will prompt you to use their moment and place
 4. Switch to the `Search` / `Tags` / `Locations` / `Stats` tabs to browse across days — `Locations` opens on the world map, with the city list one click away
-5. To chat about an entry, enable **Settings → Chat** first (requires Claude Code on your machine), then right-click any memo and choose **"Chat about this"**
 
 ---
 

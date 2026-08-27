@@ -48,23 +48,13 @@ export interface SparkMemoSettings {
   imageCompressionQuality: number;
   /** Max long-edge size in pixels; images larger than this are downscaled. 0 disables resizing. */
   imageCompressionMaxSize: number;
-  /** Master switch for the chat tab. Off by default: it depends on a locally installed CLI. */
-  chatEnabled: boolean;
-  /** Absolute path to the `claude` CLI. Empty auto-detects from the usual install locations. */
-  chatCliPath: string;
-  /** Model alias or full name passed to the CLI, e.g. sonnet, opus, claude-sonnet-5. */
-  chatModel: string;
   /**
-   * Default permission mode for new conversations; each thread then keeps its
-   * own. Headless mode has no way to ask before running a tool, so this is the
-   * only gate between the model and the vault.
+   * Master switch for the "Send to MyClaudian" entry in the memo context menu.
+   * Deliberately absent from the settings tab: this is a personal hook that only
+   * works alongside a locally installed MyClaudian, so turning it on means editing
+   * this default and rebuilding, not flipping a switch a stranger might find.
    */
-  chatPermissionMode: string;
-  /**
-   * Load the user's own Claude Code setup (MCP servers, skills, CLAUDE.md).
-   * Off makes turns dramatically cheaper and narrows what chat can reach.
-   */
-  chatLoadUserSettings: boolean;
+  sendToMyClaudianEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
@@ -86,11 +76,7 @@ export const DEFAULT_SETTINGS: SparkMemoSettings = {
   imageCompressionEnabled: true,
   imageCompressionQuality: 0.8,
   imageCompressionMaxSize: 1920,
-  chatEnabled: false,
-  chatCliPath: '',
-  chatModel: 'sonnet',
-  chatPermissionMode: 'acceptEdits',
-  chatLoadUserSettings: true,
+  sendToMyClaudianEnabled: false,
 };
 
 export type Rng = { from: number; to: number };

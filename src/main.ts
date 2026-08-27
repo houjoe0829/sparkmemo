@@ -443,17 +443,6 @@ export default class SparkMemoPlugin extends Plugin {
     this.refreshEditors();
   }
 
-  /**
-   * Push the chat-enabled setting into every open capture view. The tab button
-   * and pane are always built on desktop, so this only flips their visibility
-   * — no view teardown, and no risk of double-registering vault listeners.
-   */
-  refreshChatVisibility() {
-    for (const leaf of this.app.workspace.getLeavesOfType(CAPTURE_VIEW_TYPE)) {
-      if (leaf.view instanceof JournalCaptureView) leaf.view.applyChatVisibility();
-    }
-  }
-
   private refreshEditors() {
     this.app.workspace.iterateAllLeaves(leaf => {
       if (leaf.view instanceof MarkdownView) {
@@ -666,83 +655,6 @@ class SparkMemoSettingTab extends PluginSettingTab {
       text: '07:31',
     });
     previewEl.createEl('span', { text: t('settings.preview.sampleText') });
-
-    // ── Chat ──────────────────────────────────────────────────────────────
-    // Desktop only: chat drives the locally installed claude CLI, which has no
-    // mobile equivalent, so the whole section is hidden there.
-    if (Platform.isDesktopApp) {
-      new Setting(containerEl).setName(t('settings.chatHeading')).setHeading();
-
-      new Setting(containerEl)
-        .setName(t('settings.chatEnabledName'))
-        .setDesc(t('settings.chatEnabledDesc'))
-        .addToggle(toggle =>
-          toggle.setValue(this.plugin.settings.chatEnabled).onChange(async value => {
-            this.plugin.settings.chatEnabled = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshChatVisibility();
-            // Redraw so the CLI path and model rows appear or disappear with it.
-            this.display();
-          }),
-        );
-
-      // CLI path and model only matter once chat is on, so they stay hidden
-      // until then rather than sitting there inert.
-      if (this.plugin.settings.chatEnabled) {
-        new Setting(containerEl)
-          .setName(t('settings.chatCliPathName'))
-          .setDesc(t('settings.chatCliPathDesc'))
-          .addText(text =>
-            text
-              .setPlaceholder('/usr/local/bin/claude')
-              .setValue(this.plugin.settings.chatCliPath)
-              .onChange(async value => {
-                this.plugin.settings.chatCliPath = value.trim();
-                await this.plugin.saveSettings();
-              }),
-          );
-
-        new Setting(containerEl)
-          .setName(t('settings.chatPermissionName'))
-          .setDesc(t('settings.chatPermissionDesc'))
-          .addDropdown(drop =>
-            drop
-              .addOption('plan', t('chat.permission.plan'))
-              .addOption('acceptEdits', t('chat.permission.acceptEdits'))
-              .addOption('bypassPermissions', t('chat.permission.bypassPermissions'))
-              .setValue(this.plugin.settings.chatPermissionMode)
-              .onChange(async value => {
-                this.plugin.settings.chatPermissionMode = value;
-                await this.plugin.saveSettings();
-              }),
-          );
-
-        new Setting(containerEl)
-          .setName(t('settings.chatUserSettingsName'))
-          .setDesc(t('settings.chatUserSettingsDesc'))
-          .addToggle(toggle =>
-            toggle
-              .setValue(this.plugin.settings.chatLoadUserSettings)
-              .onChange(async value => {
-                this.plugin.settings.chatLoadUserSettings = value;
-                await this.plugin.saveSettings();
-              }),
-          );
-
-        new Setting(containerEl)
-          .setName(t('settings.chatModelName'))
-          .setDesc(t('settings.chatModelDesc'))
-          .addText(text =>
-            text
-              .setPlaceholder('sonnet')
-              .setValue(this.plugin.settings.chatModel)
-              .onChange(async value => {
-                this.plugin.settings.chatModel = value.trim() || 'sonnet';
-                await this.plugin.saveSettings();
-              }),
-          );
-      }
-    }
 
     // ── Speech-to-text ────────────────────────────────────────────────────
     new Setting(containerEl).setName(t('settings.stt.heading')).setHeading();

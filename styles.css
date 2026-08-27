@@ -2676,648 +2676,69 @@
   top: 0;
   left: -9999px;
 }
-
-/* ── Chat pane ─────────────────────────────────────────────────────── */
-.jp-pane-chat {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
+/* ── Send to MyClaudian dialog ─────────────────────────────────────── */
+/* Narrower than Obsidian's default modal: this dialog holds one short
+   instruction, not a document, and the default width made a three-line box
+   look like a text editor. */
+.jp-mc-modal-shell {
+  max-width: 520px;
 }
-
-/* Header shared by both views: back arrow only appears inside a thread. */
-.jp-chat-bar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-.jp-chat-back-btn {
-  flex: 0 0 auto;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box !important;
-  width: 24px !important;
-  height: 24px !important;
-  min-width: 24px !important;
-  min-height: 24px !important;
-  max-width: 24px !important;
-  max-height: 24px !important;
-  padding: 0 !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent;
-  box-shadow: none;
-  cursor: pointer;
-  color: var(--text-muted);
-}
-.jp-chat-back-btn svg {
-  width: 16px !important;
-  height: 16px !important;
-  min-width: 16px !important;
-  min-height: 16px !important;
-  flex-shrink: 0 !important;
-  display: inline-block !important;
-}
-.jp-chat-bar-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 0.85em;
-  font-weight: 500;
-  color: var(--text-normal);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Conversation list ── */
-.jp-chat-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  padding: 6px 6px 12px;
-}
-.jp-chat-list-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
+.jp-mc-memo {
+  border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  /* No rules between rows: whitespace does the separating, and hover supplies
-     the only frame a row ever needs. Hairlines here read as a data table,
-     which is the wrong metaphor for a short list of conversations. */
-}
-.jp-chat-list-item:hover {
-  background: var(--background-modifier-hover);
-}
-.jp-chat-list-main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.jp-chat-list-title {
-  font-size: 0.85em;
-  line-height: 1.4;
-  color: var(--text-normal);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.jp-chat-list-meta {
-  margin-top: 2px;
-  font-size: 0.72em;
-  color: var(--text-faint);
-}
-.jp-chat-list-delete {
-  flex: 0 0 auto;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box !important;
-  width: 24px !important;
-  height: 24px !important;
-  min-width: 24px !important;
-  min-height: 24px !important;
-  max-width: 24px !important;
-  max-height: 24px !important;
-  padding: 0 !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent;
-  box-shadow: none;
-  cursor: pointer;
-  color: var(--text-faint);
-  /* Hidden until hover so the row stays quiet; still reachable via
-     right-click, and on touch the row simply always shows it. */
-  opacity: 0;
-}
-.jp-chat-list-item:hover .jp-chat-list-delete {
-  opacity: 1;
-}
-.jp-chat-list-delete:hover {
-  color: var(--text-error);
-}
-.jp-chat-list-delete svg {
-  width: 14px !important;
-  height: 14px !important;
-  min-width: 14px !important;
-  min-height: 14px !important;
-  flex-shrink: 0 !important;
-  display: inline-block !important;
-}
-
-/* ── Thread ── */
-/* Type scale for the whole thread. Without this the messages inherit the
-   vault's reading-view body size, which is sized for a full-width note and
-   reads as oversized in a sidebar. Setting it once on the container (rather
-   than per element) also carries the composer and toolbar along. */
-.jp-chat-thread {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-text);
-  font-size: 13px;
-}
-
-/* Sticky wrapper: opaque so the thread scrolls behind it rather than through
-   it, and full-bleed so the collapsed bar spans the pane. */
-.jp-chat-context {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 8px 12px;
-  background: var(--background-primary);
-  border-bottom: 1px solid transparent;
-  transition: border-color 140ms ease;
-}
-.jp-chat-context.is-collapsed {
-  border-bottom-color: var(--background-modifier-border);
-}
-.jp-chat-context-card {
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 10px 12px;
   background: var(--background-secondary);
-  border-left: 3px solid var(--jp-ts-color, var(--interactive-accent));
+  margin-bottom: 12px;
 }
-/* Collapsed: one line of text, no thumbnails, tighter box — just enough to
-   keep track of which memo is under discussion. */
-.jp-chat-context.is-collapsed .jp-chat-context-card {
-  padding: 5px 10px;
-}
-.jp-chat-context.is-collapsed .jp-chat-context-body {
-  -webkit-line-clamp: 1;
-  margin-top: 2px;
-}
-.jp-chat-context.is-collapsed .jp-chat-context-images {
-  display: none;
-}
-.jp-chat-context-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
+.jp-mc-memo-meta {
   font-size: 0.8em;
-}
-.jp-chat-context-icon {
-  display: flex;
-}
-.jp-chat-context-icon svg {
-  width: 13px;
-  height: 13px;
-}
-.jp-chat-context-body {
-  margin-top: 4px;
-  /* Same size as the messages, set apart by color instead. Shrinking the quote
-     made it the smallest text in the pane and hard to read, when all it needs
-     is to sit behind the conversation rather than compete with it. */
-  font-size: 1em;
-  line-height: 1.5;
   color: var(--text-muted);
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  /* Long memos stay a summary card rather than pushing the thread off-screen.
-     Line-clamp rather than max-height so the cut lands on a whole line with an
-     ellipsis, instead of slicing a row of glyphs in half. */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
+  margin-bottom: 4px;
 }
-
-/* Thumbnails of whatever the memo embeds — these belong to the entry, so they
-   sit in the quote card rather than in the user's own attachment strip. */
-.jp-chat-context-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-.jp-chat-context-thumb {
-  width: 52px;
-  height: 52px;
-  object-fit: cover;
-  border-radius: 6px;
-  display: block;
-  background: var(--background-primary);
-}
-
-.jp-chat-messages {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  /* Padding lives on the children so the sticky context card can sit flush
-     against the top edge of the scrollport. */
-  padding: 0;
-}
-.jp-chat-msg-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 8px 12px 12px;
-}
-.jp-chat-empty {
-  margin: auto;
-  padding: 0 24px;
-  text-align: center;
-  color: var(--text-muted);
+.jp-mc-memo-body {
   font-size: 0.9em;
-  line-height: 1.6;
+  white-space: pre-wrap;
+  /* The memo is an echo, not the subject of the dialog: a long one scrolls
+     inside its card rather than pushing the composer off screen. */
+  max-height: 120px;
+  overflow-y: auto;
 }
-
-.jp-chat-msg {
-  display: flex;
-  flex-direction: column;
-  max-width: 100%;
-}
-.jp-chat-msg-user {
-  align-self: flex-end;
-  max-width: 95%;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--background-modifier-hover);
-}
-.jp-chat-msg-assistant {
-  align-self: stretch;
-}
-.jp-chat-msg-content {
-  line-height: 1.5;
-  min-width: 0;
-  max-width: 100%;
-}
-.jp-chat-msg-content > :first-child {
-  margin-top: 0;
-}
-.jp-chat-msg-content > :last-child {
-  margin-bottom: 0;
-}
-.jp-chat-msg-content p {
-  margin: 0 0 8px;
-}
-.jp-chat-msg-content p:last-child {
-  margin-bottom: 0;
-}
-.jp-chat-msg-content ul,
-.jp-chat-msg-content ol {
-  margin: 8px 0;
-  padding-inline-start: 20px;
-}
-/* Headings carry hierarchy through weight and spacing rather than size. The
-   reading-view scale is built for a full-width note; in a sidebar this narrow
-   an h1 three times the body size shouts. `!important` because themes style
-   bare h1-h6 and out-specify a plain class selector here. */
-.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6) {
-  font-family: var(--font-monospace) !important;
-  font-size: 1em !important;
-  font-weight: 700 !important;
-  line-height: 1.4;
-  letter-spacing: 0;
-  margin: 14px 0 6px;
-  padding: 0 !important;
-  border: none !important;
-}
-.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6):first-child {
-  margin-top: 0;
-}
-/* Theme heading decorations (collapse arrows, prefix glyphs) have no place in
-   a chat bubble. */
-.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6)::before,
-.jp-chat-msg-content :is(h1, h2, h3, h4, h5, h6)::after {
-  content: none !important;
-}
-/* Inline code reads as emphasis, not as a boxed chip — a badge per token is
-   noisy at this size. Fenced blocks keep their own background. */
-.jp-chat-msg-content :not(pre) > code {
-  background: none;
-  padding: 0;
+/* Height is set here rather than through the `rows` attribute, which themes
+   override freely — one was inflating a 4-row box to ~550px. Explicit min and
+   max keep it at three lines, growing only if the user drags it. */
+.jp-mc-input {
+  width: 100%;
+  height: 72px;
+  min-height: 72px;
+  max-height: 160px;
+  resize: vertical;
   font-size: 0.95em;
 }
-/* Blinking caret while a reply streams in. */
-.jp-chat-msg-pending .jp-chat-msg-content::after,
-.jp-chat-msg-pending::after {
-  content: '';
-}
-.jp-chat-msg-pending .jp-chat-msg-content:empty::before {
-  content: '…';
-  color: var(--text-faint);
-}
-
-/* A wide table must scroll inside itself — letting it size the message would
-   turn the whole thread into a horizontal scroller. */
-.jp-chat-table-wrap {
-  overflow-x: auto;
-  max-width: 100%;
-}
-.jp-chat-error {
-  margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-size: 0.85em;
-  color: var(--text-error);
-  background: var(--background-modifier-error);
-}
-.jp-chat-render-error {
-  color: var(--text-error);
-  font-size: 0.85em;
-}
-
-/* Unrestricted mode is the one state worth colouring: everything else is a
-   guardrail, this is the absence of one. */
-.jp-chat-permission-btn.is-unguarded {
-  color: var(--text-error);
-}
-
-/* ── Tool calls ──
-   A reply is a run of blocks: prose, then a tool row, then more prose. The
-   rows are deliberately quiet — they are how the answer was reached, not the
-   answer, so they sit at smaller type behind a left rule. */
-.jp-chat-msg-block + .jp-chat-tool,
-.jp-chat-tool + .jp-chat-msg-block,
-.jp-chat-tool + .jp-chat-tool {
-  margin-top: 8px;
-}
-.jp-chat-tool {
-  border-inline-start: 2px solid var(--background-modifier-border);
-  padding-inline-start: 8px;
-}
-.jp-chat-tool-header {
+.jp-mc-suggestions {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.9em;
-  font-family: var(--font-monospace);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.jp-chat-tool-header:focus-visible {
-  outline: 1px solid var(--interactive-accent);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-.jp-chat-tool-chevron,
-.jp-chat-tool-icon,
-.jp-chat-tool-status {
-  display: flex;
-  flex: 0 0 auto;
-}
-.jp-chat-tool-chevron svg,
-.jp-chat-tool-icon svg,
-.jp-chat-tool-status svg {
-  width: 13px;
-  height: 13px;
-}
-.jp-chat-tool-chevron {
-  transition: transform 120ms ease;
-}
-.jp-chat-tool.is-expanded .jp-chat-tool-chevron {
-  transform: rotate(90deg);
-}
-.jp-chat-tool-icon {
-  color: var(--text-accent);
-}
-.jp-chat-tool-name {
-  flex: 0 0 auto;
-  color: var(--text-normal);
-}
-/* Expanded, the command is echoed in full in the body, so the truncated copy
-   in the header would just be the same string said worse. */
-.jp-chat-tool-bash.is-expanded .jp-chat-tool-summary {
-  visibility: hidden;
-}
-.jp-chat-tool.is-running .jp-chat-tool-status {
-  animation: jp-chat-spin 1s linear infinite;
-  color: var(--text-faint);
-}
-.jp-chat-tool:not(.is-error) .jp-chat-tool-status {
-  color: var(--color-green);
-}
-@keyframes jp-chat-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-/* The summary is the part that must give: at sidebar width a long command or
-   path should ellipsize rather than wrap or push the status marker away. */
-.jp-chat-tool-summary {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.jp-chat-tool-status {
-  flex: 0 0 auto;
-  margin-inline-start: auto;
-}
-.jp-chat-tool.is-error .jp-chat-tool-status {
-  color: var(--text-error);
-}
-/* Collapsed by default: a turn can make half a dozen calls, and the reply is
-   the thing being read. */
-.jp-chat-tool-content {
-  display: none;
-  margin-top: 4px;
-  font-size: 0.85em;
-  font-family: var(--font-monospace);
-  color: var(--text-faint);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.jp-chat-tool.is-expanded .jp-chat-tool-content {
-  display: block;
-}
-.jp-chat-tool-content:empty {
-  display: none;
-}
-.jp-chat-tool-command {
-  margin-bottom: 4px;
-  color: var(--text-muted);
-}
-.jp-chat-tool-more {
-  color: var(--text-faint);
-  font-style: italic;
-}
-
-/* One rounded card holds the attachment strip, the textarea and the toolbar,
-   so the composer reads as a single control rather than three siblings. */
-.jp-chat-composer {
-  flex: 0 0 auto;
-  margin: 0 12px 12px;
-  padding: 6px 6px 6px 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 14px;
-  background: var(--background-primary);
-  transition: border-color 120ms ease;
-}
-.jp-chat-composer.is-focused {
-  border-color: var(--interactive-accent);
-}
-
-.jp-chat-attach-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 4px 0 6px;
-}
-.jp-chat-attach-chip {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--background-secondary);
-}
-.jp-chat-attach-thumb {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.jp-chat-attach-remove {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  box-sizing: border-box !important;
-  flex-shrink: 0 !important;
-  width: 16px !important;
-  height: 16px !important;
-  min-width: 16px !important;
-  min-height: 16px !important;
-  max-width: 16px !important;
-  max-height: 16px !important;
-  padding: 0 !important;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50% !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  cursor: pointer;
-  background: var(--background-primary);
-  color: var(--text-muted);
-  box-shadow: 0 0 0 1px var(--background-modifier-border);
-}
-.jp-chat-attach-remove svg {
-  width: 10px !important;
-  height: 10px !important;
-  min-width: 10px !important;
-  min-height: 10px !important;
-  flex-shrink: 0 !important;
-  display: inline-block !important;
-}
-
-.jp-chat-input {
-  display: block;
-  width: 100%;
-  min-height: 28px;
-  max-height: 160px;
-  resize: none;
-  padding: 4px 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  /* Same size as the messages — the composer shouldn't read as finer print
-     than what it produces. */
-  font-size: 1em;
-  line-height: 1.5;
-}
-.jp-chat-input:focus,
-.jp-chat-input:active {
-  border: none;
-  box-shadow: none;
-  outline: none;
-}
-
-.jp-chat-toolbar {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  padding-top: 2px;
+  margin-top: 10px;
 }
-/* Pill with a label, so only the height is pinned — the width has to follow
-   the text. */
-.jp-chat-tool-btn {
-  flex: 0 0 auto;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box !important;
-  height: 24px !important;
-  min-height: 24px !important;
-  max-height: 24px !important;
-  padding: 0 7px !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 0.75em;
-}
-.jp-chat-tool-btn:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-.jp-chat-tool-btn svg {
-  width: 15px !important;
-  height: 15px !important;
-  min-width: 15px !important;
-  min-height: 15px !important;
-  flex-shrink: 0 !important;
-  display: inline-block !important;
-}
-.jp-chat-model-btn {
-  /* Model names vary in length; keep the row from jumping as it changes. */
-  min-width: 52px;
-}
-.jp-chat-toolbar-spacer {
-  flex: 1 1 auto;
-}
-.jp-chat-usage {
-  padding-right: 6px;
-  font-size: 0.72em;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.jp-chat-usage:empty {
+.jp-mc-suggestions.is-hidden {
   display: none;
 }
-.jp-chat-send {
-  flex: 0 0 auto;
-  box-sizing: border-box !important;
-  width: 26px !important;
-  height: 26px !important;
-  min-width: 26px !important;
-  min-height: 26px !important;
-  max-width: 26px !important;
-  max-height: 26px !important;
-  padding: 0 !important;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50% !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
+.jp-mc-suggestion {
+  background: transparent;
+  box-shadow: none;
+  padding: 2px 0;
+  font-size: 0.88em;
+  color: var(--text-muted);
   cursor: pointer;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+  text-align: left;
 }
-.jp-chat-send svg {
-  width: 14px !important;
-  height: 14px !important;
-  min-width: 14px !important;
-  min-height: 14px !important;
-  flex-shrink: 0 !important;
-  display: inline-block !important;
+.jp-mc-suggestion:hover {
+  color: var(--text-accent);
+  background: transparent;
 }
-.jp-chat-send.is-streaming {
-  background: var(--background-modifier-border);
-  color: var(--text-normal);
+.jp-mc-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
 }

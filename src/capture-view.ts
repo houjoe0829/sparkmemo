@@ -84,7 +84,8 @@ import {
 import type SparkMemoPlugin from './main';
 import { t, currentLocale } from './i18n';
 import { notice } from './notice';
-import { ChatPane } from './chat-pane';
+import { isMyClaudianAvailable } from './myclaudian-bridge';
+import { SendToMyClaudianModal } from './send-to-myclaudian-modal';
 
 export const CAPTURE_VIEW_TYPE = 'spark-memo-capture-view';
 
@@ -137,7 +138,7 @@ export class JournalCaptureView extends ItemView {
   private plugin: SparkMemoPlugin;
 
   // Top-level tab state
-  private currentTab: 'capture' | 'stats' | 'search' | 'location' | 'tag' | 'chat' = 'capture';
+  private currentTab: 'capture' | 'stats' | 'search' | 'location' | 'tag' = 'capture';
   private tabBarEl!: HTMLElement;
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
@@ -147,13 +148,6 @@ export class JournalCaptureView extends ItemView {
   private locationTabBtn!: HTMLButtonElement;
   private tagAggTabBtn!: HTMLButtonElement;
 
-  // Chat tab state. Desktop-only: the pane drives the local claude CLI, so on
-  // mobile the tab button is never created and these stay null.
-  private chatTabBtn: HTMLButtonElement | null = null;
-  private chatPaneEl: HTMLElement | null = null;
-  private chatPane: ChatPane | null = null;
-  /** Lifecycle owner for the chat pane's markdown rendering. */
-  private chatScope: Component | null = null;
 
   // Search state
   private searchBarEl!: HTMLElement;
@@ -442,13 +436,6 @@ export class JournalCaptureView extends ItemView {
     this.statsPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-stats' });
     this.statsPaneEl.hide();
 
-    // Chat pane. Unlike search/location/tag it cannot reuse the capture pane —
-    // it owns a composer and its own scroll region. Desktop only.
-    if (Platform.isDesktopApp) {
-      this.chatPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-chat' });
-      this.chatPaneEl.hide();
-    }
-    this.applyChatVisibility();
 
 
     // ── Vault listeners ──
@@ -531,12 +518,6 @@ export class JournalCaptureView extends ItemView {
       this.intersectionObs = null;
     }
     this.teardownMobileToolbarAutoHide();
-    this.chatPane?.dispose();
-    this.chatPane = null;
-    if (this.chatScope) {
-      this.removeChild(this.chatScope);
-      this.chatScope = null;
-    }
     this.disposeDays();
     this.containerEl.children[1].empty();
   }
@@ -548,15 +529,6 @@ export class JournalCaptureView extends ItemView {
 
     this.captureTabBtn = this.makeTabBtn('zap', true, t('capture.quickCapture'));
     this.captureTabBtn.addEventListener('click', () => this.switchTab('capture'));
-
-    // Chat needs to spawn a local process, which only exists on desktop, so the
-    // button is never created on mobile. On desktop it is created but hidden
-    // until the feature is switched on — cheap, since the pane itself is built
-    // lazily, and it lets the setting take effect without rebuilding the view.
-    if (Platform.isDesktopApp) {
-      this.chatTabBtn = this.makeTabBtn('message-circle', false, t('chat.tab'));
-      this.chatTabBtn.addEventListener('click', () => this.switchTab('chat'));
-    }
 
     this.searchTabBtn = this.makeTabBtn('search', false, t('search.searchJournal'));
     this.searchTabBtn.addEventListener('click', () => this.switchTab('search'));
@@ -692,19 +664,13 @@ export class JournalCaptureView extends ItemView {
     return btn;
   }
 
-  private switchTab(tab: 'capture' | 'stats' | 'search' | 'location' | 'tag' | 'chat') {
-    if (tab === 'chat' && !this.chatEnabled()) return;
+  private switchTab(tab: 'capture' | 'stats' | 'search' | 'location' | 'tag') {
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
     // Any navigation other than "into the tag tab" drops the remembered origin.
     if (tab !== 'tag') this.tagReturnTab = null;
     if (prevTab === 'location' && tab !== 'location') this.teardownMap();
-
-    // Chat is the only pane outside the capture/stats pair, so hide it here
-    // once rather than in every branch below; its own branch re-shows it.
-    this.chatPaneEl?.hide();
-    this.chatTabBtn?.toggleClass('is-active', tab === 'chat');
 
     this.captureTabBtn.toggleClass('is-active', tab === 'capture');
     this.searchTabBtn.toggleClass('is-active', tab === 'search');
@@ -780,16 +746,6 @@ export class JournalCaptureView extends ItemView {
           }
         });
       }
-    } else if (tab === 'chat') {
-      this.capturePaneEl.hide();
-      this.statsPaneEl.hide();
-      this.inputCardEl.hide();
-      this.searchBarEl.hide();
-      this.locationBarEl.hide();
-      this.tagAggBarEl.hide();
-      this.ensureChatPane();
-      this.chatPaneEl?.show();
-      void this.chatPane?.activate();
     } else if (tab === 'tag') {
       this.capturePaneEl.show();
       this.statsPaneEl.hide();
@@ -5704,13 +5660,24 @@ export class JournalCaptureView extends ItemView {
         }),
     );
 
-    if (this.chatEnabled()) {
+    // Only when the personal hook is on, the desktop MyClaudian is actually
+    // installed, and it is new enough to be sent to. Mobile has no MyClaudian at all.
+    if (
+      this.plugin.settings.sendToMyClaudianEnabled &&
+      Platform.isDesktopApp &&
+      isMyClaudianAvailable(this.app)
+    ) {
       menu.addItem(item =>
         item
-          .setTitle(t('capture.menuChat'))
+          .setTitle(t('capture.menuSendToMyClaudian'))
           .setIcon('message-circle')
           .onClick(() => {
-            this.startChatFromEntry(day, entry);
+            new SendToMyClaudianModal(this.app, {
+              timestamp: entry.timestamp,
+              date: day.date.format('YYYY-MM-DD'),
+              text: entry.text,
+              notePath: day.filePath,
+            }).open();
           }),
       );
     }
@@ -5743,55 +5710,6 @@ export class JournalCaptureView extends ItemView {
     }
 
     menu.showAtMouseEvent(evt);
-  }
-
-  // ── Chat ────────────────────────────────────────────────────────────────
-
-  /**
-   * Show or hide the chat tab to match the setting. Called on open and again
-   * whenever the toggle changes, so switching it off takes the user out of the
-   * chat tab instead of stranding them on a pane they just disabled.
-   */
-  applyChatVisibility(): void {
-    if (!this.chatTabBtn) return;
-    const enabled = this.chatEnabled();
-    // Not hide()/show(): `.jp-tab-btn` sets `display: inline-flex !important`
-    // to survive theme overrides, and that beats the inline `display: none`
-    // those helpers write. A class carrying its own !important wins instead.
-    this.chatTabBtn.toggleClass('is-hidden', !enabled);
-    if (!enabled && this.currentTab === 'chat') this.switchTab('capture');
-  }
-
-  /** Chat is desktop-only and off unless the user turns it on. */
-  private chatEnabled(): boolean {
-    return Platform.isDesktopApp && this.plugin.settings.chatEnabled;
-  }
-
-  /**
-   * Build the chat pane on first use. Kept lazy so a user who never opens a
-   * chat pays neither the DOM nor the Component lifecycle cost.
-   */
-  private ensureChatPane(): void {
-    if (this.chatPane || !this.chatPaneEl) return;
-    const scope = new Component();
-    this.addChild(scope);
-    this.chatScope = scope;
-    this.chatPane = new ChatPane(this.app, this.chatPaneEl, scope, () => this.plugin.settings);
-  }
-
-  /** Open a new conversation seeded with this entry and switch to the chat tab. */
-  private startChatFromEntry(day: DaySection, entry: JournalEntry): void {
-    if (!this.chatEnabled()) return;
-    this.ensureChatPane();
-    // Switch first so the pane is visible while the conversation is created;
-    // switchTab is a no-op when chat is already active, which is fine because
-    // startFromMemo replaces whatever thread is on screen either way.
-    this.switchTab('chat');
-    void this.chatPane?.startFromMemo({
-      timestamp: entry.timestamp,
-      date: day.date.format('YYYY-MM-DD'),
-      text: entry.text,
-    });
   }
 
   /** Copy the raw markdown body of the entry (without `- HH:MM` prefix). */
