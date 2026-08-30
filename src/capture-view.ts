@@ -4357,13 +4357,25 @@ export class JournalCaptureView extends ItemView {
     return this.tagAggLoadPromise;
   }
 
+  /**
+   * Status text for the tag scan. Only paints when the user is actually looking
+   * at the tag list — otherwise a background scan would append "scanning…" to
+   * whatever list is on screen (a tag's detail view, the search results, …).
+   */
+  private renderTagStatusMessage(msg: string) {
+    if (this.currentTab !== 'tag' || this.selectedTag !== null) return;
+    this.disposeDays();
+    this.timelineEl.empty();
+    this.renderTopLevelMessage(msg);
+  }
+
   private async buildTagIndex(): Promise<void> {
     this.tagAggLoading = true;
-    this.renderTopLevelMessage(t('tag.scanning'));
+    this.renderTagStatusMessage(t('tag.scanning'));
 
     try {
       if (!appHasDailyNotesPluginLoaded()) {
-        this.renderTopLevelMessage(t('notice.dailyNotesRequired'));
+        this.renderTagStatusMessage(t('notice.dailyNotesRequired'));
         return;
       }
 
@@ -4417,7 +4429,7 @@ export class JournalCaptureView extends ItemView {
       this.tagAggIndex = index;
     } catch (err) {
       console.error('[Spark Memo] tag index build failed', err);
-      this.renderTopLevelMessage(t('tag.scanFailed'));
+      this.renderTagStatusMessage(t('tag.scanFailed'));
     } finally {
       this.tagAggLoading = false;
     }
@@ -4882,7 +4894,11 @@ export class JournalCaptureView extends ItemView {
       this.tagAggTitleEl.hide();
       this.tagSearchInputEl.show();
     }
-    this.renderTagList();
+    // The vault 'modify'/'create'/'delete' listeners null out `tagAggIndex` on any
+    // md write, which can happen while the user sits in a tag's detail view. Going
+    // through `ensureTagIndexAndRenderList` rebuilds it instead of rendering an
+    // empty tag list. No-op cost when the index is still warm.
+    void this.ensureTagIndexAndRenderList();
   }
 
   /** Render one day's entries for a selected tag — same shape as the location tab's day renderer. */
