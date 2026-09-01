@@ -3925,7 +3925,25 @@ export class JournalCaptureView extends ItemView {
       // right after our own rebuild can still find + highlight + scroll to
       // the row instead of wiping the state on first paint.
       window.requestAnimationFrame(() => {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Top-aligned on purpose: `block: 'center'` pushed the start of a memo
+        // taller than the viewport off-screen, leaving only its tail visible.
+        // scrollIntoView isn't used here because the day header is sticky at
+        // top: 0 and would cover the row's first lines; its height varies by
+        // platform and font size, so it's measured at scroll time rather than
+        // hardcoded as a scroll-margin.
+        const scroller = this.timelineScrollEl;
+        if (!scroller) return;
+        const header = target.parentElement?.querySelector<HTMLElement>(
+          '.jp-timeline-entry--header',
+        );
+        const headerH = header ? header.getBoundingClientRect().height : 0;
+        const top =
+          target.getBoundingClientRect().top -
+          scroller.getBoundingClientRect().top +
+          scroller.scrollTop -
+          headerH -
+          8;
+        scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
       });
       if (this.highlightClearTimer !== null) {
         window.clearTimeout(this.highlightClearTimer);
