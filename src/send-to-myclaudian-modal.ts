@@ -1,5 +1,6 @@
 import { App, Modal } from 'obsidian';
 import { t } from './i18n';
+import { MentionSuggest } from './mention-suggest';
 import { getMyClaudian } from './myclaudian-bridge';
 import { notice } from './notice';
 
@@ -72,6 +73,13 @@ export class SendToMyClaudianModal extends Modal {
   private inputEl!: HTMLTextAreaElement;
   private suggestionsEl!: HTMLElement;
   private sendBtn!: HTMLButtonElement;
+  private mentions: MentionSuggest | null = null;
+  /**
+   * Notes the user reached for with `@`, kept so the conversation is recorded
+   * under them too. Their paths are already in the message text, but a path in a
+   * string is not something the receiving side can recognise as a reference.
+   */
+  private mentionedPaths = new Set<string>();
   private sending = false;
 
   constructor(app: App, seed: MemoSeed) {
@@ -121,6 +129,15 @@ export class SendToMyClaudianModal extends Modal {
       btn.addEventListener('click', () => void this.send(suggestion.prompt));
     }
 
+    // Attached after the handlers above: the mention dropdown anchors itself to
+    // the textarea, and `syncSuggestions` hiding the buttons below resizes this
+    // dialog — so it has to run first, or the dropdown positions against a layout
+    // that is about to change. Ordering costs nothing here: its key handling
+    // captures from `document` rather than competing for a slot on the textarea.
+    this.mentions = new MentionSuggest(this.app, this.inputEl, {
+      onPickFile: path => this.mentionedPaths.add(path),
+    });
+
     const actions = contentEl.createDiv({ cls: 'jp-mc-actions' });
     this.sendBtn = actions.createEl('button', {
       cls: 'mod-cta jp-mc-send',
@@ -132,12 +149,29 @@ export class SendToMyClaudianModal extends Modal {
   }
 
   onClose(): void {
+    this.mentions?.destroy();
+    this.mentions = null;
     this.contentEl.empty();
   }
 
   /** Suggestions are for an empty box; once the user writes their own they are noise. */
   private syncSuggestions(): void {
     this.suggestionsEl.toggleClass('is-hidden', this.inputEl.value.trim().length > 0);
+  }
+
+  /**
+   * The daily note the memo came out of, plus whatever the user mentioned. Only
+   * paths still present in the text count: a mention that was typed and then
+   * deleted is not a reference the user still means.
+   */
+  private collectNotePaths(): string[] | undefined {
+    const text = this.inputEl.value;
+    const paths = new Set<string>();
+    if (this.seed.notePath) paths.add(this.seed.notePath);
+    for (const path of this.mentionedPaths) {
+      if (text.includes(`@${path}`)) paths.add(path);
+    }
+    return paths.size > 0 ? Array.from(paths) : undefined;
   }
 
   private async send(prompt: string): Promise<void> {
@@ -158,7 +192,7 @@ export class SendToMyClaudianModal extends Modal {
       const ok = await plugin.sendFromPlugin({
         text: composeMessage(prompt, this.seed),
         startNew: true,
-        notePaths: this.seed.notePath ? [this.seed.notePath] : undefined,
+        notePaths: this.collectNotePaths(),
       });
       if (!ok) {
         notice(t('myclaudian.failed'));
