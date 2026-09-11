@@ -1083,7 +1083,15 @@ export class JournalCaptureView extends ItemView {
     );
     const items: ImagePreviewItem[] = embeds.map(el => {
       const img = el.querySelector('img')!;
-      return { src: img.getAttribute('src') ?? '', alt: img.getAttribute('alt') ?? '' };
+      // `.internal-embed[src]` holds the raw wikilink text; resolve it to a
+      // real vault path so the preview can offer "copy image link".
+      const linktext = el.getAttribute('src') ?? '';
+      const dest = linktext ? this.app.metadataCache.getFirstLinkpathDest(linktext, '') : null;
+      return {
+        src: img.getAttribute('src') ?? '',
+        alt: img.getAttribute('alt') ?? '',
+        path: dest?.path,
+      };
     });
     embeds.forEach((embed, idx) => {
       embed.addEventListener('click', evt => {
@@ -2188,6 +2196,7 @@ export class JournalCaptureView extends ItemView {
       const items: ImagePreviewItem[] = this.pendingImages.map(f => ({
         src: this.app.vault.getResourcePath(f),
         alt: f.name,
+        path: f.path,
       }));
       this.pendingImages.forEach((file, idx) => {
         const src = items[idx].src;
@@ -6661,7 +6670,7 @@ class CalendarPickerModal extends Modal {
 // ── Image preview modal ──────────────────────────────────────────────────
 
 /** One entry in the preview carousel. */
-interface ImagePreviewItem { src: string; alt: string; }
+interface ImagePreviewItem { src: string; alt: string; path?: string; }
 
 /** Horizontal distance a swipe must cover before it switches photos. */
 const SWIPE_THRESHOLD_PX = 60;
@@ -6831,6 +6840,13 @@ class ImagePreviewModal extends Modal {
         .setTitle(t('preview.copyImage'))
         .setIcon('copy')
         .onClick(() => void this.copyCurrentImage()));
+      // Only images that live in the vault can be referenced by a wikilink.
+      if (this.items[this.index].path) {
+        menu.addItem(i => i
+          .setTitle(t('preview.copyImageLink'))
+          .setIcon('link')
+          .onClick(() => void this.copyCurrentImageLink()));
+      }
       menu.showAtMouseEvent(ev);
     });
   }
@@ -6885,6 +6901,21 @@ class ImagePreviewModal extends Modal {
       notice(t('notice.imageCopied'));
     } catch (e) {
       notice(t('notice.imageCopyFailed', { error: String(e) }));
+    }
+  }
+
+  /**
+   * Copy an embed wikilink (`![[path/to/image.png]]`) for the current image so
+   * it can be referenced from another note without duplicating the file.
+   */
+  private async copyCurrentImageLink(): Promise<void> {
+    try {
+      const path = this.items[this.index].path;
+      if (!path) throw new Error('no vault path');
+      await navigator.clipboard.writeText(`![[${path}]]`);
+      notice(t('notice.imageLinkCopied'));
+    } catch (e) {
+      notice(t('notice.imageLinkCopyFailed', { error: String(e) }));
     }
   }
 
