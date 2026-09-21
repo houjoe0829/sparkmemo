@@ -5,7 +5,7 @@
 
 set -e  # Exit on error
 
-VAULT_PATH="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/MindCraft"
+VAULT_PATH="$HOME/Obsidian/MindCraft"
 PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/spark-memo"
 
 echo "📦 Building Spark Memo..."
