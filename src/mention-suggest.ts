@@ -61,7 +61,7 @@ export class MentionSuggest {
     // of a fixed-height dialog, so a list rendered in the modal's own flow is
     // clipped by its edge after two rows.
     this.listEl = document.body.createDiv({ cls: 'jp-mention-dropdown' });
-    this.listEl.style.display = 'none';
+    this.listEl.hide();
 
     // On `document`, not on the textarea: listeners on the element the event
     // targets fire in registration order whatever their capture flag, so sitting
@@ -289,7 +289,7 @@ export class MentionSuggest {
     });
 
     // Shown before measuring: a hidden element has no height to position against.
-    this.listEl.style.display = '';
+    this.listEl.show();
     this.position();
     this.scrollSelectedIntoView();
     // Positioned once more after the browser has finished this frame's layout.
@@ -380,7 +380,7 @@ export class MentionSuggest {
   private close(): void {
     this.startIndex = -1;
     this.items = [];
-    this.listEl.style.display = 'none';
+    this.listEl.hide();
     this.listEl.empty();
   }
 }
