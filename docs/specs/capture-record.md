@@ -63,12 +63,12 @@
 
 ### `#` 候选（标签）
 
-**来源：** vault 的 tag 索引（`getVaultTags`），带每个 tag 的使用次数和所在文件 mtime；另有一份可选的 tag 聚合索引（`tagAggIndex`），记录该 tag 最近一次在 Memo 条目里出现的时间戳——只有用户打开过标签浏览器才会建，没建时用 mtime 兜底。
+**来源：** 空查询时只取 Memo 聚合索引（`tagAggIndex`）里的 tag，即真正在 Memo 条目里用过的那些，索引记录每个 tag 的使用次数和最近一次被 Memo 使用的时间戳。有查询时取 vault 的 tag 索引（`getVaultTags`），覆盖全库 tag，带使用次数。`tagAggIndex` 在视图打开时后台预热，任何 md 文件改动会让它失效并在 1.5 秒后自动重建，失效窗口内空查询降级为按使用次数排序，同时触发重建。
 
 **匹配：** 查询只允许 Obsidian tag 合法字符（unicode 字母数字 + `-` `_` `/`），且不能是纯数字（Obsidian 不识别 `#2026` 这类）。
 
 **排序规则：**
-- 空查询：按 `max(entry.lastTs, file.mtime)` 倒序。取 max 是为了兼容回填条目——即使条目写的是"昨天 09:00"，只要今天真的敲过，mtime 就会让它排到最前。tiebreak 依次为使用次数、字面序。
+- 空查询：按该 tag 最近一次被 Memo 使用的时间戳（`entry.lastTs`）倒序，不参考文件 mtime。早先取 `max(lastTs, mtime)` 会让 Daily Note 里所有 tag 因为当天写过 Memo 而集体刷新成最新，Flow 记录用的 `#中断` 这类非 Memo tag 会长期霸占榜首，故去掉 mtime 这一路信号。tiebreak 依次为使用次数、字面序。
 - 有查询：按匹配位置分层打分（低分排前）——完全相等 `0` / 整体前缀 `1` / 任一路径段前缀 `2`（用于嵌套 tag，如打 `child` 匹配 `#parent/child`）/ 普通子串 `3`。同分按使用次数倒序。
 
 **选中行为（两者共用）：**

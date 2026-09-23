@@ -203,6 +203,8 @@ export class JournalCaptureView extends ItemView {
     { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
   > | null = null;
   private tagAggLoading = false;
+  /** Debounce timer for rebuilding `tagAggIndex` after vault writes, so the tag autocomplete stays warm. */
+  private tagIndexRefreshTimer: number | null = null;
   /** In-flight `loadTagIndex` scan, so concurrent callers await the same build instead of racing past a half-built index. */
   private tagAggLoadPromise: Promise<void> | null = null;
   /** Non-null while viewing a single tag's memo list; null while viewing the tag list. */
@@ -452,6 +454,7 @@ export class JournalCaptureView extends ItemView {
           this.scheduleStatsRefresh();
           this.locationIndex = null;
           this.tagAggIndex = null;
+          this.scheduleTagIndexRefresh();
         }
       }),
     );
@@ -464,6 +467,7 @@ export class JournalCaptureView extends ItemView {
           this.scheduleStatsRefresh();
           this.locationIndex = null;
           this.tagAggIndex = null;
+          this.scheduleTagIndexRefresh();
         }
       }),
     );
@@ -478,6 +482,7 @@ export class JournalCaptureView extends ItemView {
           this.scheduleStatsRefresh();
           this.locationIndex = null;
           this.tagAggIndex = null;
+          this.scheduleTagIndexRefresh();
         }
       }),
     );
@@ -497,6 +502,11 @@ export class JournalCaptureView extends ItemView {
     await this.fullRebuild();
     this.setupIntersectionObserver();
     this.setupMobileToolbarAutoHide();
+
+    // Warm the tag index in the background so typing "#" ranks by real memo
+    // recency from the first keystroke, without waiting for the tag tab to be
+    // opened. No-op if it's already built.
+    void this.loadTagIndex();
   }
 
   async onClose(): Promise<void> {
@@ -508,6 +518,10 @@ export class JournalCaptureView extends ItemView {
     if (this.statsRefreshTimer !== null) {
       window.clearTimeout(this.statsRefreshTimer);
       this.statsRefreshTimer = null;
+    }
+    if (this.tagIndexRefreshTimer !== null) {
+      window.clearTimeout(this.tagIndexRefreshTimer);
+      this.tagIndexRefreshTimer = null;
     }
     if (this.searchDebounceTimer !== null) {
       window.clearTimeout(this.searchDebounceTimer);
@@ -3293,15 +3307,22 @@ export class JournalCaptureView extends ItemView {
       // wins and the tag still surfaces as recent. Tags with no signal
       // (mtime = 0) fall back to count-based order via the tiebreakers.
       const agg = this.tagAggIndex;
-      matches = all
-        .map(t => {
-          const entryTs = agg?.get(t.tag)?.lastTs ?? 0;
-          const lastTs = Math.max(entryTs, t.mtime);
-          return { tag: t.tag, count: t.count, lastTs };
-        })
-        .sort((a, b) => b.lastTs - a.lastTs || b.count - a.count || a.tag.localeCompare(b.tag))
-        .slice(0, 8)
-        .map(t => t.tag);
+      if (agg && agg.size > 0) {
+        matches = [...agg.entries()]
+          .map(([tag, data]) => ({ tag, count: data.count, lastTs: data.lastTs }))
+          .sort((a, b) => b.lastTs - a.lastTs || b.count - a.count || a.tag.localeCompare(b.tag))
+          .slice(0, 8)
+          .map(t => t.tag);
+      } else {
+        // Index not built yet (first open, or a vault write just invalidated
+        // it) — kick off the scan and fall back to frequency order for now.
+        void this.loadTagIndex();
+        matches = all
+          .slice()
+          .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+          .slice(0, 8)
+          .map(t => t.tag);
+      }
     } else {
       // Rank so that, for nested tags, matching the leaf segment (e.g. typing
       // "child" for "#parent/child") or the tag's own prefix outranks a
@@ -5247,6 +5268,21 @@ export class JournalCaptureView extends ItemView {
 
     // Body container
     this.statsBodyEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-body' });
+  }
+
+  /**
+   * Debounced rebuild of `tagAggIndex` after a vault write invalidated it.
+   * Keeps the `#` autocomplete ranking by real memo recency instead of
+   * silently degrading to frequency order after every memo you save.
+   */
+  private scheduleTagIndexRefresh() {
+    if (this.tagIndexRefreshTimer !== null) {
+      window.clearTimeout(this.tagIndexRefreshTimer);
+    }
+    this.tagIndexRefreshTimer = window.setTimeout(() => {
+      this.tagIndexRefreshTimer = null;
+      void this.loadTagIndex();
+    }, 1500);
   }
 
   /** Debounced reload, used in response to vault mutations. */
