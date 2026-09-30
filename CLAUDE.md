@@ -20,7 +20,7 @@ npm run dev
 # Production build (type-check + minified bundle, no sourcemaps)
 npm run build
 
-# Deploy to local Obsidian vault (requires configured VAULT_PATH in deploy.sh)
+# Deploy to local Obsidian vault (vault path is looked up by name via scripts/vault-path.sh; set VAULT_NAME in deploy.sh)
 npm run deploy
 ```
 
@@ -95,7 +95,7 @@ Both share the same timestamp detection logic (`section.ts`) but render differen
 - **`package.json`** — Dependencies: obsidian, @codemirror/{state,view}, obsidian-daily-notes-interface, @jsquash/webp, TypeScript, esbuild.
 - **`tsconfig.json`** — TypeScript config (ES2018 target).
 - **`esbuild.config.mjs`** / **`scripts/build.js`** — Build configuration.
-- **`deploy.sh`** — Local development deploy script (hardcoded Obsidian vault path).
+- **`deploy.sh`** — Local development deploy script. Finds the vault by name (`VAULT_NAME`) through `scripts/vault-path.sh`, which reads Obsidian's vault registry `obsidian.json`.
 
 ## Settings & Defaults
 

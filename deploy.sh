@@ -5,7 +5,10 @@
 
 set -e  # Exit on error
 
-VAULT_PATH="$HOME/Obsidian/MindCraft"
+# 只写仓库名，实际地址由 scripts/vault-path.sh 从 Obsidian 的仓库登记表里查出，
+# vault 搬家后不用改这里。查不到会报错退出，不会复制到错的地方。
+VAULT_NAME="MindCraft"
+VAULT_PATH="$("$(dirname "$0")/scripts/vault-path.sh" "$VAULT_NAME")"
 PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/spark-memo"
 
 echo "📦 Building Spark Memo..."
