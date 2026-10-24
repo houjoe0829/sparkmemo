@@ -14,19 +14,23 @@
 
 ## 用户可感知行为
 
-- 在 Obsidian 设置 → 第三方插件 → Spark Memo 里能看到一个设置页，按用途分组：
-  - **Memo section**：`targetHeading`、`headingLevel`
-  - **时间戳外观与行为**：`timestampPattern`、`timestampColor`、`timestampBgColor`、`readonlyTimestamps`、`autoTimestamp`
-  - **附件保存位置**：`recordingFolder`、`imageFolder`
-  - **图片处理**：`imageTimeCheck`、`imageCompressionEnabled`、`imageCompressionQuality`、`imageCompressionMaxSize`
-  - **语音转文字**（暂未启用，UI 注释掉）：`sttEndpoint`、`sttApiKey`、`sttModel`、`sttLanguage`、`sttRealtime`
+- 设置页顶部按顺序显示「通用」「时间戳」「媒体」「关于」四个标签，外观参照 RSS Dashboard。
+- 首次打开默认进入「通用」，同一个设置页实例记住本次选择，不新增持久化的标签配置。
+- 通用：语言、Memo 标题、标题层级。
+- 时间戳：文字颜色、背景颜色、只读保护、自动插入时间戳、匹配正则、效果预览。
+- 媒体：按「保存位置」「图片处理」分组。前者包含图片和录音目录，后者包含图片压缩开关、质量、最大边长和时间与位置校验。
+- 关于：参照 RSS Dashboard 居中展示 24px 的插件名称，左侧显示与 Obsidian 侧边栏和标签页相同的星芒图标，以一行浅色小字显示版本号和构建号，版本信息与按钮之间仅展示一段简短介绍，不使用列表，并排放置等尺寸的 GitHub 和 X 品牌图标描边按钮，图标随插件打包并跟随主题颜色，保留链接与无障碍名称，不显示按钮文字、重复悬停提示或完整网址。
+- 语言可选「跟随 Obsidian」「简体中文」「繁體中文」「English」「日本語」，默认跟随 Obsidian，用于 Spark Memo 的界面和新获取地名，不更改 Obsidian 的语言或 Memo 正文。
+- 切换语言即时保存并刷新设置页；为避免清空草稿或中断录音，不重新创建已打开的记录面板。既有面板重新打开时更新静态文案，关闭前需先保存草稿或结束录音；命令注册文案在插件下次加载时更新。
 - 改颜色、改开关、改路径都是即时生效，不用重载 Obsidian。
-- 所有文案跟随语言（见 [i18n.md](i18n.md)）。
+- 语言和标题层级选择器使用 Obsidian 主题菜单；原有文件夹选择器和配置字段保持不变。
+- 设置页与文件夹选择弹窗不显示重复的悬停提示，文件夹按钮保留无障碍名称。菜单选项文字、键盘操作和错误提示保持不变。
 
 ## 完整字段表
 
 | 字段 | 类型 | 默认值 | 用途 | 修改后的副作用 |
 |---|---|---|---|---|
+| `language` | `system` / `zh` / `zh-TW` / `en` / `ja` | `system` | 插件界面和新地名查询的语言 | 更新翻译语言并刷新设置页 |
 | `targetHeading` | string | `"Memo"` | 激活插件的 heading 文本 | `refreshEditors()` 重新扫描 section |
 | `headingLevel` | number | `2` | Heading 级别（1–6，对应 `#`–`######`） | `refreshEditors()` |
 | `timestampPattern` | string | `\d{2}:\d{2}` | 时间戳识别正则 | `refreshEditors()` |
@@ -50,7 +54,7 @@
 
 - **类型与默认**：[section.ts](../../src/section.ts) 里的 `SparkMemoSettings` interface 与 `DEFAULT_SETTINGS` 常量。
 - **持久化**：`this.saveData()` / `this.loadData()`（Obsidian 官方 API），[main.ts](../../src/main.ts) 里封装为 `loadSettings` / `saveSettings`。
-- **设置 UI**：[main.ts](../../src/main.ts) 的 `SparkMemoSettingTab.display()` 用 Obsidian 的 `Setting` 构建器渲染；每项 name/desc 都走 [i18n.ts](../../src/i18n.ts) 的 `t()`。
+- **设置 UI**：[main.ts](../../src/main.ts) 注册的 [settings-tab.ts](../../src/settings-tab.ts) 中的 `SparkMemoSettingTab` 用 Obsidian 的 `Setting` 构建器渲染；每项 name/desc 都走 [i18n.ts](../../src/i18n.ts) 的 `t()`。
 - **副作用触发**：
   - 装饰相关（正则、颜色开关、只读开关）→ `refreshEditors()` 派发 `forceUpdateEffect`
   - 颜色 → `applyCSSVariables()` 更新 CSS 变量
@@ -58,6 +62,6 @@
 
 ## 已知约束与遗留
 
-- **STT 字段悬空**：字段留着但 UI 注释掉，避免用户误配置；语音模块见 [capture-audio.md](capture-audio.md)。
+- STT 字段保留但不展示，不增加尚未实现的语音转文字入口；语音模块见 [capture-audio.md](capture-audio.md)。
 - **无迁移逻辑**：新增字段依赖 `DEFAULT_SETTINGS` merge，不做版本化迁移；重命名字段会破坏老用户配置，谨慎重命名。
-- **正则暴露**：`timestampPattern` 是原始正则字符串，用户填错会静默失效；未来可加校验提示。
+- `timestampPattern` 仍使用原有正则校验，非法输入提示错误且不保存。

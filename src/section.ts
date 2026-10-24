@@ -6,12 +6,15 @@
  * and timestamp parsing in one place.
  */
 
+import type { LanguagePreference } from './i18n';
 import { RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet } from '@codemirror/view';
 
 // ── Types & defaults ────────────────────────────────────────────────────────
 
 export interface SparkMemoSettings {
+  /** Plugin UI language; system preserves the existing Obsidian-language behavior. */
+  language: LanguagePreference;
   /** The heading text that activates the plugin (without # symbols) */
   targetHeading: string;
   /** Heading level: 1 → #, 2 → ##, … */
@@ -58,6 +61,7 @@ export interface SparkMemoSettings {
 }
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
+  language: 'system',
   targetHeading: 'Memo',
   headingLevel: 2,
   timestampPattern: '\\d{2}:\\d{2}',

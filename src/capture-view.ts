@@ -83,6 +83,7 @@ import {
 } from './stats';
 import type SparkMemoPlugin from './main';
 import { t, currentLocale } from './i18n';
+import { LANGUAGE_PROFILES } from './languages';
 import { notice } from './notice';
 import { isMyClaudianAvailable } from './myclaudian-bridge';
 import { SendToMyClaudianModal } from './send-to-myclaudian-modal';
@@ -5259,7 +5260,21 @@ export class JournalCaptureView extends ItemView {
     // Toolbar with title
     this.statsToolbarEl = this.statsPaneEl.createDiv({ cls: 'jp-stats-toolbar' });
 
-    this.statsToolbarEl.createDiv({ cls: 'jp-stats-toolbar-spacer' });
+    // Keep the existing spacer and toolbar height so the year and cards do not move.
+    const settingsSlot = this.statsToolbarEl.createDiv({ cls: 'jp-stats-toolbar-spacer' });
+    const settingsBtn = settingsSlot.createEl('button', {
+      cls: 'jp-timeline-header-btn jp-stats-settings-btn',
+      attr: { type: 'button', 'aria-label': t('stats.openSettings') },
+    });
+    setIcon(settingsBtn, 'settings');
+    settingsBtn.addEventListener('click', () => {
+      // Same internal settings navigation used by RSS Dashboard; no note/view switch.
+      const appWithSettings = this.app as unknown as {
+        setting?: { open?: () => void; openTabById?: (id: string) => void };
+      };
+      appWithSettings.setting?.open?.();
+      appWithSettings.setting?.openTabById?.(this.plugin.manifest.id);
+    });
 
     this.statsYearLabelEl = this.statsToolbarEl.createDiv({
       cls: 'jp-stats-year-label',
@@ -5442,7 +5457,8 @@ export class JournalCaptureView extends ItemView {
 
     const numLine = top.createDiv({ cls: 'jp-stats-hero-number' });
     const formatted = formatWordCount(allTime.totalWords, currentLocale());
-    if (formatted.includes('万')) {
+    const largeNumberUnit = LANGUAGE_PROFILES[currentLocale()].largeNumberUnit;
+    if (largeNumberUnit && formatted.endsWith(` ${largeNumberUnit}`)) {
       const [num, unit] = formatted.split(' ');
       numLine.createSpan({ cls: 'jp-stats-hero-num', text: num });
       numLine.createSpan({ cls: 'jp-stats-hero-unit', text: unit });
@@ -5523,7 +5539,7 @@ export class JournalCaptureView extends ItemView {
     footer.setText(
       t('stats.footerSummary', {
         days: String(stats.writingDays),
-        words: stats.totalWords.toLocaleString('en-US'),
+        words: stats.totalWords.toLocaleString(LANGUAGE_PROFILES[currentLocale()].numberLocale),
         entries: String(stats.totalEntries),
       }) + (stats.totalAudios > 0 ? t('stats.footerAudioSuffix', { count: String(stats.totalAudios) }) : ''),
     );
@@ -5583,9 +5599,8 @@ export class JournalCaptureView extends ItemView {
     for (let w = 0; w < totalWeeks; w++) {
       const entry = Object.entries(monthWeek).find(([, wk]) => wk === w);
       const monthLabel = entry
-        ? currentLocale() === 'zh'
-          ? `${Number(entry[0]) + 1}月`
-          : moment().month(Number(entry[0])).format('MMM')
+        ? moment().locale(LANGUAGE_PROFILES[currentLocale()].momentLocale)
+          .month(Number(entry[0])).format(LANGUAGE_PROFILES[currentLocale()].heatmapMonthFormat)
         : '';
       monthRow.createDiv({ cls: 'jp-stats-monthlabel', text: monthLabel });
     }
@@ -5611,7 +5626,7 @@ export class JournalCaptureView extends ItemView {
           (isFuture ? ' is-future' : '');
         const cell = col.createDiv({ cls: classes });
 
-        const label = date.format(t('stats.cellDateFormat'));
+        const label = date.clone().locale(LANGUAGE_PROFILES[currentLocale()].momentLocale).format(t('stats.cellDateFormat'));
         if (entryCount > 0) {
           cell.setAttr('title', t('stats.cellTitleWithData', { date: label, entries: String(entryCount), words: String(wordCount) }));
         } else {
@@ -6640,7 +6655,8 @@ class CalendarPickerModal extends Modal {
 
     header.createDiv({
       cls: 'jp-cal-title',
-      text: this.viewMonth.format(currentLocale() === 'zh' ? 'YYYY年M月' : 'MMMM YYYY'),
+      text: this.viewMonth.clone().locale(LANGUAGE_PROFILES[currentLocale()].momentLocale)
+        .format(LANGUAGE_PROFILES[currentLocale()].calendarMonthFormat),
     });
 
     const nextBtn = header.createEl('button', { cls: 'jp-cal-nav-btn', attr: { 'aria-label': t('capture.calNextMonth') } });
@@ -6651,9 +6667,7 @@ class CalendarPickerModal extends Modal {
     });
 
     const weekRow = contentEl.createDiv({ cls: 'jp-cal-weekdays' });
-    const weekdayShort = currentLocale() === 'zh'
-      ? ['日', '一', '二', '三', '四', '五', '六']
-      : ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const weekdayShort = LANGUAGE_PROFILES[currentLocale()].calendarWeekdays;
     for (const w of weekdayShort) {
       weekRow.createDiv({ cls: 'jp-cal-weekday', text: w });
     }

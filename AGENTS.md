@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Overview
 
-**Spark Memo** is an Obsidian plugin for journaling. It highlights and manages `HH:MM` timestamps in a designated Memo section, provides a quick-capture sidebar (record / search / tags / locations / stats) for jotting down text, images, and voice recordings straight into today's daily note, plots every geo-tagged memo on a bundled offline world map, and includes a multi-language (中文/English) UI that follows Obsidian's configured language.
+**Spark Memo** is an Obsidian plugin for journaling. It highlights and manages `HH:MM` timestamps in a designated Memo section, provides a quick-capture sidebar (record / search / tags / locations / stats) for jotting down text, images, and voice recordings straight into today's daily note, plots every geo-tagged memo on a bundled offline world map, and includes a multi-language (简体中文 / 繁體中文 / English / 日本語) UI that follows Obsidian by default or uses an independent plugin preference.
 
 The project started as a fork of [zhaohongxuan/journal-partner](https://github.com/zhaohongxuan/journal-partner) (a single-file timestamp-highlighting plugin) and has since grown well beyond it — the codebase is now split across several modules and the plugin ID/branding is `spark-memo` / Spark Memo, not Journal Partner. When updating docs or comments, prefer "Spark Memo" and "Memo section" over the old naming.
 
@@ -44,7 +44,7 @@ The source is split by concern under `src/`:
   - **地点 (Locations)** — two views over entries carrying a `[name](geo:lat,lon)` tag: an offline world map (default) and a by-city list.
   - **统计 (Stats)** — renders the yearly heatmaps computed by `stats.ts`.
 - **`stats.ts`** — Pure data layer for the stats tab (deliberately Obsidian-free so it can be unit-tested in isolation). Computes per-year and all-time word/entry/streak counts from raw section text; does not depend on `- HH:MM` formatting.
-- **`i18n.ts`** — Minimal translation layer. `t(key, vars?)` looks up `dictionaries.en` / `dictionaries.zh` based on Obsidian's `getLanguage()` (falling back to `moment.locale()`, then English). `currentLocale()` is exported for call sites that need to branch on locale directly (e.g. date/number formatting) rather than just look up a string.
+- `i18n.ts` resolves the plugin preference and translates UI strings through `locales/`. `languages.ts` is the single registry for supported locales, native names, host aliases, date/number formats and the one-language geocoding parameter. `currentLocale()` exposes the resolved plugin language.
 - **`exif.ts`** — Minimal EXIF reader (no dependency) for JPEG capture time + GPS coordinates.
 - **`geocode.ts`** — Reverse geocoding via OpenStreetMap Nominatim (free, rate-limited to ~1 req/s).
 - **`map-view.ts`** — Pure geometry layer for the map view (Obsidian-free, like `stats.ts`): Web Mercator projection clipped to 78N..60S, single-pass greedy clustering in screen pixels, dot sizing, and time-zone-derived initial longitude. There is no zoom, so exactly one clustering result is alive at a time.
@@ -63,7 +63,7 @@ Both share the same timestamp detection logic (`section.ts`) but render differen
 
 **CSS-Driven Styling:** Colors are stored in CSS custom properties (`--jp-ts-color`, `--jp-ts-bg`) applied via `applyCSSVariables()`. Settings changes dispatch a `forceUpdateEffect` to trigger decoration recomputation without reloading. (CSS class names still carry the `jp-` prefix from the original Journal Partner fork — this is internal naming only, not user-facing, and hasn't been renamed.)
 
-**i18n:** All user-visible strings (settings tab, Notice toasts, capture sidebar UI) go through `t()` from `i18n.ts` rather than being hardcoded. When adding new UI text, add matching `en`/`zh` entries to `dictionaries` in `i18n.ts` rather than inlining Chinese (or English) strings directly.
+**i18n:** All user-visible strings (settings tab, Notice toasts, capture sidebar UI) go through `t()` from `i18n.ts` rather than being hardcoded. When adding UI text, add matching keys and placeholders to every dictionary under `src/locales/`, rather than inlining visible strings. Dictionaries are checked against the English key type.
 
 ### Critical Functions
 
@@ -79,7 +79,7 @@ Both share the same timestamp detection logic (`section.ts`) but render differen
 - **`src/section.ts`** — Settings type/defaults + section & timestamp utilities (shared).
 - **`src/capture-view.ts`** — Quick-capture sidebar view (record / search / locations / stats).
 - **`src/stats.ts`** — Pure stats computation (Obsidian-free).
-- **`src/i18n.ts`** — Translation dictionaries + `t()`/`currentLocale()`.
+- `src/i18n.ts`, `src/locales/`, `src/languages.ts`: translation lookup, typed dictionaries and shared language profiles.
 - **`src/exif.ts`** — EXIF capture time + GPS reader.
 - **`src/geocode.ts`** — Reverse geocoding (Nominatim).
 - **`src/map-view.ts`** — Map projection, clustering, dot sizing (Obsidian-free).
@@ -121,11 +121,18 @@ Settings are persisted via Obsidian's `this.saveData()` / `this.loadData()` API.
 **Adding a new setting:**
 1. Add the field to `SparkMemoSettings` in `section.ts`.
 2. Add a default to `DEFAULT_SETTINGS`.
-3. Add a `Setting` control in `SparkMemoSettingTab.display()` (`main.ts`), using `t()` for its name/description — add the corresponding `en`/`zh` entries to `i18n.ts`.
+3. Add a `Setting` control in `SparkMemoSettingTab.display()` (`main.ts`), using `t()` for its name/description — add corresponding entries to every dictionary under `src/locales/`.
 4. Call `this.plugin.saveSettings()` in the `onChange` callback.
 5. Apply the effect (`refreshEditors()` if it affects decorations, `applyCSSVariables()` if it's a color).
 
-**Adding new UI text:** Never hardcode a Chinese or English string in `main.ts` / `capture-view.ts`. Add a key to both `dictionaries.en` and `dictionaries.zh` in `i18n.ts`, then call `t('namespace.key', { ...vars })`. Keep the existing dot-namespace convention (`capture.*`, `search.*`, `location.*`, `stats.*`, `notice.*`, `settings.*`).
+**Adding new UI text:** Never hardcode a Chinese or English string in `main.ts` / `capture-view.ts`. Add the same key and `{{name}}` placeholders to every dictionary in `src/locales/`, then call `t('namespace.key', { ...vars })`. Keep the existing dot-namespace convention (`capture.*`, `search.*`, `location.*`, `stats.*`, `notice.*`, `settings.*`).
+
+Adding a language must update these together in one change:
+1. Register a complete profile in `src/languages.ts`: native name, Obsidian aliases, moment/number formats, calendar weekdays, large-number unit and a single geocoding request language.
+2. Add a complete typed UI dictionary in `src/locales/` and register it in `i18n.ts`. Keep all keys and `{{name}}` placeholders aligned.
+3. Keep the language menu derived from the registry. Verify following Obsidian, manual selection, saved settings, calendar and stats without modifying global Obsidian/moment language.
+4. Verify district-only geocoding, per-language persistent cache, existing cache compatibility and one language per user-triggered request. Do not automatically query or rewrite historical memos.
+5. Update the i18n/settings/locations specs. Run `node --test scripts/languages.test.cjs scripts/test-settings.cjs scripts/geocode.test.cjs`, type-check and build. Do not deploy or reload without separate authorization.
 
 **Modifying timestamp detection:**
 - Edit the regex pattern in `getTimestampRanges()` (`section.ts`), or make it configurable via settings (already is, via `timestampPattern`).

@@ -1,3 +1,10 @@
+/* Suppress Obsidian aria-label hover hints only on Spark Memo-owned surfaces.
+   Native heatmap title details and accessible names are intentionally retained. */
+.jp-no-tooltip,
+.jp-no-tooltip [aria-label] {
+  --no-tooltip: true;
+}
+
 /* ── Spark Memo ──────────────────────────────────────────────────────────── */
 
 /*
@@ -2283,13 +2290,62 @@
   --jp-stats-cell-gap: 3px;
 }
 
-/* Stats toolbar — year nav only (page title sits in the tab bar above) */
+/* Stats toolbar: settings on the left, existing year label on the right. */
 .jp-stats-toolbar {
   display: flex;
   align-items: center;
 }
 .jp-stats-toolbar-spacer {
   flex: 1;
+  align-self: stretch;
+  position: relative;
+}
+/* The button occupies the existing empty space without increasing toolbar height. */
+.jp-stats-toolbar .jp-stats-settings-btn {
+  background: transparent;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  box-sizing: border-box !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  max-width: 28px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  padding: 0 !important;
+  flex: 0 0 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  box-shadow: none;
+}
+.jp-stats-toolbar .jp-stats-settings-btn:hover {
+  background: var(--background-modifier-hover);
+}
+.jp-stats-toolbar .jp-stats-settings-btn .svg-icon {
+  width: 14px !important;
+  height: 14px !important;
+  flex: 0 0 auto;
+}
+.jp-stats-toolbar .jp-stats-settings-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+.is-mobile .jp-stats-toolbar .jp-stats-settings-btn {
+  width: 32px !important;
+  min-width: 32px !important;
+  max-width: 32px !important;
+}
+/* Grow the touch target into the existing gap below, never above the scroll pane. */
+.is-mobile .jp-stats-toolbar .jp-stats-settings-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 28px;
 }
 .jp-stats-year-nav {
   display: flex;
@@ -2629,11 +2685,169 @@
   min-height: 0;
   transition: margin-top 0.3s ease, min-height 0.3s ease;
 }
-.jp-settings-version {
-  margin-top: 1.5em;
-  font-size: 0.75em;
-  color: var(--text-faint);
+/* Settings navigation mirrors RSS Dashboard without styling other plugins. */
+.jp-settings .jp-settings-tab-bar {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.jp-settings .jp-settings-tab-btn {
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  height: auto;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  border-radius: 4px 4px 0 0;
+  transition: color 0.2s, border-bottom 0.2s;
+}
+.jp-settings .jp-settings-tab-btn.active {
+  color: var(--text-normal);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+  background: var(--background-secondary);
+}
+.jp-settings .jp-settings-tab-btn:hover {
+  color: var(--color-accent);
+  background: var(--background-secondary);
+}
+.jp-settings .jp-settings-tab-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+.jp-settings .jp-settings-tab-content {
+  margin-top: 12px;
+}
+/* About uses RSS Dashboard's centered title, muted version and outlined actions. */
+.jp-settings .jp-settings-about {
+  max-width: 640px;
+  margin: 8px auto 0;
+  padding: 12px 8px;
   text-align: center;
+}
+.jp-settings .jp-settings-about-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-normal);
+  line-height: 1.15;
+}
+.jp-settings .jp-settings-about-product-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+.jp-settings .jp-settings-about-product-icon .svg-icon {
+  width: 24px !important;
+  height: 24px !important;
+}
+.jp-settings .jp-settings-about-version {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.jp-settings .jp-settings-about-description {
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+.jp-settings .jp-settings-about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.jp-settings .jp-settings-about-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
+}
+.jp-settings .jp-settings-about-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.jp-settings .jp-settings-about-icon .svg-icon {
+  width: 18px !important;
+  height: 18px !important;
+  stroke: none;
+}
+.jp-settings .jp-settings-about-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--background-secondary);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.jp-settings .jp-settings-about-btn:active {
+  transform: translateY(0);
+}
+.jp-settings .jp-settings-about-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+.jp-settings .jp-settings-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: 100%;
+}
+.jp-settings .jp-settings-select-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jp-settings .jp-settings-select-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.jp-settings .jp-settings-select-icon .svg-icon {
+  width: 14px !important;
+  height: 14px !important;
+  flex: 0 0 auto;
+}
+@media (max-width: 600px) {
+  .jp-settings .jp-settings-tab-content > .setting-item:not(.setting-item-heading) {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .jp-settings .jp-settings-tab-content > .setting-item > .setting-item-info {
+    min-width: 0;
+  }
+  .jp-settings .jp-settings-tab-content > .setting-item > .setting-item-control {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .jp-settings .jp-settings-tab-content input[type="text"] {
+    max-width: 100%;
+    min-width: 0;
+  }
 }
 
 .jp-notice {

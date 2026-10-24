@@ -1,3 +1,6 @@
+import { LANGUAGE_PROFILES } from './languages';
+import type { Locale } from './languages';
+
 /**
  * Pure data layer for the yearly stats view.
  *
@@ -340,17 +343,18 @@ export function computeAllTimeStats(yearStatsList: YearStats[]): AllTimeStats {
 
 /**
  * Format a large word count as a short, locale-appropriate string.
- * Chinese groups by 万 (10,000):
+ * Chinese and Japanese group by 万/萬 (10,000):
  *   - <10000   → "1234"
  *   - <100000  → "3.2 万"   (one decimal)
  *   - >=100000 → "12 万"    (no decimal — past five digits the decimal noise distracts)
  * English uses compact notation (e.g. "12.3K", "1.2M").
  */
-export function formatWordCount(n: number, locale: 'en' | 'zh'): string {
-  if (locale === 'zh') {
+export function formatWordCount(n: number, locale: Locale): string {
+  const { largeNumberUnit, numberLocale } = LANGUAGE_PROFILES[locale];
+  if (largeNumberUnit) {
     if (n < 10_000) return String(n);
     const wan = n / 10_000;
-    return wan < 10 ? `${wan.toFixed(1)} 万` : `${Math.floor(wan)} 万`;
+    return wan < 10 ? `${wan.toFixed(1)} ${largeNumberUnit}` : `${Math.floor(wan)} ${largeNumberUnit}`;
   }
-  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+  return new Intl.NumberFormat(numberLocale, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 }

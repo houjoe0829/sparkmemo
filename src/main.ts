@@ -1,15 +1,9 @@
 import {
-  App,
-  FuzzySuggestModal,
   MarkdownPostProcessorContext,
   MarkdownView,
   Platform,
   Plugin,
-  PluginSettingTab,
-  Setting,
   TFile,
-  TFolder,
-  TextComponent,
   WorkspaceLeaf,
   moment,
 } from 'obsidian';
@@ -45,8 +39,10 @@ import {
   getTimestampRanges,
 } from './section';
 import { CAPTURE_VIEW_TYPE, JournalCaptureView } from './capture-view';
-import { t } from './i18n';
+import { normalizeLanguage, setLanguage, t } from './i18n';
+import { SparkMemoSettingTab } from './settings-tab';
 import { notice } from './notice';
+import { initializeGeocoding } from './geocode';
 
 // ── CM6 utilities ───────────────────────────────────────────────────────────
 
@@ -60,6 +56,7 @@ export default class SparkMemoPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    initializeGeocoding(this);
     this.applyCSSVariables();
     this.registerEditorExtension(this.createEditorExtensions());
     this.registerMarkdownPostProcessor(this.postProcessor.bind(this));
@@ -435,10 +432,13 @@ export default class SparkMemoPlugin extends Plugin {
       DEFAULT_SETTINGS,
       await this.loadData(),
     );
+    this.settings.language = normalizeLanguage(this.settings.language);
+    setLanguage(this.settings.language);
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
+    setLanguage(this.settings.language);
     this.applyCSSVariables();
     this.refreshEditors();
   }
@@ -450,394 +450,5 @@ export default class SparkMemoPlugin extends Plugin {
         editorWithCm.cm?.dispatch({ effects: forceUpdateEffect.of(null) });
       }
     });
-  }
-}
-
-// ── Settings tab ────────────────────────────────────────────────────────────
-
-class SparkMemoSettingTab extends PluginSettingTab {
-  plugin: SparkMemoPlugin;
-
-  constructor(app: App, plugin: SparkMemoPlugin) {
-    super(app, plugin);
-    this.plugin = plugin;
-  }
-
-  /** Collect all vault folder paths, sorted and deduplicated. */
-  private getFolderPaths(): string[] {
-    const folders = this.app.vault
-      .getAllFolders()
-      .filter((file): file is TFolder => file instanceof TFolder);
-    const folderPaths = folders.map((folder) => (folder.path === '' ? '/' : folder.path));
-    if (!folderPaths.includes('/')) {
-      folderPaths.unshift('/');
-    }
-    return Array.from(new Set(folderPaths)).sort();
-  }
-
-  /**
-   * Best-effort synchronous read of Obsidian's configured attachment folder,
-   * for the settings placeholder so users see the real fallback (not a
-   * hard-coded "Attachments") when they leave the field blank.
-   *
-   * `app.getConfig('attachmentFolderPath')` returns undefined on some Obsidian
-   * versions, so we read the in-memory vault config object directly — it's a
-   * plain property access, cheap and safe to call during settings render.
-   * Special values: `.` = same folder as the note, `/` or empty = vault root.
-   */
-  private attachmentFolderLabel(): string {
-    const vaultWithConfig = this.app.vault as unknown as {
-      config?: { attachmentFolderPath?: string };
-    };
-    const folder = vaultWithConfig.config?.attachmentFolderPath;
-    if (!folder || folder === '/' || folder === '') return t('settings.attachmentFolder.vaultRoot');
-    if (folder === '.') return t('settings.attachmentFolder.sameAsNote');
-    return folder;
-  }
-
-  /**
-   * A folder-picker setting row shared by the recording and image folders: a
-   * text field (placeholder = Obsidian's real attachment folder) plus a 📁
-   * button that opens the fuzzy folder-suggest modal. `key` selects which
-   * settings field to read/write.
-   */
-  private addFolderSetting(
-    containerEl: HTMLElement,
-    name: string,
-    desc: string,
-    key: 'recordingFolder' | 'imageFolder',
-  ): void {
-    let textComp: TextComponent | null = null;
-    new Setting(containerEl)
-      .setName(name)
-      .setDesc(desc)
-      .addText(text => {
-        textComp = text;
-        text
-          .setPlaceholder(this.attachmentFolderLabel())
-          .setValue(this.plugin.settings[key])
-          .onChange(async value => {
-            this.plugin.settings[key] = value.trim();
-            await this.plugin.saveSettings();
-          });
-      })
-      .addButton(btn => {
-        btn
-          .setButtonText('📁')
-          .setTooltip(t('settings.folderPicker.tooltip'))
-          .onClick(() => {
-            const modal = this.createFolderSuggestModal((path: string) => {
-              this.plugin.settings[key] = path;
-              void this.plugin.saveSettings();
-              textComp?.setValue(path);
-            });
-            modal.open();
-          });
-      });
-  }
-
-  /** Creates a FuzzySuggestModal pre-populated with vault folder paths. */
-  private createFolderSuggestModal(onSelect: (value: string) => void): FolderSuggestModal {
-    const folders = this.getFolderPaths();
-    return new FolderSuggestModal(this.app, folders, onSelect);
-  }
-
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-
-    new Setting(containerEl).setName(t('settings.title')).setHeading();
-
-    // ── Timestamp Settings ────────────────────────────────────────────────
-    new Setting(containerEl).setName(t('settings.timestamp.heading')).setHeading();
-
-    new Setting(containerEl)
-      .setName(t('settings.targetHeading.name'))
-      .setDesc(t('settings.targetHeading.desc'))
-      .addText(text =>
-        text
-          .setPlaceholder('Memo')
-          .setValue(this.plugin.settings.targetHeading)
-          .onChange(async value => {
-            this.plugin.settings.targetHeading = value.trim() || 'Memo';
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.headingLevel.name'))
-      .setDesc(t('settings.headingLevel.desc'))
-      .addDropdown(dd => {
-        for (let i = 1; i <= 6; i++) {
-          dd.addOption(String(i), `H${i}  ${'#'.repeat(i)}`);
-        }
-        dd.setValue(String(this.plugin.settings.headingLevel));
-        dd.onChange(async value => {
-          this.plugin.settings.headingLevel = parseInt(value);
-          await this.plugin.saveSettings();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName(t('settings.timestampColor.name'))
-      .setDesc(t('settings.timestampColor.desc'))
-      .addColorPicker(cp =>
-        cp
-          .setValue(this.plugin.settings.timestampColor)
-          .onChange(async value => {
-            this.plugin.settings.timestampColor = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.timestampBgColor.name'))
-      .setDesc(t('settings.timestampBgColor.desc'))
-      .addColorPicker(cp =>
-        cp
-          .setValue(this.plugin.settings.timestampBgColor)
-          .onChange(async value => {
-            this.plugin.settings.timestampBgColor = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.readonly.name'))
-      .setDesc(t('settings.readonly.desc'))
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.readonlyTimestamps)
-          .onChange(async value => {
-            this.plugin.settings.readonlyTimestamps = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.autoTimestamp.name'))
-      .setDesc(t('settings.autoTimestamp.desc'))
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.autoTimestamp)
-          .onChange(async value => {
-            this.plugin.settings.autoTimestamp = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.pattern.name'))
-      .setDesc(t('settings.pattern.desc'))
-      .addText(text =>
-        text
-          .setPlaceholder('\\d{2}:\\d{2}')
-          .setValue(this.plugin.settings.timestampPattern)
-          .onChange(async value => {
-            try {
-              new RegExp(value);
-              this.plugin.settings.timestampPattern = value;
-              await this.plugin.saveSettings();
-            } catch {
-              notice(t('notice.invalidRegex'));
-            }
-          }),
-      );
-
-    // Preview badge
-    const previewEl = containerEl.createDiv({ cls: 'jp-settings-preview' });
-    previewEl.createEl('span', {
-      cls: 'jp-settings-preview-label',
-      text: t('settings.preview.label'),
-    });
-    previewEl.createEl('span', {
-      cls: 'jp-timestamp',
-      text: '07:31',
-    });
-    previewEl.createEl('span', { text: t('settings.preview.sampleText') });
-
-    // ── Speech-to-text ────────────────────────────────────────────────────
-    new Setting(containerEl).setName(t('settings.stt.heading')).setHeading();
-
-    this.addFolderSetting(
-      containerEl,
-      t('settings.recordingFolder.name'),
-      t('settings.recordingFolder.desc'),
-      'recordingFolder',
-    );
-
-    // ── Cloud transcription settings (hidden for now — local recording only) ──
-    // let apiKeyInputEl: HTMLInputElement | null = null;
-    //
-    // new Setting(containerEl)
-    //   .setName('转写地址')
-    //   .setDesc('OpenAI 兼容的 /audio/transcriptions 地址。留空则关闭录音转文字。')
-    //   .addText(text =>
-    //     text
-    //       .setPlaceholder('https://api.openai.com/v1/audio/transcriptions')
-    //       .setValue(this.plugin.settings.sttEndpoint)
-    //       .onChange(async value => {
-    //         this.plugin.settings.sttEndpoint = value.trim();
-    //         await this.plugin.saveSettings();
-    //       }),
-    //   );
-    //
-    // new Setting(containerEl)
-    //   .setName('API Key')
-    //   .setDesc('以 Bearer 形式发送的密钥。可填 OpenAI / Groq / 自建服务的密钥。')
-    //   .addText(text => {
-    //     text.inputEl.type = 'password';
-    //     apiKeyInputEl = text.inputEl;
-    //     text
-    //       .setPlaceholder('sk-…')
-    //       .setValue(this.plugin.settings.sttApiKey)
-    //       .onChange(async value => {
-    //         this.plugin.settings.sttApiKey = value.trim();
-    //         await this.plugin.saveSettings();
-    //       });
-    //     return text;
-    //   })
-    //   .addExtraButton((button: ExtraButtonComponent) => {
-    //     let isPassword = true;
-    //     button.setIcon('eye')
-    //       .setTooltip('显示/隐藏 API Key')
-    //       .onClick(() => {
-    //         isPassword = !isPassword;
-    //         if (apiKeyInputEl) {
-    //           apiKeyInputEl.type = isPassword ? 'password' : 'text';
-    //         }
-    //         button.setIcon(isPassword ? 'eye' : 'eye-off');
-    //       });
-    //     return button;
-    //   });
-    //
-    // new Setting(containerEl)
-    //   .setName('模型')
-    //   .setDesc('multipart 中的 model 字段，如 whisper-1、whisper-large-v3。')
-    //   .addText(text =>
-    //     text
-    //       .setPlaceholder('whisper-1')
-    //       .setValue(this.plugin.settings.sttModel)
-    //       .onChange(async value => {
-    //         this.plugin.settings.sttModel = value.trim();
-    //         await this.plugin.saveSettings();
-    //       }),
-    //   );
-    //
-    // new Setting(containerEl)
-    //   .setName('语言')
-    //   .setDesc('ISO-639-1 语言提示，如 zh、en。留空让模型自动识别。')
-    //   .addText(text =>
-    //     text
-    //       .setPlaceholder('zh')
-    //       .setValue(this.plugin.settings.sttLanguage)
-    //       .onChange(async value => {
-    //         this.plugin.settings.sttLanguage = value.trim();
-    //         await this.plugin.saveSettings();
-    //       }),
-    //   );
-    //
-    // new Setting(containerEl)
-    //   .setName('实时转写')
-    //   .setDesc('录音时边说边出字，在停顿处切句并带上下文拼接。关闭则录完整段后一次性转写。')
-    //   .addToggle(toggle =>
-    //     toggle
-    //       .setValue(this.plugin.settings.sttRealtime)
-    //       .onChange(async value => {
-    //         this.plugin.settings.sttRealtime = value;
-    //         await this.plugin.saveSettings();
-    //       }),
-    //   );
-
-    // ── Shortcut ──────────────────────────────────────────────────────────
-    new Setting(containerEl).setName(t('settings.other.heading')).setHeading();
-
-    this.addFolderSetting(
-      containerEl,
-      t('settings.imageFolder.name'),
-      t('settings.imageFolder.desc'),
-      'imageFolder',
-    );
-
-    new Setting(containerEl)
-      .setName(t('settings.imageCompression.name'))
-      .setDesc(t('settings.imageCompression.desc'))
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.imageCompressionEnabled)
-          .onChange(async value => {
-            this.plugin.settings.imageCompressionEnabled = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.compressionQuality.name'))
-      .setDesc(t('settings.compressionQuality.desc'))
-      .addSlider(slider =>
-        slider
-          .setLimits(0.1, 1, 0.05)
-          .setValue(this.plugin.settings.imageCompressionQuality)
-          .onChange(async value => {
-            this.plugin.settings.imageCompressionQuality = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.compressionMaxSize.name'))
-      .setDesc(t('settings.compressionMaxSize.desc'))
-      .addText(text =>
-        text
-          .setPlaceholder('1920')
-          .setValue(String(this.plugin.settings.imageCompressionMaxSize))
-          .onChange(async value => {
-            const n = parseInt(value, 10);
-            this.plugin.settings.imageCompressionMaxSize = Number.isFinite(n) && n >= 0 ? n : 0;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t('settings.imageTimeCheck.name'))
-      .setDesc(t('settings.imageTimeCheck.desc'))
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.imageTimeCheck)
-          .onChange(async value => {
-            this.plugin.settings.imageTimeCheck = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    containerEl.createEl('div', {
-      cls: 'jp-settings-version',
-      text: `Spark Memo v${__PLUGIN_VERSION__} (build ${__BUILD_NUMBER__})`,
-    });
-  }
-}
-
-/** Fuzzy-suggest modal for selecting a vault folder path. */
-class FolderSuggestModal extends FuzzySuggestModal<string> {
-  private folders: string[];
-  private onSelectFolder: (value: string) => void;
-
-  constructor(app: App, folders: string[], onSelect: (value: string) => void) {
-    super(app);
-    this.folders = folders;
-    this.onSelectFolder = onSelect;
-    this.setPlaceholder(t('settings.folderPicker.placeholder'));
-  }
-
-  getItems(): string[] {
-    return this.folders;
-  }
-
-  getItemText(item: string): string {
-    return item;
-  }
-
-  onChooseItem(item: string): void {
-    this.onSelectFolder(item);
   }
 }

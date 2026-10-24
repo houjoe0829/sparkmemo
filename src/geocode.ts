@@ -1,47 +1,46 @@
-/**
- * Reverse geocoding via OpenStreetMap's Nominatim — turns a decimal-degree
- * GPS coordinate into a coarse, human-readable place name (city/district
- * level, not street/POI). Free, no API key, but rate-limited to ~1 req/s —
- * callers doing a photo batch should await sequentially, not in parallel.
- */
+/** Obsidian adapter shared by photo metadata, mobile positioning and manual retries. */
+import { normalizePath, requestUrl } from 'obsidian';
+import type { Plugin } from 'obsidian';
+import { ReverseGeocoder } from './geocode-client';
+import { currentLocale } from './i18n';
 
-import { requestUrl } from 'obsidian';
+let client: ReverseGeocoder | null = null;
 
-interface NominatimAddress {
-  city?: string;
-  town?: string;
-  village?: string;
-  county?: string;
-  state?: string;
-  country?: string;
+/** Cache is separate from settings and only accessed when the plugin is running. */
+export function initializeGeocoding(plugin: Plugin): void {
+  client?.dispose();
+  const adapter = plugin.app.vault.adapter;
+  const directory = plugin.manifest.dir ?? `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`;
+  const cachePath = normalizePath(`${directory}/geocode-cache.json`);
+  const instance = new ReverseGeocoder({
+    request: async url => {
+      const response = await requestUrl({
+        url,
+        headers: { 'User-Agent': 'SparkMemo-Obsidian-Plugin' },
+        throw: false,
+      });
+      return { status: response.status, headers: response.headers, readJson: () => response.json };
+    },
+    storage: {
+      read: async () => {
+        if (!(await adapter.exists(cachePath))) return null;
+        const stat = await adapter.stat(cachePath);
+        if (stat && stat.size > 2 * 1024 * 1024) throw new Error('Cache too large');
+        return adapter.read(cachePath);
+      },
+      write: content => adapter.write(cachePath, content),
+    },
+    // Never log URLs, raw errors, coordinates, response bodies or memo content.
+    report: (kind, status) => console.warn('[Spark Memo] Geocoding', { kind, ...(status ? { status } : {}) }),
+  });
+  client = instance;
+  plugin.register(() => {
+    instance.dispose();
+    if (client === instance) client = null;
+  });
 }
 
-interface NominatimResponse {
-  address?: NominatimAddress;
-}
-
-/**
- * Resolves a coordinate to a coarse place name, preferring city-level
- * granularity and falling back to progressively broader administrative
- * levels. Returns `null` on any network/parse failure — callers should fall
- * back to storing the raw coordinate without a display name.
- */
+/** One requested language per user action; failures preserve the caller's coordinates. */
 export async function reverseGeocodeCity(latitude: number, longitude: number): Promise<string | null> {
-  try {
-    const url =
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
-      `&lat=${latitude}&lon=${longitude}&zoom=10&accept-language=zh-CN`;
-    const res = await requestUrl({
-      url,
-      headers: { 'User-Agent': 'SparkMemo-Obsidian-Plugin' },
-    });
-    if (res.status !== 200) return null;
-
-    const data = res.json as NominatimResponse;
-    const address = data.address;
-    if (!address) return null;
-    return address.city ?? address.town ?? address.village ?? address.county ?? address.state ?? address.country ?? null;
-  } catch {
-    return null;
-  }
+  return client ? client.resolve(latitude, longitude, currentLocale()) : null;
 }

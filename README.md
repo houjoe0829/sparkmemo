@@ -36,7 +36,7 @@ Under the hood it highlights `HH:MM` timestamps inside a designated Memo section
 - **Offline world map** — the Locations tab opens on a map of everywhere you've written, drawn from a vector basemap bundled with the plugin: no tile server, no network request, no account. Nearby memos cluster into a single dot sized by how much you wrote there; hover for the count, click to read them, and scroll sideways to wrap around the globe
 - **Yearly heatmap** — GitHub-style grid per year, with total words, writing days, entry count, and longest streak
 - **Random rewind** — open the Search tab and a random past memo greets you, so old thoughts get another moment in the light
-- **Multi-language** — follows Obsidian's UI language (English / 简体中文)
+- **Multi-language**: follows Obsidian by default, with an independent 简体中文 / 繁體中文 / English / 日本語 choice under Settings → General. New place-name lookups request only the plugin UI language and display a district/county name when available, with a persistent cache and a serial, rate-limited queue. Existing memo labels are not automatically translated or rewritten.
 
 Requires Obsidian's built-in **Daily Notes** core plugin.
 
