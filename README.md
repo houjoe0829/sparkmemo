@@ -47,7 +47,7 @@ Requires Obsidian's built-in **Daily Notes** core plugin.
 
 ## Installation
 
-Once the plugin is accepted into the community catalog, install it from **Settings → Community plugins → Browse → "Spark Memo"**.
+Install from Settings → Community plugins → Browse → "Spark Memo".
 
 Manual install: download `main.js`, `manifest.json`, and `styles.css` from the latest [GitHub Release](https://github.com/houjoe0829/sparkmemo/releases) into `<vault>/.obsidian/plugins/spark-memo/`, then enable it in Settings → Community plugins.
 
