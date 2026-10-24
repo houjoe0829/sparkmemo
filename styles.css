@@ -2843,6 +2843,38 @@
   height: 18px !important;
   stroke: none;
 }
+.jp-settings .jp-settings-about-email {
+  box-shadow: none;
+}
+.jp-settings .jp-settings-about-email .svg-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.jp-email-contact-modal {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+}
+.jp-email-contact-description {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+.jp-email-contact-address {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.jp-email-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.jp-email-contact-actions button {
+  height: auto;
+  min-height: 32px;
+  white-space: normal;
+}
 .jp-settings .jp-settings-about-btn:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);

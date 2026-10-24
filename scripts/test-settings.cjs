@@ -76,6 +76,7 @@ class Control {
 class Button {
   constructor(parent) { this.buttonEl = parent.createEl('button'); this.buttonEl.component = this; }
   setButtonText(text) { this.buttonEl.setText(text); return this; }
+  setCta() { this.buttonEl.addClass('mod-cta'); return this; }
   setTooltip(text) { this.tooltip = text; return this; }
   onClick(fn) { this.buttonEl.addEventListener('click', fn); return this; }
 }
@@ -125,15 +126,28 @@ let legacyHost = false;
 let momentLanguage = 'zh-cn';
 const notices = [];
 const registeredIcons = new Map();
+class TestModal {
+  static latest;
+  constructor(app) {
+    this.app = app;
+    this.modalEl = new Element();
+    this.titleEl = this.modalEl.createDiv();
+    this.contentEl = this.modalEl.createDiv();
+  }
+  open() { TestModal.latest = this; this.opened = true; this.onOpen?.(); }
+  close() { this.opened = false; this.onClose?.(); }
+}
+const clipboardWrites = [], openedUrls = [];
+let clipboardError = null, emailOpenError = null;
 const obsidian = {
-  Setting, Menu, TFolder, FuzzySuggestModal, normalizePath: path => path,
+  Setting, Menu, TFolder, FuzzySuggestModal, ButtonComponent: Button, normalizePath: path => path,
   Platform: { isMacOS: true, isMobile: false, isIosApp: false },
   Scope: class {
     constructor(parent) { this.parent = parent; this.bindings = []; }
     register(modifiers, key, callback) { this.bindings.push({ modifiers, key, callback }); }
   },
   Plugin: class { constructor(app) { this.app = app; } },
-  Component: class {}, ItemView: class {}, Modal: class { constructor() { this.modalEl = new Element(); } }, MarkdownView: class {},
+  Component: class {}, ItemView: class {}, Modal: TestModal, MarkdownView: class {},
   PluginSettingTab: class {
     constructor(app) { this.app = app; this.containerEl = new Element(); }
   },
@@ -174,8 +188,12 @@ class TestImage {
 const runtimeWindow = {
   app: { internalPlugins: { plugins: { 'daily-notes': { enabled: true } } }, plugins: { getPlugin: () => null } },
   setTimeout: () => 0, clearTimeout() {},
+  open(url, target) { if (emailOpenError) throw emailOpenError; openedUrls.push({ url, target }); },
 };
-const runtimeNavigator = { mediaDevices: { getUserMedia: async () => { throw Error('No test microphone'); } } };
+const runtimeNavigator = {
+  mediaDevices: { getUserMedia: async () => { throw Error('No test microphone'); } },
+  clipboard: { async writeText(text) { if (clipboardError) throw clipboardError; clipboardWrites.push(text); } },
+};
 class TestMediaRecorder {
   static latest;
   static isTypeSupported() { return false; }
@@ -239,15 +257,38 @@ test('older Obsidian falls back to moment language only in system mode', () => {
 });
 test('four tabs render in order with General initially selected', () => {
   const { root } = setup();
-  assert.deepEqual(tabs(root).map(el => el.textContent), ['通用', '时间戳', '媒体', '关于']);
+  assert.deepEqual(tabs(root).map(el => el.textContent), ['通用', '存储位置', '配置', '关于']);
   assert.equal(tabs(root)[0].getAttribute('aria-selected'), 'true');
   assert.deepEqual(rows(root).map(item => item.name), ['语言', '日记标题', '标题层级']);
+});
+test('daily note location is translated, explanatory only, and leads the storage tab', async () => {
+  const expected = [
+    ['zh', '每日笔记存放位置', 'Memo 保存在 Obsidian 的每日笔记（Daily Note）中，存放位置跟随每日笔记的设置。'],
+    ['zh-TW', '每日筆記存放位置', 'Memo 儲存在 Obsidian 的每日筆記（Daily Note）中，存放位置依照每日筆記的設定。'],
+    ['en', 'Daily note location', 'Memos are saved in Obsidian daily notes, following the daily note folder settings.'],
+    ['ja', 'デイリーノートの保存先', 'Memo は Obsidian のデイリーノートに保存され、保存先はデイリーノートの設定に従います。'],
+  ];
+  for (const [language, name, description] of expected) {
+    const { root, plugin } = setup({ language });
+    const settings = plain(plugin.settings);
+    await tabs(root)[1].click();
+    const info = rows(root)[0];
+    assert.equal(info.name, name);
+    assert.equal(info.desc, description);
+    assert.equal(info.controlEl.children.length, 0);
+    assert.deepEqual(rows(root).map(item => item.name), [name, t('settings.imageFolder.name'), t('settings.recordingFolder.name')]);
+    assert.equal(plugin.saved.length, 0);
+    assert.deepEqual(plain(plugin.settings), settings);
+    assert.ok(root.classes.has('jp-no-tooltip'));
+    assert.equal(info.settingEl.getAttribute('title'), undefined);
+  }
 });
 test('tab switching remembers selection without saving settings', async () => {
   const { tab, root, plugin } = setup();
   await tabs(root)[1].click(); tab.display();
   assert.equal(tabs(root)[1].getAttribute('aria-selected'), 'true');
-  assert.ok(root.querySelector('.jp-settings-preview')); assert.equal(rows(root).length, 5);
+  assert.deepEqual(rows(root).map(item => item.name), ['每日笔记存放位置', '图片存放位置', '录音存放位置']);
+  assert.equal(root.querySelector('.jp-settings-preview'), null);
   assert.equal(plugin.saved.length, 0);
 });
 test('keyboard navigation wraps and keeps focus and accessibility state together', () => {
@@ -274,7 +315,7 @@ test('language change persists and refreshes settings without changing other val
   await Menu.latest.choose('English');
   assert.equal(plugin.saved.length, 1); assert.equal(plugin.saved[0].language, 'en');
   assert.deepEqual(plain(plugin.settings), { ...before, language: 'en' });
-  assert.deepEqual(tabs(root).map(el => el.textContent), ['General', 'Timestamps', 'Media', 'About']);
+  assert.deepEqual(tabs(root).map(el => el.textContent), ['General', 'Storage locations', 'Configuration', 'About']);
   assert.equal(hostLanguage, 'zh'); assert.equal(momentLanguage, 'zh-cn');
   await root.querySelector('.jp-settings-select').click(); await Menu.latest.choose('Follow Obsidian');
   assert.equal(tabs(root)[0].textContent, '通用');
@@ -294,7 +335,7 @@ test('heading level remains editable through six themed-menu options', async () 
   assert.equal(plugin.saved.length, 1);
 });
 test('timestamp settings retain color, toggle, regular-expression validation and preview', async () => {
-  const { root, plugin } = setup(); await tabs(root)[1].click();
+  const { root, plugin } = setup(); await tabs(root)[2].click();
   await control(row(root, t('settings.timestampColor.name'))).change('#ffffff');
   await control(row(root, t('settings.timestampBgColor.name'))).change('#000000');
   await control(row(root, t('settings.readonly.name'))).change(false);
@@ -308,15 +349,18 @@ test('timestamp settings retain color, toggle, regular-expression validation and
   await pattern.change('\\d{1,2}:\\d{2}'); assert.equal(plugin.settings.timestampPattern, '\\d{1,2}:\\d{2}');
   assert.ok(root.querySelector('.jp-settings-preview').textContent.includes('07:31'));
 });
-test('media groups preserve saved values, paths and all image controls', async () => {
+test('storage and configuration preserve saved values, paths and all image controls', async () => {
   const { root, plugin } = setup({ imageFolder: 'Photos', recordingFolder: 'Audio', imageCompressionQuality: 0.65 });
-  await tabs(root)[2].click();
-  assert.deepEqual(rows(root).filter(item => item.heading).map(item => item.name), ['保存位置', '图片处理']);
-  assert.equal(rows(root).length, 8);
+  await tabs(root)[1].click();
+  assert.equal(rows(root).length, 3);
+  assert.deepEqual(rows(root).filter(item => item.heading), []);
   const image = control(row(root, t('settings.imageFolder.name')));
   assert.equal(image.value, 'Photos'); assert.equal(image.placeholder, 'Attachments');
   await image.change('  Pictures  '); assert.equal(plugin.settings.imageFolder, 'Pictures');
   assert.equal(control(row(root, t('settings.recordingFolder.name'))).value, 'Audio');
+  await tabs(root)[2].click();
+  assert.deepEqual(rows(root).filter(item => item.heading).map(item => item.name), [t('settings.timestamp.heading'), t('settings.media.images')]);
+  assert.equal(rows(root).length, 11);
   assert.equal(control(row(root, t('settings.compressionQuality.name'))).value, 0.65);
   await control(row(root, t('settings.imageCompression.name'))).change(false);
   await control(row(root, t('settings.compressionQuality.name'))).change(0.9);
@@ -326,7 +370,7 @@ test('media groups preserve saved values, paths and all image controls', async (
   assert.equal(plugin.settings.imageCompressionMaxSize, 1280); assert.equal(plugin.settings.imageTimeCheck, false);
 });
 test('folder picker keeps existing selection and fallback semantics', async () => {
-  const { root, plugin, app, tab } = setup(); await tabs(root)[2].click();
+  const { root, plugin, app, tab } = setup(); await tabs(root)[1].click();
   const image = row(root, t('settings.imageFolder.name'));
   await image.controlEl.children.find(el => el.component?.buttonEl).click();
   assert.deepEqual(plain(FuzzySuggestModal.latest.getItems()), ['/', 'Audio', 'Photos']);
@@ -335,15 +379,98 @@ test('folder picker keeps existing selection and fallback semantics', async () =
   app.vault.config.attachmentFolderPath = '.'; tab.display();
   assert.equal(control(row(root, t('settings.imageFolder.name'))).placeholder, t('settings.attachmentFolder.sameAsNote'));
 });
-test('About centers title, compact version and two buttons without setting-row cards', async () => {
+test('About centers title, compact version and three buttons without setting-row cards', async () => {
   const { root, plugin } = setup(); await tabs(root)[3].click();
   assert.equal(rows(root).length, 0);
   assert.equal(root.querySelector('.jp-settings-about-title').textContent, 'Spark Memo');
   assert.equal(root.querySelector('.jp-settings-about-version').textContent, 'v0.2.6 · 构建 test-build');
-  assert.deepEqual(root.querySelectorAll('.jp-settings-about-btn').map(e => e.textContent), ['', '']);
-  assert.equal(root.querySelector('.jp-settings-about-actions').children.length, 2);
+  assert.deepEqual(root.querySelectorAll('.jp-settings-about-btn').map(e => e.textContent), ['', '', '']);
+  assert.equal(root.querySelector('.jp-settings-about-actions').children.length, 3);
   assert.equal(root.querySelector('.jp-settings-about').textContent.includes('https://'), false);
   assert.equal(plugin.saved.length, 0); assert.equal(root.querySelector('.jp-settings-version'), null);
+});
+test('email icon preserves existing links and only opens a localized contact dialog', async () => {
+  for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+    clipboardWrites.length = 0; openedUrls.length = 0;
+    const { root, plugin } = setup({ language });
+    await tabs(root)[3].click();
+    assert.deepEqual(root.querySelectorAll('a').map(e => e.getAttribute('href')),
+      ['https://github.com/houjoe0829/sparkmemo', 'https://x.com/houjoe1']);
+    const button = root.querySelector('.jp-settings-about-email');
+    assert.equal(button.getAttribute('type'), 'button');
+    assert.equal(button.getAttribute('aria-label'), t('settings.contact.title'));
+    assert.equal(button.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(button.getAttribute('title'), undefined);
+    assert.equal(button.children[0].icon, 'mail');
+    await button.click();
+    const modal = TestModal.latest;
+    assert.equal(modal.titleEl.textContent, t('settings.contact.title'));
+    assert.equal(modal.contentEl.querySelector('.jp-email-contact-description').textContent, t('settings.contact.description'));
+    assert.equal(modal.contentEl.querySelector('.jp-email-contact-address').textContent, 'houqiao829@gmail.com');
+    assert.deepEqual(modal.contentEl.querySelectorAll('button').map(e => e.textContent),
+      [t('settings.contact.copy'), t('settings.contact.open')]);
+    assert.ok(modal.modalEl.classes.has('jp-no-tooltip'));
+    assert.ok(modal.modalEl.classes.has('jp-email-contact-modal'));
+    assert.equal(clipboardWrites.length, 0); assert.equal(openedUrls.length, 0);
+    assert.equal(plugin.saved.length, 0);
+    modal.close(); assert.equal(modal.contentEl.children.length, 0);
+    modal.open(); assert.equal(modal.contentEl.querySelectorAll('button').length, 2);
+    modal.close();
+  }
+});
+test('copy contact email writes the exact address and reports success without opening email', async () => {
+  clipboardWrites.length = 0; openedUrls.length = 0;
+  const { root } = setup(); await tabs(root)[3].click();
+  await root.querySelector('.jp-settings-about-email').click();
+  const modal = TestModal.latest;
+  await modal.contentEl.querySelectorAll('button')[0].click();
+  assert.deepEqual(clipboardWrites, ['houqiao829@gmail.com']);
+  assert.equal(notices.at(-1), '邮箱地址已复制');
+  assert.equal(openedUrls.length, 0); assert.equal(modal.opened, true);
+  modal.close();
+});
+test('copy failure keeps the selectable address and does not claim success or launch email', async () => {
+  clipboardWrites.length = 0; openedUrls.length = 0;
+  const { root } = setup(); await tabs(root)[3].click();
+  await root.querySelector('.jp-settings-about-email').click();
+  const modal = TestModal.latest;
+  clipboardError = Error('Clipboard denied');
+  try { await modal.contentEl.querySelectorAll('button')[0].click(); }
+  finally { clipboardError = null; }
+  assert.equal(notices.at(-1), t('settings.contact.copyFailed'));
+  assert.equal(clipboardWrites.length, 0); assert.equal(openedUrls.length, 0);
+  assert.equal(modal.contentEl.querySelector('.jp-email-contact-address').textContent, 'houqiao829@gmail.com');
+  assert.equal(modal.opened, true); modal.close();
+});
+test('open email action uses mailto with only the recipient and never sends or copies automatically', async () => {
+  clipboardWrites.length = 0; openedUrls.length = 0;
+  const { root } = setup(); await tabs(root)[3].click();
+  await root.querySelector('.jp-settings-about-email').click();
+  const modal = TestModal.latest;
+  await modal.contentEl.querySelectorAll('button')[1].click();
+  assert.deepEqual(openedUrls, [{ url: 'mailto:houqiao829@gmail.com', target: '_blank' }]);
+  assert.equal(clipboardWrites.length, 0); modal.close();
+});
+test('email launch errors are localized and preserve the manual copy fallback', async () => {
+  openedUrls.length = 0;
+  const { root } = setup(); await tabs(root)[3].click();
+  await root.querySelector('.jp-settings-about-email').click();
+  const modal = TestModal.latest;
+  emailOpenError = Error('No mail handler');
+  try { await modal.contentEl.querySelectorAll('button')[1].click(); }
+  finally { emailOpenError = null; }
+  assert.equal(openedUrls.length, 0);
+  assert.equal(notices.at(-1), t('settings.contact.openFailed'));
+  assert.equal(modal.contentEl.querySelectorAll('button').length, 2); modal.close();
+});
+test('email icon and dialog use scoped styles while retaining the existing brand icon treatment', () => {
+  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  assert.match(css, /\.jp-settings \.jp-settings-about-icon \.svg-icon\s*\{[^}]*stroke:\s*none;/s);
+  assert.match(css, /\.jp-settings \.jp-settings-about-email \.svg-icon\s*\{[^}]*fill:\s*none;[^}]*stroke:\s*currentColor;/s);
+  assert.match(css, /\.jp-email-contact-address\s*\{[^}]*user-select:\s*text;/s);
+  const addressRule = css.match(/\.jp-email-contact-address\s*\{([^}]*)\}/)[1];
+  assert.doesNotMatch(addressRule, /padding\s*:|border(?:-radius)?\s*:|background(?:-color)?\s*:/);
+  assert.match(css, /\.jp-email-contact-actions\s*\{[^}]*flex-wrap:\s*wrap;/s);
 });
 test('About title reuses the product sparkle beside the smaller name without extra labels or settings writes', async () => {
   for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
@@ -373,6 +500,31 @@ test('About title reuses the product sparkle beside the smaller name without ext
   assert.match(css, /\.jp-settings \.jp-settings-about-product-icon \.svg-icon\s*\{[^}]*width:\s*24px !important;[^}]*height:\s*24px !important;/s);
 });
 
+test('regrouping renders every existing setting exactly once and never migrates saved values', async () => {
+  for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+    const { root, plugin } = setup({ language, targetHeading: 'Journal', headingLevel: 3,
+      imageFolder: 'Photos', recordingFolder: 'Audio', imageCompressionQuality: 0.65, futureSetting: 'keep' });
+    const before = plain(plugin.settings);
+    const groups = [
+      ['settings.language.name', 'settings.targetHeading.name', 'settings.headingLevel.name'],
+      ['settings.dailyNote.name', 'settings.imageFolder.name', 'settings.recordingFolder.name'],
+      ['settings.timestampColor.name', 'settings.timestampBgColor.name', 'settings.readonly.name',
+        'settings.autoTimestamp.name', 'settings.pattern.name', 'settings.imageCompression.name',
+        'settings.compressionQuality.name', 'settings.compressionMaxSize.name', 'settings.imageTimeCheck.name'],
+    ];
+    const rendered = [];
+    for (let index = 0; index < groups.length; index++) {
+      await tabs(root)[index].click();
+      const names = rows(root).filter(item => !item.heading).map(item => item.name);
+      assert.deepEqual(names, groups[index].map(key => t(key)));
+      rendered.push(...names);
+    }
+    assert.equal(new Set(rendered).size, rendered.length);
+    assert.ok(root.querySelector('.jp-settings-preview'));
+    assert.deepEqual(plain(plugin.settings), before);
+    assert.equal(plugin.saved.length, 0);
+  }
+});
 test('opening every tab does not alter a legacy configuration', async () => {
   const legacy = plain(DEFAULT_SETTINGS); delete legacy.language;
   const { root, plugin } = setup(legacy); const before = plain(plugin.settings);
@@ -473,8 +625,8 @@ test('stats settings entry tolerates unavailable internal settings APIs', async 
 
 test('traditional Chinese and Japanese selections persist and localize all four settings tabs', async () => {
   for (const [name, locale, expected] of [
-    ['繁體中文', 'zh-TW', ['通用', '時間戳', '媒體', '關於']],
-    ['日本語', 'ja', ['一般', 'タイムスタンプ', 'メディア', '情報']],
+    ['繁體中文', 'zh-TW', ['通用', '儲存位置', '設定', '關於']],
+    ['日本語', 'ja', ['一般', '保存先', '設定', '情報']],
   ]) {
     const { root, plugin, tab } = setup({ imageFolder: 'Photos', recordingFolder: 'Audio' });
     const before = plain(plugin.settings);
@@ -631,7 +783,7 @@ test('settings and folder pickers suppress hover hints without losing folder sel
   for (const locale of ['zh', 'zh-TW', 'en', 'ja']) {
     const { root, plugin } = setup({ language: locale });
     assert.ok(root.classes.has('jp-no-tooltip'));
-    await tabs(root)[2].click();
+    await tabs(root)[1].click();
     const buttons = root.querySelectorAll('button').filter(el => el.textContent === '📁');
     assert.equal(buttons.length, 2);
     for (const button of buttons) {
@@ -722,7 +874,7 @@ test('About includes one approved paragraph without a list between version and l
     assert.equal(description.querySelectorAll('ol').length, 0);
     assert.equal(description.querySelectorAll('li').length, 0);
     assert.equal(plugin.saved.length, 0);
-    assert.equal(root.querySelectorAll('.jp-settings-about-btn').length, 2);
+    assert.equal(root.querySelectorAll('.jp-settings-about-btn').length, 3);
   }
 });
 

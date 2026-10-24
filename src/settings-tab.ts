@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, Menu, PluginSettingTab, Setting, TFolder, TextComponent, addIcon, setIcon } from 'obsidian';
+import { App, ButtonComponent, FuzzySuggestModal, Menu, Modal, PluginSettingTab, Setting, TFolder, TextComponent, addIcon, setIcon } from 'obsidian';
 import type SparkMemoPlugin from './main';
 import { normalizeLanguage, t } from './i18n';
 import { LANGUAGE_PROFILES, SUPPORTED_LOCALES } from './languages';
@@ -13,7 +13,8 @@ const ABOUT_BRAND_ICONS = {
   'x': '<g transform="scale(4.1666666667)"><path fill="currentColor" d="M14.234 10.162L22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299l-.929-1.329L3.076 1.56h3.182l5.965 8.532l.929 1.329l7.754 11.09h-3.182z"/></g>',
 } as const;
 
-const TABS = ['general', 'timestamp', 'media', 'about'] as const;
+const CONTACT_EMAIL = 'houqiao829@gmail.com';
+const TABS = ['general', 'storage', 'configuration', 'about'] as const;
 type SettingsTab = typeof TABS[number];
 let nextSettingsId = 0;
 
@@ -191,8 +192,8 @@ export class SparkMemoSettingTab extends PluginSettingTab {
     } });
     switch (this.currentTab) {
       case 'general': this.renderGeneral(content); break;
-      case 'timestamp': this.renderTimestamps(content); break;
-      case 'media': this.renderMedia(content); break;
+      case 'storage': this.renderStorage(content); break;
+      case 'configuration': this.renderConfiguration(content); break;
       case 'about': this.renderAbout(content); break;
     }
   }
@@ -240,6 +241,21 @@ export class SparkMemoSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       },
     );
+  }
+
+  private renderStorage(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName(t('settings.dailyNote.name'))
+      .setDesc(t('settings.dailyNote.desc'));
+    this.addFolderSetting(containerEl, t('settings.imageFolder.name'), t('settings.imageFolder.desc'), 'imageFolder');
+    this.addFolderSetting(containerEl, t('settings.recordingFolder.name'), t('settings.recordingFolder.desc'), 'recordingFolder');
+  }
+
+  private renderConfiguration(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName(t('settings.timestamp.heading')).setHeading();
+    this.renderTimestamps(containerEl);
+    new Setting(containerEl).setName(t('settings.media.images')).setHeading();
+    this.renderImageProcessing(containerEl);
   }
 
   private renderTimestamps(containerEl: HTMLElement): void {
@@ -323,11 +339,7 @@ export class SparkMemoSettingTab extends PluginSettingTab {
 
   }
 
-  private renderMedia(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName(t('settings.media.folders')).setHeading();
-    this.addFolderSetting(containerEl, t('settings.imageFolder.name'), t('settings.imageFolder.desc'), 'imageFolder');
-    this.addFolderSetting(containerEl, t('settings.recordingFolder.name'), t('settings.recordingFolder.desc'), 'recordingFolder');
-    new Setting(containerEl).setName(t('settings.media.images')).setHeading();
+  private renderImageProcessing(containerEl: HTMLElement): void {
     new Setting(containerEl)
       .setName(t('settings.imageCompression.name'))
       .setDesc(t('settings.imageCompression.desc'))
@@ -407,6 +419,58 @@ export class SparkMemoSettingTab extends PluginSettingTab {
       setIcon(glyph, `spark-memo-${icon}`);
       glyph.querySelector('svg')?.setAttribute('focusable', 'false');
     }
+    const emailButton = actions.createEl('button', {
+      cls: 'jp-settings-about-btn jp-settings-about-email',
+      attr: { type: 'button', 'aria-label': t('settings.contact.title'), 'aria-haspopup': 'dialog' },
+    });
+    const emailIcon = emailButton.createSpan({ cls: 'jp-settings-about-icon', attr: { 'aria-hidden': 'true' } });
+    setIcon(emailIcon, 'mail');
+    emailIcon.querySelector('svg')?.setAttribute('focusable', 'false');
+    emailButton.addEventListener('click', () => new EmailContactModal(this.app).open());
+  }
+}
+
+/** Contact choices stay local until the user explicitly copies or opens their email app. */
+class EmailContactModal extends Modal {
+  constructor(app: App) {
+    super(app);
+    this.modalEl.addClass('jp-email-contact-modal', 'jp-no-tooltip');
+  }
+
+  onOpen(): void {
+    const { contentEl, titleEl } = this;
+    contentEl.empty();
+    titleEl.setText(t('settings.contact.title'));
+    titleEl.addClass('jp-modal-title-flush');
+    contentEl.createEl('p', { cls: 'jp-email-contact-description', text: t('settings.contact.description') });
+    contentEl.createDiv({ cls: 'jp-email-contact-address', text: CONTACT_EMAIL });
+    const actions = contentEl.createDiv({ cls: 'jp-email-contact-actions' });
+    new ButtonComponent(actions)
+      .setButtonText(t('settings.contact.copy'))
+      .onClick(async () => {
+        try {
+          await navigator.clipboard.writeText(CONTACT_EMAIL);
+          notice(t('settings.contact.copied'));
+        } catch (error) {
+          console.error('[Spark Memo] Could not copy contact email', error);
+          notice(t('settings.contact.copyFailed'));
+        }
+      });
+    new ButtonComponent(actions)
+      .setButtonText(t('settings.contact.open'))
+      .setCta()
+      .onClick(() => {
+        try {
+          window.open(`mailto:${CONTACT_EMAIL}`, '_blank');
+        } catch (error) {
+          console.error('[Spark Memo] Could not open email app', error);
+          notice(t('settings.contact.openFailed'));
+        }
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
 

@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, '..');
 // Exceptions are exact file + UI entry + value, never a language-wide exemption.
 const ALLOWED_UI_LITERALS = new Set([
   'settings-tab.ts:setPlaceholder:Memo', // Actual heading name, not instructional text.
+  'settings-tab.ts:text:houqiao829@gmail.com', // Contact address is data, identical in every locale.
   'settings-tab.ts:setPlaceholder:\\d{2}:\\d{2}', // Stored regex example.
   'capture-view.ts:text:Ctrl ↵', // Physical keycap label, independent of UI language.
   'capture-view.ts:text: B', // Standard byte units, not prose.
