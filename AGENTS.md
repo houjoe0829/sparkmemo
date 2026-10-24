@@ -8,6 +8,13 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 The project started as a fork of [zhaohongxuan/journal-partner](https://github.com/zhaohongxuan/journal-partner) (a single-file timestamp-highlighting plugin) and has since grown well beyond it — the codebase is now split across several modules and the plugin ID/branding is `spark-memo` / Spark Memo, not Journal Partner. When updating docs or comments, prefer "Spark Memo" and "Memo section" over the old naming.
 
+## 悬停提示
+- 默认不新增重复按钮名称、完整标题或完整链接的悬停提示，不因控件只有图标就添加 `title` 或 `setTooltip()`。
+- 保留无障碍名称、键盘操作、菜单文字、弹窗标题和必要错误说明，不能通过删除 `aria-label` 来消除提示。
+- Spark Memo 的面板、设置页、弹窗和自身功能区入口标记 `jp-no-tooltip`，通过局部 `--no-tooltip` 禁用 Obsidian 自动生成的提示，不全局隐藏 `.tooltip`，不影响宿主或其他插件。
+- 热力图格子的日期和统计详情、地图点的数量属于必要内容，继续保留。用户笔记自带的链接地址和 Markdown 内容不改写。
+- 新增界面时同步覆盖此规则的回归测试，运行 `scripts/tooltip-policy.test.cjs` 和 `scripts/test-settings.cjs`。桌面与移动端使用同一规则。
+
 ## Build & Development Commands
 
 ```bash

@@ -28,24 +28,24 @@ export interface MemoSeed {
  * an explanation of it: being told what you just wrote is worth nothing. They push
  * outward instead — extend it, question it, or connect it to older notes.
  *
- * Deliberately not routed through `i18n.ts`: the user writes memos in Chinese and
- * wants the replies in Chinese, regardless of what language Obsidian's UI is set to.
+ * Prompt bodies intentionally remain Chinese, preserving the writing workflow.
+ * Button labels use i18n and follow the plugin's selected interface language.
  *
- * `label` is what fits on a button; `prompt` is what actually goes out. The extra
+ * `labelKey` identifies the translated button label; `prompt` is what actually goes out. The extra
  * clause in each prompt is load-bearing — without it a short instruction reads to
  * the model as "summarise this", which is the one thing these are meant to avoid.
  */
-const SUGGESTIONS: ReadonlyArray<{ label: string; prompt: string }> = [
+const SUGGESTIONS: ReadonlyArray<{ labelKey: string; prompt: string }> = [
   {
-    label: '顺着这个往下想，还能推出什么',
+    labelKey: 'myclaudian.suggestion.extend',
     prompt: '顺着这条往下想，还能推出什么？不用复述我写的，直接往外推。',
   },
   {
-    label: '顺着这条追问我',
+    labelKey: 'myclaudian.suggestion.question',
     prompt: '顺着这条追问我，一次问一个问题，帮我把没想透的地方挖出来。',
   },
   {
-    label: '找找库里跟这条呼应的旧想法',
+    labelKey: 'myclaudian.suggestion.connect',
     prompt: '在我的 vault 里找找跟这条呼应或者冲突的旧想法，说说它们之间是什么关系。',
   },
 ];
@@ -84,6 +84,7 @@ export class SendToMyClaudianModal extends Modal {
 
   constructor(app: App, seed: MemoSeed) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.seed = seed;
   }
 
@@ -124,7 +125,7 @@ export class SendToMyClaudianModal extends Modal {
     for (const suggestion of SUGGESTIONS) {
       const btn = this.suggestionsEl.createEl('button', {
         cls: 'jp-mc-suggestion',
-        text: `→ ${suggestion.label}`,
+        text: `→ ${t(suggestion.labelKey)}`,
       });
       btn.addEventListener('click', () => void this.send(suggestion.prompt));
     }
@@ -201,7 +202,7 @@ export class SendToMyClaudianModal extends Modal {
       notice(`✅ ${t('myclaudian.sent')}`);
       this.close();
     } catch (error) {
-      notice(`❌ ${error instanceof Error ? error.message : String(error)}`);
+      notice(t('myclaudian.sendError', { error: error instanceof Error ? error.message : String(error) }));
     } finally {
       this.sending = false;
       this.sendBtn.disabled = false;

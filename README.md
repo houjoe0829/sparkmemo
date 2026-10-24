@@ -53,7 +53,7 @@ Manual install: download `main.js`, `manifest.json`, and `styles.css` from the l
 ## Usage
 
 1. Click the feather-pen icon in the ribbon (or run **"Open Quick Capture sidebar"** from the Command Palette) to open the sidebar
-2. Type into the input, then click submit — the memo is written to today's daily note as `- HH:MM text`
+2. Type into the input, then click submit or press `Cmd+Enter` on macOS / `Ctrl+Enter` on Windows and Linux while the input is focused. Plain `Enter` inserts a new line. The memo is written to today's daily note as `- HH:MM text`. A keycap hint appears beside submit on desktop when space permits.
 3. Paste an image or hit record to attach media; images with EXIF time / GPS will prompt you to use their moment and place
 4. Switch to the `Search` / `Tags` / `Locations` / `Stats` tabs to browse across days — `Locations` opens on the world map, with the city list one click away
 

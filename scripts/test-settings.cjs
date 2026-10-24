@@ -163,6 +163,14 @@ const output = (await esbuild.build({
   define: { __PLUGIN_VERSION__: JSON.stringify('0.2.6'), __BUILD_NUMBER__: JSON.stringify('test-build') },
 })).outputFiles[0].text;
 const loaded = { exports: {} };
+const runtimeMath = Object.create(Math);
+let previewDecodeFails = false;
+let previewCanvas = null;
+class TestImage {
+  constructor() { this.naturalWidth = 2; this.naturalHeight = 2; }
+  set src(value) { if (previewDecodeFails) this.onerror?.(); else this.onload?.(); }
+}
+
 const runtimeWindow = {
   app: { internalPlugins: { plugins: { 'daily-notes': { enabled: true } } }, plugins: { getPlugin: () => null } },
   setTimeout: () => 0, clearTimeout() {},
@@ -178,8 +186,9 @@ class TestMediaRecorder {
 vm.runInNewContext(output, {
   module: loaded, exports: loaded.exports,
   require: name => name === 'obsidian' ? obsidian : require(name),
-  Buffer, URL, Blob, document: ownerDocument, window: runtimeWindow, navigator: runtimeNavigator, MediaRecorder: TestMediaRecorder, performance,
+  Buffer, URL, Blob, Math: runtimeMath, Image: TestImage, document: ownerDocument, window: runtimeWindow, navigator: runtimeNavigator, MediaRecorder: TestMediaRecorder, performance,
   activeDocument: {
+    createElement: tag => tag === 'canvas' ? previewCanvas : new Element(tag),
     createDocumentFragment: () => new Element('fragment'),
     documentElement: { style: { setProperty() {} } },
   },
@@ -597,6 +606,27 @@ test('About brand icon buttons keep equal compact geometry and scoped theme-awar
   assert.match(rule, /justify-content:\s*center/); assert.match(rule, /padding:\s*0/);
   assert.match(css, /\.jp-settings \.jp-settings-about-icon \.svg-icon\s*\{[^}]*width:\s*18px !important;[^}]*height:\s*18px !important;[^}]*stroke:\s*none/s);
 });
+
+test('all toolbar tabs, tag/location controls and search actions keep accessible names without native hover titles', () => {
+  for (const locale of ['zh', 'zh-TW', 'en', 'ja']) {
+    setup(); setLanguage(locale);
+    const view = Object.create(JournalCaptureView.prototype);
+    const root = new Element(); view.buildTabBar(root);
+    const buttons = root.querySelectorAll('button');
+    assert.equal(buttons.length, 11);
+    for (const button of buttons) {
+      assert.ok(button.getAttribute('aria-label'), button.textContent);
+      assert.equal(button.getAttribute('title'), undefined);
+      assert.equal(button.getAttribute('data-tooltip-position'), undefined);
+    }
+    assert.equal(view.randomMemoBtn.getAttribute('aria-label'), t('search.randomMemo'));
+    view.searchInputEl.value = 'memo'; view.updateSearchActionBtn();
+    assert.equal(view.randomMemoBtn.getAttribute('aria-label'), t('search.clearQuery'));
+    assert.equal(view.randomMemoBtn.icon, 'x'); assert.equal(view.randomMemoBtn.getAttribute('title'), undefined);
+    view.searchInputEl.value = ''; view.updateSearchActionBtn();
+    assert.equal(view.randomMemoBtn.icon, 'dice'); assert.equal(view.randomMemoBtn.getAttribute('title'), undefined);
+  }
+});
 test('settings and folder pickers suppress hover hints without losing folder selection or localized names', async () => {
   for (const locale of ['zh', 'zh-TW', 'en', 'ja']) {
     const { root, plugin } = setup({ language: locale });
@@ -613,6 +643,68 @@ test('settings and folder pickers suppress hover hints without losing folder sel
     FuzzySuggestModal.latest.onChooseItem('Photos'); await Promise.resolve();
     assert.equal(plugin.settings.imageFolder, 'Photos');
   }
+});
+test('bare link shortening retains the exact target and accessible address without adding a hover title', () => {
+  const view = Object.create(JournalCaptureView.prototype); const bubble = new Element();
+  const url = 'https://www.example.com/path?q=memo#section';
+  const bare = bubble.createEl('a', { text: url, attr: { href: url } });
+  const authored = bubble.createEl('a', { text: 'My link label', attr: { href: url, title: 'User-authored title' } });
+  const local = bubble.createEl('a', { text: 'A note', attr: { href: 'obsidian://open?vault=MindCraft' } });
+  view.shortenBareLinks(bubble);
+  assert.equal(bare.textContent, 'example.com'); assert.ok(bare.classes.has('jp-short-link'));
+  assert.equal(bare.getAttribute('href'), url); assert.equal(bare.getAttribute('aria-label'), url);
+  assert.equal(bare.getAttribute('title'), undefined);
+  assert.equal(authored.getAttribute('title'), 'User-authored title'); assert.equal(authored.textContent, 'My link label');
+  assert.equal(local.getAttribute('href'), 'obsidian://open?vault=MindCraft');
+});
+test('all plugin-owned modal shells including fuzzy pickers opt into the scoped tooltip policy', () => {
+  const { ImageMetadataConfirmModal, DeleteConfirmModal, TagRenameModal, TagPickerModal,
+    TagDeleteConfirmModal, ImagePreviewModal, SendToMyClaudianModal, FolderSuggestModal } = loaded.exports;
+  const moment = require('moment');
+  const stub = obsidian.moment;
+  try {
+    obsidian.moment = moment;
+    const modals = [
+      new ImageMetadataConfirmModal({}, { capturedAt: null, location: null }, () => {}),
+      new DeleteConfirmModal({}, { title: 'Delete memo', audioPaths: [], mode: 'memo', onConfirm() {} }),
+      new TagRenameModal({}, 'tag', () => {}), new TagPickerModal({}, ['one', 'two'], 'move', () => {}),
+      new TagDeleteConfirmModal({}, { tag: 'tag', hasChildren: false, ownCount: 1, totalCount: 1, onConfirm() {} }),
+      new CalendarPickerModal({}, moment('2026-01-01'), async () => new Set(), () => {}),
+      new ImagePreviewModal({}, 'blob:preview', 'A photo'),
+      new SendToMyClaudianModal({}, { text: 'Memo text', date: '2026-01-01', timestamp: '12:00', notePath: null }),
+      new FolderSuggestModal({}, ['/', 'Photos'], () => {}),
+    ];
+    for (const modal of modals) assert.ok(modal.modalEl.classes.has('jp-no-tooltip'), modal.constructor.name);
+  } finally { obsidian.moment = stub; }
+});
+test('capture shell alone opts into the scoped policy when opened', async () => {
+  const view = Object.create(JournalCaptureView.prototype);
+  view.containerEl = new Element(); view.containerEl.createDiv(); const root = view.containerEl.createDiv();
+  const otherPlugin = new Element();
+  view.app = { vault: { on() {} } }; view.registerEvent = () => {};
+  for (const name of ['buildTabBar', 'buildInputCard', 'buildTimeline', 'setupIntersectionObserver', 'setupMobileToolbarAutoHide', 'loadTagIndex']) view[name] = () => {};
+  view.fullRebuild = async () => {};
+  await view.onOpen();
+  assert.ok(root.classes.has('jp-capture-root')); assert.ok(root.classes.has('jp-no-tooltip'));
+  assert.ok(!view.containerEl.classes.has('jp-no-tooltip')); assert.ok(!otherPlugin.classes.has('jp-no-tooltip'));
+});
+test('only Spark Memo ribbon icon receives the scoped suppression marker and keeps its action/name', async () => {
+  setup();
+  const cleanups = [], icon = new Element();
+  const plugin = new SparkMemoPlugin({ vault: { configDir: '.obsidian', adapter: { exists: async () => false } } });
+  plugin.manifest = { id: 'spark-memo', dir: '.obsidian/plugins/spark-memo' };
+  plugin.register = fn => cleanups.push(fn);
+  plugin.loadSettings = async () => {}; plugin.applyCSSVariables = () => {};
+  plugin.registerEditorExtension = () => {}; plugin.createEditorExtensions = () => [];
+  plugin.registerMarkdownPostProcessor = () => {}; plugin.addSettingTab = () => {};
+  plugin.registerView = () => {}; plugin.addCommand = () => {};
+  let clicked = false; plugin.activateCaptureView = () => { clicked = true; };
+  plugin.addRibbonIcon = (name, label, action) => { icon.setAttribute('aria-label', label); icon.action = action; return icon; };
+  try {
+    await plugin.onload();
+    assert.ok(icon.classes.has('jp-no-tooltip')); assert.equal(icon.getAttribute('aria-label'), 'Spark Memo');
+    icon.action(); assert.ok(clicked);
+  } finally { cleanups.forEach(fn => fn()); }
 });
 
 test('About includes one approved paragraph without a list between version and link buttons', async () => {
@@ -632,6 +724,55 @@ test('About includes one approved paragraph without a list between version and l
     assert.equal(plugin.saved.length, 0);
     assert.equal(root.querySelectorAll('.jp-settings-about-btn').length, 2);
   }
+});
+
+test('random memo heading shares the search dice glyph without adding another random action', async () => {
+  const moment = require('moment');
+  for (const locale of ['zh', 'zh-TW', 'en', 'ja']) {
+    setup(); setLanguage(locale);
+    const view = Object.create(JournalCaptureView.prototype);
+    view.randomMemoBtn = new Element('button'); view.searchInputEl = { value: '' }; view.updateSearchActionBtn();
+    const day = { date: moment('2024-12-09'), el: new Element(), filePath: 'daily/2024-12-09.md', scope: {} };
+    const entry = { timestamp: '14:46', text: 'Memo text', lineIndex: 1 };
+    view.renderEntryBody = async (text, bubble) => { bubble.setText(text); };
+    for (const method of ['applyImageGrid', 'attachImagePreviews', 'renderFileEmbedCards', 'attachTagClickHandlers']) view[method] = () => {};
+    const actions = []; view.currentTab = 'search'; view.switchTab = tab => actions.push(tab);
+    view.renderRandomMemoContent(day, entry); await Promise.resolve();
+    const header = day.el.children[0]; const marker = header.children[0];
+    assert.ok(marker.classes.has('jp-timeline-dot--header')); assert.ok(marker.classes.has('jp-timeline-dot--random'));
+    assert.equal(marker.icon, 'dice'); assert.equal(marker.icon, view.randomMemoBtn.icon);
+    assert.equal(marker.tagName, 'div'); assert.equal(marker.getAttribute('aria-hidden'), 'true');
+    assert.equal(marker.getAttribute('title'), undefined); assert.equal(marker.listeners.click, undefined);
+    assert.equal(day.el.querySelector('.jp-timeline-header-title').textContent, t('search.randomMemoLabel'));
+    const ordinaryDot = day.el.children[1].children[0];
+    assert.ok(ordinaryDot.classes.has('jp-timeline-dot')); assert.ok(!ordinaryDot.classes.has('jp-timeline-dot--random'));
+    assert.equal(ordinaryDot.icon, undefined);
+    const buttons = day.el.querySelectorAll('button'); assert.equal(buttons.length, 1);
+    assert.equal(buttons[0].icon, 'crosshair'); await buttons[0].click();
+    assert.deepEqual(actions, ['capture']); assert.equal(view.currentDate.format('YYYY-MM-DD'), '2024-12-09');
+    view.searchInputEl.value = 'find'; view.updateSearchActionBtn();
+    assert.equal(view.randomMemoBtn.icon, 'x'); assert.equal(marker.icon, 'dice');
+    assert.equal(view.randomMemoBtn.getAttribute('aria-label'), t('search.clearQuery'));
+  }
+});
+test('random heading dice keeps the existing header anchor and matches search icon size with mobile-safe SVG sizing', () => {
+  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const rule = selector => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const found = css.match(new RegExp('(?:^|\\n)' + escaped + '\\s*\\{([^}]+)\\}'));
+    assert.ok(found, selector); return found[1];
+  };
+  const marker = rule('.jp-timeline-dot--random');
+  assert.match(marker, /color:\s*var\(--jp-tl-dot\)/);
+  assert.match(marker, /border:\s*0\s*;/); assert.match(marker, /box-shadow:\s*none\s*;/);
+  assert.ok(!/\b(?:left|top|width|height):/.test(marker)); // Inherit the unchanged header-dot anchor.
+  const svg = rule('.jp-timeline-dot--random svg');
+  const search = rule('.jp-search-bar-random-btn svg');
+  for (const property of ['width', 'height']) {
+    const pattern = new RegExp('(?:^|\\n)\\s*' + property + ':\\s*([^;]+);');
+    assert.equal(svg.match(pattern)[1], search.match(pattern)[1]);
+  }
+  assert.match(svg, /flex:\s*0 0 auto\s*;/);
 });
 
 test('language setting uses only the approved one-sentence scope description', () => {
@@ -676,6 +817,324 @@ test('plugin startup initializes the geocoder without querying locations or writ
     assert.deepEqual(registrations, ['settings', 'capture']);
     cleanups.forEach(fn => fn());
   } finally { obsidian.requestUrl = previousRequest; }
+});
+
+
+// Real composer construction and shared write path under DOM doubles.
+// These establish behavior, not actual Obsidian keyboard dispatch or visual acceptance.
+function composer({ mac = true, mobile = false, ios = false, language = 'en' } = {}) {
+  setup(); setLanguage(language);
+  Object.assign(obsidian.Platform, { isMacOS: mac, isMobile: mobile, isIosApp: ios });
+  const previousMoment = obsidian.moment; obsidian.moment = require('moment');
+  const view = new JournalCaptureView({}, { settings: { ...DEFAULT_SETTINGS } });
+  obsidian.moment = previousMoment;
+  view.app = { scope: { sentinel: 'host-scope' }, metadataCache: { on() {} }, vault: { on() {} } };
+  view.registerEvent = () => {}; view.registerDomEvent = () => {};
+  for (const name of ['renderCaptureTimePill', 'renderLocationPill', 'renderMetadataHintPill', 'renderEditingPill', 'renderAttachmentList', 'autoResizeTextarea']) view[name] = () => {};
+  const root = new Element(); view.buildInputCard(root);
+  return { view, root };
+}
+function keyEvent(view, overrides = {}) {
+  return {
+    target: view.textareaEl, key: 'Enter', metaKey: obsidian.Platform.isMacOS || obsidian.Platform.isIosApp,
+    ctrlKey: !(obsidian.Platform.isMacOS || obsidian.Platform.isIosApp), shiftKey: false, altKey: false,
+    repeat: false, isComposing: false, keyCode: 13, defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; },
+    ...overrides,
+  };
+}
+function textareaKey(view, overrides) {
+  const event = keyEvent(view, overrides);
+  view.textareaEl.listeners.keydown.forEach(fn => fn(event));
+  return event;
+}
+function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
+async function settle() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
+function readyToWrite(view) {
+  const moment = require('moment'); obsidian.moment = moment;
+  view.textareaEl.value = 'A memo'; view.days = [{ date: moment() }];
+  view.fullRebuild = async () => {};
+  view.refreshSubmitState();
+}
+test('composer keycaps follow OS rather than language, hide on mobile, and preserve localized accessibility', () => {
+  for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+    for (const mac of [true, false]) {
+      const { view, root } = composer({ mac, language });
+      const hint = root.querySelector('kbd');
+      assert.equal(hint.textContent, mac ? '⌘ ↵' : 'Ctrl ↵');
+      assert.equal(hint.getAttribute('aria-hidden'), 'true'); assert.equal(hint.getAttribute('title'), undefined);
+      assert.equal(hint.listeners.click, undefined);
+      assert.equal(view.submitBtn.getAttribute('aria-label'), t('capture.submit'));
+      assert.equal(view.submitBtn.getAttribute('aria-keyshortcuts'), mac ? 'Meta+Enter' : 'Control+Enter');
+      const group = root.querySelector('.jp-capture-submit-group');
+      assert.equal(group.children[0], hint); assert.equal(group.children[1], view.submitBtn);
+      assert.equal(view.submitBtn.icon, 'arrow-up'); assert.equal(view.submitBtn.disabled, true);
+    }
+  }
+  for (const ios of [true, false]) {
+    const { root, view } = composer({ mac: false, mobile: true, ios });
+    assert.equal(root.querySelector('kbd'), null);
+    assert.equal(view.submitBtn.getAttribute('aria-keyshortcuts'), ios ? 'Meta+Enter' : 'Control+Enter');
+  }
+});
+test('exact platform chord saves only in composer, including scoped host interception and textarea fallback', () => {
+  for (const mac of [true, false]) {
+    const { view } = composer({ mac }); let saves = 0;
+    view.handleSubmit = async () => { saves++; };
+    const [binding] = view.scope.bindings;
+    assert.equal(view.scope.parent, view.app.scope); assert.deepEqual(plain(binding.modifiers), ['Mod']); assert.equal(binding.key, 'Enter');
+    const event = keyEvent(view);
+    assert.equal(binding.callback(event), false); assert.equal(saves, 1);
+    assert.ok(event.defaultPrevented); assert.ok(event.stopped);
+    // If a host still dispatches the consumed event, the fallback cannot save twice.
+    view.textareaEl.listeners.keydown.forEach(fn => fn(event)); assert.equal(saves, 1);
+    textareaKey(view); assert.equal(saves, 2);
+    for (const overrides of [
+      { target: new Element('textarea') }, { key: 's' }, { metaKey: false, ctrlKey: false },
+      { metaKey: !mac, ctrlKey: mac }, { shiftKey: true }, { altKey: true }, { metaKey: true, ctrlKey: true },
+    ]) assert.equal(binding.callback(keyEvent(view, overrides)), undefined);
+    assert.equal(saves, 2);
+    view.currentTab = 'search'; assert.equal(binding.callback(keyEvent(view)), undefined); assert.equal(saves, 2);
+  }
+});
+test('ordinary Enter keeps newline or suggestion confirmation; save chord never selects a suggestion', () => {
+  const { view } = composer(); let saves = 0, tag = 0, mention = 0;
+  view.handleSubmit = async () => { saves++; };
+  assert.equal(textareaKey(view, { metaKey: false }).defaultPrevented, false); assert.equal(saves, 0);
+  view.selectTagSuggestion = () => { tag++; };
+  view.selectMentionSuggestion = () => { mention++; };
+  view.tagSuggestRange = { start: 0, end: 2 }; view.tagSuggestMatches = ['#tag'];
+  textareaKey(view); assert.equal(saves, 1); assert.equal(tag, 0);
+  textareaKey(view, { metaKey: false }); textareaKey(view, { metaKey: false, key: 'Tab' }); assert.equal(tag, 2);
+  view.mentionSuggestRange = { start: 0, end: 2 }; view.mentionSuggestMatches = [{}];
+  textareaKey(view); assert.equal(saves, 2); assert.equal(mention, 0);
+  textareaKey(view, { metaKey: false }); textareaKey(view, { metaKey: false, key: 'Tab' }); assert.equal(mention, 2);
+});
+test('composition and long-press never submit or accidentally select a suggestion', () => {
+  const { view } = composer(); let saves = 0, selected = 0;
+  view.handleSubmit = async () => { saves++; };
+  view.mentionSuggestRange = { start: 0, end: 2 }; view.mentionSuggestMatches = [{}];
+  view.selectMentionSuggestion = () => { selected++; };
+  for (const override of [{ isComposing: true }, { keyCode: 229 }]) {
+    assert.equal(view.scope.bindings[0].callback(keyEvent(view, override)), undefined);
+    textareaKey(view, override); textareaKey(view, { ...override, metaKey: false });
+  }
+  view.textareaEl.listeners.compositionstart[0]();
+  textareaKey(view); textareaKey(view, { metaKey: false }); assert.equal(saves, 0); assert.equal(selected, 0);
+  view.textareaEl.listeners.compositionend[0]();
+  assert.ok(textareaKey(view, { repeat: true }).defaultPrevented); assert.equal(saves, 0);
+  textareaKey(view); assert.equal(saves, 1); assert.equal(selected, 0);
+});
+test('shared submit rejects empty, recording and composition states without writes', async () => {
+  const { view } = composer(); let writes = 0;
+  view.plugin.writeJournalEntry = async () => { writes++; return false; };
+  await view.handleSubmit(); textareaKey(view); await settle(); assert.equal(writes, 0);
+  view.textareaEl.value = 'A draft'; view.recordingBusy = true; view.refreshSubmitState();
+  assert.equal(view.submitBtn.disabled, true); textareaKey(view); await view.handleSubmit(); assert.equal(writes, 0);
+  view.recordingBusy = false; view.inputComposing = true; await view.handleSubmit(); assert.equal(writes, 0);
+  view.inputComposing = false; view.refreshSubmitState(); assert.equal(view.submitBtn.disabled, false);
+});
+test('keyboard and click share a single write lock, even when input refreshes during saving', async () => {
+  const { view } = composer(); const previousMoment = obsidian.moment;
+  try {
+    readyToWrite(view); const write = deferred(); let calls = 0;
+    view.plugin.writeJournalEntry = async () => { calls++; return write.promise; };
+    textareaKey(view); assert.equal(calls, 1); assert.equal(view.isSubmitting, true);
+    assert.equal(view.submitBtn.disabled, true); assert.equal(view.submitBtn.icon, 'loader-2');
+    view.refreshSubmitState(); assert.equal(view.submitBtn.disabled, true);
+    textareaKey(view); await view.submitBtn.click(); await view.handleSubmit(); assert.equal(calls, 1);
+    write.resolve(true); await settle();
+    assert.equal(view.isSubmitting, false); assert.equal(view.textareaEl.value, '');
+    assert.equal(view.submitBtn.disabled, true); assert.equal(view.submitBtn.icon, 'arrow-up');
+  } finally { obsidian.moment = previousMoment; }
+});
+test('failed writes release the lock and keep the draft available for retry', async () => {
+  for (const throws of [false, true]) {
+    const { view } = composer(); const previousMoment = obsidian.moment;
+    try {
+      readyToWrite(view); let calls = 0;
+      view.plugin.writeJournalEntry = async () => { calls++; if (throws) throw Error('Expected test failure'); return false; };
+      await view.handleSubmit();
+      assert.equal(calls, 1); assert.equal(view.textareaEl.value, 'A memo');
+      assert.equal(view.isSubmitting, false); assert.equal(view.submitBtn.disabled, false); assert.equal(view.submitBtn.icon, 'arrow-up');
+      await view.handleSubmit(); assert.equal(calls, 2);
+    } finally { obsidian.moment = previousMoment; }
+  }
+});
+test('shortcut reuses editing and attachment-only save paths without appending duplicate new memos', async () => {
+  const { view } = composer(); const previousMoment = obsidian.moment;
+  try {
+    readyToWrite(view); view.editingEntry = { sentinel: 'existing memo' };
+    let appended = 0, edited = 0;
+    view.plugin.writeJournalEntry = async () => { appended++; return false; };
+    view.updateEditedEntry = async raw => { edited++; assert.equal(raw, 'A memo'); return true; };
+    textareaKey(view); await settle(); assert.equal(edited, 1); assert.equal(appended, 0); assert.equal(view.editingEntry, null);
+    for (const kind of ['pendingImages', 'pendingAudio', 'pendingFiles']) {
+      const file = { path: 'Attachments/item' };
+      view[kind] = kind === 'pendingAudio' ? [{ file, duration: '00:01' }] : [file];
+      view.textareaEl.value = ''; view.refreshSubmitState(); assert.equal(view.submitBtn.disabled, false);
+      textareaKey(view); await settle(); assert.equal(appended, 1);
+      appended = 0; view[kind] = [];
+    }
+  } finally { obsidian.moment = previousMoment; }
+});
+test('microphone permission and recording finalization block saving until the audio attachment is ready', async () => {
+  const { view } = composer(); view.textareaEl.value = 'Recording draft';
+  const previous = runtimeNavigator.mediaDevices.getUserMedia;
+  try {
+    const permission = deferred(); runtimeNavigator.mediaDevices.getUserMedia = () => permission.promise;
+    const starting = view.startRecordingFn(); assert.equal(view.recordingBusy, true); assert.equal(view.submitBtn.disabled, true);
+    let writes = 0; view.plugin.writeJournalEntry = async () => { writes++; return false; };
+    textareaKey(view); await settle(); assert.equal(writes, 0);
+    permission.resolve({ getTracks: () => [] }); await starting;
+    assert.equal(view.recordingBusy, true);
+    const audio = deferred(); view.saveAudioToVault = () => audio.promise;
+    view.addPendingAudio = file => view.pendingAudio.push({ file, duration: '00:01' });
+    const stopping = TestMediaRecorder.latest.onstop();
+    textareaKey(view); await settle(); assert.equal(writes, 0); assert.equal(view.recordingBusy, true);
+    audio.resolve({ path: 'Audio/recording.webm' }); await stopping;
+    assert.equal(view.recordingBusy, false); assert.equal(view.pendingAudio.length, 1); assert.equal(view.submitBtn.disabled, false);
+  } finally { runtimeNavigator.mediaDevices.getUserMedia = previous; }
+});
+test('microphone permission failure restores save availability', async () => {
+  const { view } = composer(); view.textareaEl.value = 'Draft';
+  await view.startRecordingFn();
+  assert.equal(view.recordingBusy, false); assert.equal(view.submitBtn.disabled, false); assert.equal(view.textareaEl.value, 'Draft');
+});
+test('keycap styling is local, non-interactive, responsive and disappears with recording controls', () => {
+  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  assert.match(css, /\.jp-capture-actions\s*\{[^}]*container-name:\s*jp-composer-actions/s);
+  assert.match(css, /@container jp-composer-actions \(max-width: 260px\)\s*\{\s*\.jp-capture-submit-shortcut\s*\{\s*display:\s*none/s);
+  assert.match(css, /\.jp-capture-submit-shortcut\s*\{[^}]*background:\s*var\(--background-secondary\)[^}]*pointer-events:\s*none/s);
+  assert.match(css, /\.jp-capture-actions\.is-recording \.jp-capture-submit-group\s*\{\s*display:\s*none/s);
+});
+
+
+
+test('every random prompt is translated in all four languages and preserves the 10/8 pools', () => {
+  const inputKeys = JournalCaptureView.INPUT_PLACEHOLDERS;
+  const locationKeys = JournalCaptureView.LOCATION_EMPTY_PLACEHOLDERS;
+  assert.equal(inputKeys.length, 10); assert.equal(locationKeys.length, 8);
+  assert.equal(new Set(inputKeys).size, 10); assert.equal(new Set(locationKeys).size, 8);
+  const english = new Map(); setLanguage('en');
+  assert.deepEqual(plain(inputKeys.map(key => t(key))), [
+    "What's happening?", "What's on your mind?", "What's going on?", 'Got something to jot down?',
+    'What just happened?', 'Anything worth remembering?', 'What are you up to?', 'Say something.',
+    "What's new?", 'Write it down before it slips away.',
+  ]);
+  assert.deepEqual(plain(locationKeys.map(key => t(key))), [
+    'No footprints on the map yet.', 'Not a single place has found you yet.', 'The map is still blank — for now.',
+    'Somewhere, someday. Just not yet.', 'Your atlas is waiting to be written.', 'No dots on the map. No stories to tell.',
+    "The world hasn't left a mark here yet.", 'Still waiting for your first coordinate.',
+  ]);
+  for (const key of [...inputKeys, ...locationKeys]) english.set(key, t(key));
+  const originalRandom = runtimeMath.random;
+  try {
+    for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+      const { view } = composer({ language });
+      for (const [keys, picker] of [[inputKeys, 'pickRandomPlaceholder'], [locationKeys, 'pickRandomLocationEmptyPlaceholder']]) {
+        for (let i = 0; i < keys.length; i++) {
+          runtimeMath.random = () => (i + 0.5) / keys.length;
+          const text = view[picker](); assert.equal(text, t(keys[i])); assert.notEqual(text, keys[i]);
+          if (language !== 'en') assert.notEqual(text, english.get(keys[i]), `${language}:${keys[i]}`);
+        }
+      }
+    }
+    setLanguage('zh'); assert.equal(t(inputKeys[4]), '刚刚发生了什么？'); assert.equal(t('search.randomMemoLabel'), '随机 Memo');
+    setLanguage('zh-TW'); assert.equal(t(inputKeys[4]), '剛剛發生了什麼？');
+    setLanguage('ja'); assert.equal(t(inputKeys[4]), '今、何がありましたか？');
+    setLanguage('en'); assert.equal(t(inputKeys[4]), 'What just happened?');
+  } finally { runtimeMath.random = originalRandom; }
+});
+test('creation, successful save and edit cancellation select prompts in the current plugin language', async () => {
+  const originalRandom = runtimeMath.random, previousMoment = obsidian.moment;
+  try {
+    for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+      runtimeMath.random = () => 0;
+      const { view } = composer({ language });
+      assert.equal(view.textareaEl.getAttribute('placeholder'), t(JournalCaptureView.INPUT_PLACEHOLDERS[0]));
+      readyToWrite(view); view.plugin.writeJournalEntry = async () => true;
+      runtimeMath.random = () => 0.45;
+      await view.handleSubmit(); assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[4]));
+      view.editingEntry = { sentinel: 'edit' }; view.textareaEl.value = 'Edited memo';
+      view.updateEditedEntry = async () => true; runtimeMath.random = () => 0.65;
+      await view.handleSubmit(); assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[6]));
+      view.editingEntry = { sentinel: 'edit' }; view.textareaEl.value = 'Draft';
+      runtimeMath.random = () => 0.95; view.cancelEdit();
+      assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[9]));
+      assert.equal(view.textareaEl.value, ''); assert.equal(view.editingEntry, null);
+    }
+  } finally { runtimeMath.random = originalRandom; obsidian.moment = previousMoment; }
+});
+test('empty location list uses localized random messages without lookup requests', () => {
+  const originalRandom = runtimeMath.random;
+  try {
+    for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+      const { view } = composer({ language });
+      view.timelineEl = new Element(); view.locationTitleEl = new Element(); view.locationIndex = new Map();
+      for (let i = 0; i < 8; i++) {
+        runtimeMath.random = () => (i + 0.5) / 8; view.renderLocationList();
+        assert.equal(view.timelineEl.querySelector('.jp-capture-empty').textContent, t(JournalCaptureView.LOCATION_EMPTY_PLACEHOLDERS[i]));
+        assert.equal(view.locationIndex.size, 0);
+      }
+    }
+  } finally { runtimeMath.random = originalRandom; }
+});
+test('language changes affect the next prompt pick without clearing draft, attachments or edit state', () => {
+  const originalRandom = runtimeMath.random;
+  try {
+    runtimeMath.random = () => 0.45;
+    const { view } = composer({ language: 'en' });
+    view.textareaEl.value = 'User content stays unchanged';
+    const image = { path: '照片/photo.png' }, edit = { sentinel: 'editing' };
+    view.pendingImages = [image]; view.editingEntry = edit;
+    setLanguage('ja');
+    assert.equal(view.pickRandomPlaceholder(), t(JournalCaptureView.INPUT_PLACEHOLDERS[4]));
+    assert.equal(view.textareaEl.value, 'User content stays unchanged'); assert.equal(view.pendingImages[0], image); assert.equal(view.editingEntry, edit);
+  } finally { runtimeMath.random = originalRandom; }
+});
+test('random prompts follow Obsidian aliases when no manual plugin language is selected', () => {
+  const originalRandom = runtimeMath.random;
+  try {
+    const { view } = composer(); runtimeMath.random = () => 0.45;
+    setLanguage('system');
+    for (const [host, expected] of [['zh-CN', '刚刚发生了什么？'], ['zh-Hant-HK', '剛剛發生了什麼？'], ['ja-JP', '今、何がありましたか？'], ['fr', 'What just happened?']]) {
+      hostLanguage = host; assert.equal(view.pickRandomPlaceholder(), expected);
+    }
+  } finally { runtimeMath.random = originalRandom; }
+});
+test('image preview failures use localized explanations and preserve external error details', async () => {
+  const { ImagePreviewModal } = loaded.exports;
+  try {
+    for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+      setLanguage(language); const modal = new ImagePreviewModal({}, 'blob:test');
+      previewDecodeFails = true;
+      await assert.rejects(modal.toPng(new Blob(['image'])), error => error.message === t('preview.errorDecodeFailed'));
+      previewDecodeFails = false; previewCanvas = { getContext: () => null };
+      await assert.rejects(modal.toPng(new Blob(['image'])), error => error.message === t('preview.errorCanvasUnavailable'));
+      previewCanvas = { getContext: () => ({ drawImage() {} }), toBlob: fn => fn(null) };
+      await assert.rejects(modal.toPng(new Blob(['image'])), error => error.message === t('preview.errorEncodeFailed'));
+      notices.length = 0; await modal.copyCurrentImageLink();
+      assert.ok(notices.at(-1).includes(t('preview.errorNoVaultPath'))); assert.ok(!notices.at(-1).includes('no vault path'));
+      modal.currentBlob = async () => { throw 'EXTERNAL_IMAGE_FAILURE_421'; };
+      await modal.copyCurrentImage();
+      assert.ok(notices.at(-1).includes('EXTERNAL_IMAGE_FAILURE_421'));
+      assert.ok(notices.at(-1).includes(t('notice.imageCopyFailed', { error: 'EXTERNAL_IMAGE_FAILURE_421' }).replace(/^❌\s*/, '')));
+    }
+  } finally { previewDecodeFails = false; previewCanvas = null; }
+});
+test('Craftian exceptions include a translated operation message and retain the original external detail', async () => {
+  const { SendToMyClaudianModal } = loaded.exports;
+  for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+    setLanguage(language); notices.length = 0;
+    const modal = new SendToMyClaudianModal({}, { text: '原始 Memo', date: '2026-01-01', timestamp: '12:00', notePath: null });
+    modal.app = { plugins: { plugins: { myclaudian: { async sendFromPlugin() { throw 'EXTERNAL_CRAFTIAN_FAILURE_422'; } } } } };
+    modal.inputEl = new Element('textarea'); modal.sendBtn = new Element('button');
+    await modal.send('指令正文不改');
+    assert.ok(notices.at(-1).includes(t('myclaudian.sendError', { error: 'EXTERNAL_CRAFTIAN_FAILURE_422' }).replace(/^❌\s*/, '')));
+    assert.ok(notices.at(-1).includes('EXTERNAL_CRAFTIAN_FAILURE_422'));
+    assert.equal(modal.sendBtn.disabled, false); assert.equal(modal.sendBtn.textContent, t('myclaudian.send'));
+  }
 });
 
 })().catch(error => { console.error(error); process.exitCode = 1; });

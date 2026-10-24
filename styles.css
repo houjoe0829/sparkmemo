@@ -831,10 +831,39 @@
   50% { opacity: 1; }
 }
 .jp-capture-actions {
+  container-type: inline-size;
+  container-name: jp-composer-actions;
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-top: 10px;
+}
+/* Non-interactive keycap hint, scoped to this composer's action row. */
+.jp-capture-submit-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.jp-capture-submit-shortcut {
+  display: inline-block;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  box-shadow: none;
+  font-family: var(--font-interface);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+@container jp-composer-actions (max-width: 260px) {
+  .jp-capture-submit-shortcut { display: none; }
+}
+.jp-capture-actions.is-recording .jp-capture-submit-group {
+  display: none;
 }
 /* Circular icon submit button — filled/accent when there's content to send,
    flat/muted when the input is empty. */
@@ -1066,6 +1095,25 @@
   background: var(--jp-tl-dot);
   border: 3px solid var(--background-primary);
   box-shadow: 0 0 0 2px var(--jp-tl-dot);
+}
+/* Random memo uses the same dice glyph as the search-bar action.
+   Retain the header marker's existing size and rail alignment. */
+.jp-timeline-dot--random {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-tl-dot);
+  background: var(--background-primary);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.jp-timeline-dot--random svg {
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  flex: 0 0 auto;
 }
 .jp-timeline-header-card {
   padding: 0 0 4px 2px;

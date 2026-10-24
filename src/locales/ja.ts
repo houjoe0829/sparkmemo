@@ -290,7 +290,31 @@ const dictionary: TranslationDictionary = {
   "stats.cellTitleNoData": "{{date}} · 記録なし",
   "myclaudian.suggestion.extend": "この考えをさらに広げる",
   "myclaudian.suggestion.question": "この考えについて質問する",
-  "myclaudian.suggestion.connect": "保管庫から関連する考えを探す"
+  "myclaudian.suggestion.connect": "保管庫から関連する考えを探す",
+  "capture.placeholder.happening": "今、何が起きていますか？",
+  "capture.placeholder.onYourMind": "何を考えていますか？",
+  "capture.placeholder.goingOn": "最近どうですか？",
+  "capture.placeholder.jotDown": "何か書き留めますか？",
+  "capture.placeholder.justHappened": "今、何がありましたか？",
+  "capture.placeholder.worthRemembering": "覚えておきたいことはありますか？",
+  "capture.placeholder.upTo": "今、何をしていますか？",
+  "capture.placeholder.saySomething": "ひとこと書いてみましょう。",
+  "capture.placeholder.whatsNew": "何か新しいことはありますか？",
+  "capture.placeholder.beforeItFades": "忘れる前に、書き留めましょう。",
+  "location.emptyPlaceholder.noFootprints": "地図にはまだ足跡がありません。",
+  "location.emptyPlaceholder.noPlaceYet": "まだ場所が記録されていません。",
+  "location.emptyPlaceholder.blankMap": "地図は、今はまだ白紙です。",
+  "location.emptyPlaceholder.somewhereSomeday": "いつか、どこかで。まだこれからです。",
+  "location.emptyPlaceholder.waitingForStories": "あなたの地図は、記録を待っています。",
+  "location.emptyPlaceholder.noDots": "地図にはまだ点も、物語もありません。",
+  "location.emptyPlaceholder.noMarkYet": "ここにはまだ日々の跡が残っていません。",
+  "location.emptyPlaceholder.firstCoordinate": "最初の座標が記されるのを待っています。",
+  "notice.dailyNoteCreationFailed": "デイリーノートを作成できませんでした。",
+  "preview.errorNoVaultPath": "この画像には保管庫内のファイルパスがありません。",
+  "preview.errorDecodeFailed": "この画像を読み込めませんでした。",
+  "preview.errorCanvasUnavailable": "現在、画像を変換できません。",
+  "preview.errorEncodeFailed": "この画像を PNG に変換できませんでした。",
+  "myclaudian.sendError": "❌ Craftian に送信できませんでした：{{error}}"
 };
 
 export default dictionary;

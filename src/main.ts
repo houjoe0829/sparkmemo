@@ -72,7 +72,8 @@ export default class SparkMemoPlugin extends Plugin {
       name: t('command.openCaptureView'),
       callback: () => void this.activateCaptureView(),
     });
-    this.addRibbonIcon('sparkle', t('ribbon.captureView'), () => void this.activateCaptureView());
+    this.addRibbonIcon('sparkle', t('ribbon.captureView'), () => void this.activateCaptureView())
+      .addClass('jp-no-tooltip');
   }
 
   /**
@@ -148,7 +149,7 @@ export default class SparkMemoPlugin extends Plugin {
       if (!file) {
         const created: unknown = await createDailyNote(day);
         if (!(created instanceof TFile)) {
-          throw new Error('createDailyNote did not return a TFile');
+          throw new Error(t('notice.dailyNoteCreationFailed'));
         }
         file = created;
       }

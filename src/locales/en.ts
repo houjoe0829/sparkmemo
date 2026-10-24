@@ -288,7 +288,31 @@ const en = {
   "stats.cellTitleNoData": "{{date}} · not written",
   "myclaudian.suggestion.extend": "Explore this thought further",
   "myclaudian.suggestion.question": "Ask me about this thought",
-  "myclaudian.suggestion.connect": "Find related thoughts in my vault"
+  "myclaudian.suggestion.connect": "Find related thoughts in my vault",
+  "capture.placeholder.happening": "What's happening?",
+  "capture.placeholder.onYourMind": "What's on your mind?",
+  "capture.placeholder.goingOn": "What's going on?",
+  "capture.placeholder.jotDown": "Got something to jot down?",
+  "capture.placeholder.justHappened": "What just happened?",
+  "capture.placeholder.worthRemembering": "Anything worth remembering?",
+  "capture.placeholder.upTo": "What are you up to?",
+  "capture.placeholder.saySomething": "Say something.",
+  "capture.placeholder.whatsNew": "What's new?",
+  "capture.placeholder.beforeItFades": "Write it down before it slips away.",
+  "location.emptyPlaceholder.noFootprints": "No footprints on the map yet.",
+  "location.emptyPlaceholder.noPlaceYet": "Not a single place has found you yet.",
+  "location.emptyPlaceholder.blankMap": "The map is still blank — for now.",
+  "location.emptyPlaceholder.somewhereSomeday": "Somewhere, someday. Just not yet.",
+  "location.emptyPlaceholder.waitingForStories": "Your atlas is waiting to be written.",
+  "location.emptyPlaceholder.noDots": "No dots on the map. No stories to tell.",
+  "location.emptyPlaceholder.noMarkYet": "The world hasn't left a mark here yet.",
+  "location.emptyPlaceholder.firstCoordinate": "Still waiting for your first coordinate.",
+  "notice.dailyNoteCreationFailed": "Could not create the daily note.",
+  "preview.errorNoVaultPath": "This image has no vault file path.",
+  "preview.errorDecodeFailed": "Could not decode this image.",
+  "preview.errorCanvasUnavailable": "Image conversion is unavailable.",
+  "preview.errorEncodeFailed": "Could not convert this image to PNG.",
+  "myclaudian.sendError": "❌ Failed to send to Craftian: {{error}}"
 };
 
 export type TranslationKey = keyof typeof en;

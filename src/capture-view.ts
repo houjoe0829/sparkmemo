@@ -23,6 +23,7 @@ import {
   Menu,
   Modal,
   Platform,
+  Scope,
   TFile,
   WorkspaceLeaf,
   getAllTags,
@@ -83,6 +84,7 @@ import {
 } from './stats';
 import type SparkMemoPlugin from './main';
 import { t, currentLocale } from './i18n';
+import type { TranslationKey } from './locales/en';
 import { LANGUAGE_PROFILES } from './languages';
 import { notice } from './notice';
 import { isMyClaudianAvailable } from './myclaudian-bridge';
@@ -248,6 +250,11 @@ export class JournalCaptureView extends ItemView {
   private mentionSuggestMatches: TFile[] = [];
   private mentionSuggestIndex = 0;
   private submitBtn!: HTMLButtonElement;
+  /** Shared by mouse and keyboard submission, including asynchronous writes. */
+  private isSubmitting = false;
+  /** Includes microphone permission, recording and the final attachment/transcript flush. */
+  private recordingBusy = false;
+  private inputComposing = false;
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
   private locationPillEl!: HTMLElement;
@@ -425,7 +432,7 @@ export class JournalCaptureView extends ItemView {
   async onOpen(): Promise<void> {
     const root = this.containerEl.children[1];
     root.empty();
-    root.addClass('jp-capture-root');
+    root.addClass('jp-capture-root', 'jp-no-tooltip');
 
     // Top-level tab bar — switches between "Quick capture" and "Yearly stats".
     this.buildTabBar(root as HTMLElement);
@@ -594,7 +601,7 @@ export class JournalCaptureView extends ItemView {
 
     this.tagAggBackBtn = this.tagAggBarEl.createEl('button', {
       cls: 'jp-location-back-btn',
-      attr: { 'aria-label': t('tag.backToList'), title: t('tag.backToList') },
+      attr: { 'aria-label': t('tag.backToList') },
     });
     setIcon(this.tagAggBackBtn, 'arrow-left');
     this.tagAggBackBtn.classList.add('is-hidden');
@@ -628,7 +635,7 @@ export class JournalCaptureView extends ItemView {
 
     this.tagSearchBtn = this.tagAggBarEl.createEl('button', {
       cls: 'jp-location-view-btn jp-tag-search-btn',
-      attr: { 'aria-label': t('tag.search'), title: t('tag.search') },
+      attr: { 'aria-label': t('tag.search') },
     });
     setIcon(this.tagSearchBtn, 'search');
     this.tagSearchBtn.addEventListener('click', () => {
@@ -642,7 +649,7 @@ export class JournalCaptureView extends ItemView {
 
     this.locationBackBtn = this.locationBarEl.createEl('button', {
       cls: 'jp-location-back-btn',
-      attr: { 'aria-label': t('location.backToList'), title: t('location.backToList') },
+      attr: { 'aria-label': t('location.backToList') },
     });
     setIcon(this.locationBackBtn, 'arrow-left');
     this.locationBackBtn.classList.add('is-hidden');
@@ -655,24 +662,24 @@ export class JournalCaptureView extends ItemView {
     this.locationViewToggleEl = this.locationBarEl.createDiv({ cls: 'jp-location-view-toggle' });
     this.locationMapBtn = this.locationViewToggleEl.createEl('button', {
       cls: 'jp-location-view-btn is-active',
-      attr: { 'aria-label': t('location.viewMap'), title: t('location.viewMap') },
+      attr: { 'aria-label': t('location.viewMap') },
     });
     setIcon(this.locationMapBtn, 'map');
     this.locationMapBtn.addEventListener('click', () => this.setLocationViewMode('map'));
 
     this.locationListBtn = this.locationViewToggleEl.createEl('button', {
       cls: 'jp-location-view-btn',
-      attr: { 'aria-label': t('location.viewList'), title: t('location.viewList') },
+      attr: { 'aria-label': t('location.viewList') },
     });
     setIcon(this.locationListBtn, 'list');
     this.locationListBtn.addEventListener('click', () => this.setLocationViewMode('list'));
   }
 
   /** Build one icon-only tab button. */
-  private makeTabBtn(icon: string, active: boolean, tooltip?: string): HTMLButtonElement {
+  private makeTabBtn(icon: string, active: boolean, accessibleName?: string): HTMLButtonElement {
     const btn = this.tabBarEl.createEl('button', {
       cls: 'jp-tab-btn' + (active ? ' is-active' : ''),
-      attr: tooltip ? { 'aria-label': tooltip, title: tooltip } : {},
+      attr: accessibleName ? { 'aria-label': accessibleName } : {},
     });
     const iconEl = btn.createSpan({ cls: 'jp-tab-btn-icon' });
     setIcon(iconEl, icon);
@@ -1031,7 +1038,7 @@ export class JournalCaptureView extends ItemView {
    * long one can swamp the memo it belongs to. Only that case is rewritten:
    * a link the user gave a label to (`[title](url)`) already reads short and
    * is left alone. The href is untouched, so clicking still goes where it
-   * always did, and the full address stays reachable on hover.
+   * always did, and the full address remains its accessible name.
    */
   private shortenBareLinks(bubble: HTMLElement) {
     for (const a of Array.from(bubble.querySelectorAll('a'))) {
@@ -1048,7 +1055,6 @@ export class JournalCaptureView extends ItemView {
       if (!host) continue;
       a.setText(host);
       a.addClass('jp-short-link');
-      a.setAttr('title', href);
       a.setAttr('aria-label', href);
     }
   }
@@ -1257,38 +1263,39 @@ export class JournalCaptureView extends ItemView {
   }
 
 
+  // Store translation keys, not rendered strings: every pick uses the current language.
   private static readonly INPUT_PLACEHOLDERS = [
-    "What's happening?",
-    "What's on your mind?",
-    "What's going on?",
-    'Got something to jot down?',
-    'What just happened?',
-    'Anything worth remembering?',
-    'What are you up to?',
-    'Say something.',
-    "What's new?",
-    "Write it down before it slips away.",
-  ];
+    'capture.placeholder.happening',
+    'capture.placeholder.onYourMind',
+    'capture.placeholder.goingOn',
+    'capture.placeholder.jotDown',
+    'capture.placeholder.justHappened',
+    'capture.placeholder.worthRemembering',
+    'capture.placeholder.upTo',
+    'capture.placeholder.saySomething',
+    'capture.placeholder.whatsNew',
+    'capture.placeholder.beforeItFades',
+  ] as const satisfies readonly TranslationKey[];
 
   private pickRandomPlaceholder(): string {
     const pool = JournalCaptureView.INPUT_PLACEHOLDERS;
-    return pool[Math.floor(Math.random() * pool.length)];
+    return t(pool[Math.floor(Math.random() * pool.length)]);
   }
 
   private static readonly LOCATION_EMPTY_PLACEHOLDERS = [
-    'No footprints on the map yet.',
-    'Not a single place has found you yet.',
-    'The map is still blank — for now.',
-    'Somewhere, someday. Just not yet.',
-    'Your atlas is waiting to be written.',
-    'No dots on the map. No stories to tell.',
-    "The world hasn't left a mark here yet.",
-    'Still waiting for your first coordinate.',
-  ];
+    'location.emptyPlaceholder.noFootprints',
+    'location.emptyPlaceholder.noPlaceYet',
+    'location.emptyPlaceholder.blankMap',
+    'location.emptyPlaceholder.somewhereSomeday',
+    'location.emptyPlaceholder.waitingForStories',
+    'location.emptyPlaceholder.noDots',
+    'location.emptyPlaceholder.noMarkYet',
+    'location.emptyPlaceholder.firstCoordinate',
+  ] as const satisfies readonly TranslationKey[];
 
   private pickRandomLocationEmptyPlaceholder(): string {
     const pool = JournalCaptureView.LOCATION_EMPTY_PLACEHOLDERS;
-    return pool[Math.floor(Math.random() * pool.length)];
+    return t(pool[Math.floor(Math.random() * pool.length)]);
   }
 
   private buildInputCard(root: HTMLElement) {
@@ -1354,7 +1361,12 @@ export class JournalCaptureView extends ItemView {
         this.closeMentionSuggest();
       }, 0);
     });
+    this.textareaEl.addEventListener('compositionstart', () => { this.inputComposing = true; });
+    this.textareaEl.addEventListener('compositionend', () => { this.inputComposing = false; });
     this.textareaEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      // IME confirmation must never save or select a tag/note suggestion.
+      if (e.isComposing || this.inputComposing || e.keyCode === 229) return;
+      if (this.handleSubmitShortcut(e)) return;
       // Mention popup takes priority when both would otherwise react, since
       // the two triggers ('#' and '@') can never be active at the same time.
       if (this.mentionSuggestRange) {
@@ -1787,6 +1799,7 @@ export class JournalCaptureView extends ItemView {
     };
 
     const startRecording = async () => {
+      if (this.isSubmitting || this.recordingBusy) return;
       if (this.pendingImages.length > 0) {
         notice(t('notice.imageAddedNoRecording'));
         return;
@@ -1799,6 +1812,8 @@ export class JournalCaptureView extends ItemView {
         notice(t('notice.maxOneRecording'));
         return;
       }
+      this.recordingBusy = true;
+      this.refreshSubmitState();
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
@@ -1870,6 +1885,8 @@ export class JournalCaptureView extends ItemView {
             recBar.removeClass('jp-bar-entering');
             recBar.hide();
             actions.removeClass('is-recording');
+            this.recordingBusy = false;
+            this.refreshSubmitState();
           }
         };
 
@@ -1934,6 +1951,8 @@ export class JournalCaptureView extends ItemView {
           notice(t('notice.recordingAutoStopped'));
         }, 5 * 60 * 1000);
       } catch (err) {
+        this.recordingBusy = false;
+        this.refreshSubmitState();
         notice(t('notice.micAccessFailed', { error: err instanceof Error ? err.message : String(err) }));
       }
     };
@@ -2100,12 +2119,31 @@ export class JournalCaptureView extends ItemView {
     // processing) doesn't lose the offer permanently.
     this.metadataHintPillEl = this.topPillRowEl.createDiv({ cls: 'jp-capture-time-pill jp-location-pill--hidden' });
 
-    this.submitBtn = actions.createEl('button', {
+    const submitGroup = actions.createDiv({ cls: 'jp-capture-submit-group' });
+    if (!Platform.isMobile) {
+      submitGroup.createEl('kbd', {
+        cls: 'jp-capture-submit-shortcut',
+        text: Platform.isMacOS ? '⌘ ↵' : 'Ctrl ↵',
+        attr: { 'aria-hidden': 'true' },
+      });
+    }
+    this.submitBtn = submitGroup.createEl('button', {
       cls: 'jp-capture-submit',
+      attr: {
+        'aria-label': t('capture.submit'),
+        'aria-keyshortcuts': Platform.isMacOS || Platform.isIosApp ? 'Meta+Enter' : 'Control+Enter',
+      },
     });
     setIcon(this.submitBtn, 'arrow-up');
     this.submitBtn.addEventListener('click', () => {
       void this.handleSubmit();
+    });
+
+    // The view scope handles the key before inherited Obsidian hotkeys.
+    // A textarea-only fallback above also works when no host scope is active.
+    this.scope = new Scope(this.app.scope);
+    this.scope.register(['Mod'], 'Enter', (e) => {
+      if (this.handleSubmitShortcut(e)) return false;
     });
 
     this.refreshSubmitState();
@@ -3222,13 +3260,29 @@ export class JournalCaptureView extends ItemView {
 
   // ── Behaviour ───────────────────────────────────────────────────────────
 
+  /** Consume only this composer's exact platform save chord, never a global key. */
+  private handleSubmitShortcut(e: KeyboardEvent): boolean {
+    if (e.target !== this.textareaEl || this.currentTab !== 'capture'
+      || e.key !== 'Enter' || e.shiftKey || e.altKey
+      || e.isComposing || this.inputComposing || e.keyCode === 229) return false;
+    const apple = Platform.isMacOS || Platform.isIosApp;
+    if (apple ? (!e.metaKey || e.ctrlKey) : (!e.ctrlKey || e.metaKey)) return false;
+    if (e.defaultPrevented) return true;
+    e.preventDefault();
+    e.stopPropagation();
+    // Ignore auto-repeat; handleSubmit itself protects in-flight writes.
+    if (!e.repeat) void this.handleSubmit();
+    return true;
+  }
+
   private refreshSubmitState() {
     const hasContent = this.textareaEl.value.trim().length > 0
       || this.pendingImages.length > 0
       || this.pendingAudio.length > 0
       || this.pendingFiles.length > 0;
-    this.submitBtn.toggleClass('jp-capture-submit--disabled', !hasContent);
-    this.submitBtn.disabled = !hasContent;
+    const disabled = !hasContent || this.isSubmitting || this.recordingBusy;
+    this.submitBtn.toggleClass('jp-capture-submit--disabled', disabled);
+    this.submitBtn.disabled = disabled;
   }
 
   private autoResizeTextarea() {
@@ -3679,44 +3733,11 @@ export class JournalCaptureView extends ItemView {
       this.days.push(day);
     }
 
-    this.renderBottomDayNav();
     this.updateDayNavState();
 
     // Land on the top of the day (its date header) rather than wherever the
     // previous day happened to leave the scroll position.
     if (this.timelineScrollEl) this.timelineScrollEl.scrollTop = 0;
-  }
-
-  /**
-   * Bottom-of-timeline nudge to the previous day — stands in for the old
-   * infinite-scroll-loads-older-days behaviour, now that only one day is
-   * shown at a time.
-   */
-  private renderBottomDayNav() {
-    const today = moment().startOf('day');
-    const atLookbackFloor = today.diff(this.currentDate, 'days') >= this.maxLookbackDays;
-    const isToday = this.currentDate.isSame(today, 'day');
-
-    const row = this.timelineEl.createDiv({ cls: 'jp-timeline-bottom-nav-row' });
-
-    if (!atLookbackFloor) {
-      const prevEl = row.createDiv({ cls: 'jp-timeline-bottom-nav' });
-      const icon = prevEl.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
-      setIcon(icon, 'chevron-down');
-      prevEl.createSpan({ text: t('capture.viewPrevDay') });
-      prevEl.addEventListener('click', () => this.navigateDay(-1));
-    }
-
-    if (!isToday) {
-      const todayEl = row.createDiv({ cls: 'jp-timeline-bottom-nav jp-timeline-bottom-nav-today' });
-      const icon = todayEl.createSpan({ cls: 'jp-timeline-bottom-nav-icon' });
-      setIcon(icon, 'calendar-check');
-      todayEl.createSpan({ text: t('capture.backToToday') });
-      todayEl.addEventListener('click', () => {
-        this.currentDate = moment().startOf('day');
-        void this.fullRebuild();
-      });
-    }
   }
 
   /**
@@ -4365,7 +4386,7 @@ export class JournalCaptureView extends ItemView {
       const tsEl = head.createEl('span', {
         cls: 'jp-timestamp jp-location-jump',
         text: entry.timestamp,
-        attr: { 'aria-label': t('capture.jumpToSource'), title: t('capture.jumpToSource') },
+        attr: { 'aria-label': t('capture.jumpToSource') },
       });
       tsEl.addEventListener('click', () => void this.openEntryAtLine(sourcePath, entry));
       const { text: bodyText, location } = extractLocationTag(entry.text);
@@ -4974,7 +4995,7 @@ export class JournalCaptureView extends ItemView {
       const tsEl = head.createEl('span', {
         cls: 'jp-timestamp jp-location-jump',
         text: entry.timestamp,
-        attr: { 'aria-label': t('capture.jumpToSource'), title: t('capture.jumpToSource') },
+        attr: { 'aria-label': t('capture.jumpToSource') },
       });
       tsEl.addEventListener('click', () => void this.openEntryAtLine(sourcePath, entry));
       const { text: bodyText, location } = extractLocationTag(entry.text);
@@ -5091,7 +5112,6 @@ export class JournalCaptureView extends ItemView {
     this.randomMemoBtn.empty();
     setIcon(this.randomMemoBtn, hasQuery ? 'x' : 'dice');
     this.randomMemoBtn.setAttr('aria-label', label);
-    this.randomMemoBtn.setAttr('title', label);
   }
 
   /** Clear the query and return the search tab to its empty state. */
@@ -5185,13 +5205,17 @@ export class JournalCaptureView extends ItemView {
   /** Render a single randomly-picked entry. Re-roll lives in the search bar's dice button, not here. */
   private renderRandomMemoContent(day: DaySection, entry: JournalEntry) {
     const headerRow = day.el.createDiv({ cls: 'jp-timeline-entry jp-timeline-entry--header' });
-    headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
+    const randomIcon = headerRow.createDiv({
+      cls: 'jp-timeline-dot jp-timeline-dot--header jp-timeline-dot--random',
+      attr: { 'aria-hidden': 'true' },
+    });
+    setIcon(randomIcon, 'dice');
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
     headerText.createEl('div', { cls: 'jp-timeline-header-title', text: t('search.randomMemoLabel') });
     const jumpBtn = headerCard.createEl('button', {
       cls: 'jp-timeline-open-btn',
-      attr: { 'aria-label': t('capture.jumpToDay'), title: t('capture.jumpToDay') },
+      attr: { 'aria-label': t('capture.jumpToDay') },
     });
     setIcon(jumpBtn, 'crosshair');
     jumpBtn.addEventListener('click', () => {
@@ -5652,7 +5676,7 @@ export class JournalCaptureView extends ItemView {
     if (!day.filePath) return;
     const btn = headerCard.createEl('button', {
       cls: 'jp-timeline-open-btn',
-      attr: { 'aria-label': t('capture.jumpToDay'), title: t('capture.jumpToDay') },
+      attr: { 'aria-label': t('capture.jumpToDay') },
     });
     setIcon(btn, 'crosshair');
     btn.addEventListener('click', () => {
@@ -5950,6 +5974,7 @@ export class JournalCaptureView extends ItemView {
   // ── Submit / write path ─────────────────────────────────────────────────
 
   private async handleSubmit(): Promise<void> {
+    if (this.isSubmitting || this.recordingBusy || this.inputComposing) return;
     const text = this.textareaEl.value;
     if (
       text.trim().length === 0
@@ -5977,6 +6002,7 @@ export class JournalCaptureView extends ItemView {
       return;
     }
 
+    this.isSubmitting = true;
     this.submitBtn.disabled = true;
     this.submitBtn.addClass('jp-capture-submit--disabled');
     this.submitBtn.addClass('jp-capture-submit--loading');
@@ -6063,6 +6089,7 @@ export class JournalCaptureView extends ItemView {
       console.error('[Spark Memo] submit failed', err);
       notice(t('notice.writeFailed', { error: err instanceof Error ? err.message : String(err) }));
     } finally {
+      this.isSubmitting = false;
       this.submitBtn.removeClass('jp-capture-submit--loading');
       setIcon(this.submitBtn, 'arrow-up');
       this.refreshSubmitState();
@@ -6256,6 +6283,7 @@ class ImageMetadataConfirmModal extends Modal {
     resolvingLocationName = false,
   ) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.opts = opts;
     this.resolve = resolve;
     this.location = opts.location;
@@ -6397,6 +6425,7 @@ class DeleteConfirmModal extends Modal {
 
   constructor(app: import('obsidian').App, opts: DeleteConfirmOptions) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.opts = opts;
   }
 
@@ -6476,6 +6505,7 @@ class TagRenameModal extends Modal {
 
   constructor(app: import('obsidian').App, currentName: string, onSubmit: (newName: string) => void) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.currentName = currentName;
     this.onSubmit = onSubmit;
   }
@@ -6534,6 +6564,7 @@ class TagPickerModal extends FuzzySuggestModal<string> {
 
   constructor(app: import('obsidian').App, items: string[], mode: 'move' | 'merge', private onChoose: (item: string) => void) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.items = items;
     this.setPlaceholder(mode === 'move' ? t('tag.manage.movePlaceholder') : t('tag.manage.mergePlaceholder'));
   }
@@ -6563,6 +6594,7 @@ class TagDeleteConfirmModal extends Modal {
 
   constructor(app: import('obsidian').App, opts: TagDeleteConfirmModal['opts']) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.opts = opts;
   }
 
@@ -6628,6 +6660,7 @@ class CalendarPickerModal extends Modal {
     private onPick: (date: moment.Moment) => void,
   ) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     this.viewMonth = selected.clone().startOf('month');
   }
 
@@ -6752,6 +6785,7 @@ class ImagePreviewModal extends Modal {
     startIndexOrAlt: number | string = 0,
   ) {
     super(app);
+    this.modalEl.addClass('jp-no-tooltip');
     // Backwards-compatible: single string + alt still works.
     if (typeof itemsOrSrc === 'string') {
       this.items = [{ src: itemsOrSrc, alt: typeof startIndexOrAlt === 'string' ? startIndexOrAlt : '' }];
@@ -6935,7 +6969,7 @@ class ImagePreviewModal extends Modal {
       window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
       notice(t('notice.imageSaved'));
     } catch (e) {
-      notice(t('notice.imageSaveFailed', { error: String(e) }));
+      notice(t('notice.imageSaveFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -6950,7 +6984,7 @@ class ImagePreviewModal extends Modal {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
       notice(t('notice.imageCopied'));
     } catch (e) {
-      notice(t('notice.imageCopyFailed', { error: String(e) }));
+      notice(t('notice.imageCopyFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -6961,11 +6995,11 @@ class ImagePreviewModal extends Modal {
   private async copyCurrentImageLink(): Promise<void> {
     try {
       const path = this.items[this.index].path;
-      if (!path) throw new Error('no vault path');
+      if (!path) throw new Error(t('preview.errorNoVaultPath'));
       await navigator.clipboard.writeText(`![[${path}]]`);
       notice(t('notice.imageLinkCopied'));
     } catch (e) {
-      notice(t('notice.imageLinkCopyFailed', { error: String(e) }));
+      notice(t('notice.imageLinkCopyFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -6976,17 +7010,17 @@ class ImagePreviewModal extends Modal {
       const bitmap = await new Promise<HTMLImageElement>((resolve, reject) => {
         const im = new Image();
         im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error('decode failed'));
+        im.onerror = () => reject(new Error(t('preview.errorDecodeFailed')));
         im.src = url;
       });
       const canvas = activeDocument.createElement('canvas');
       canvas.width = bitmap.naturalWidth;
       canvas.height = bitmap.naturalHeight;
       const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('canvas unavailable');
+      if (!ctx) throw new Error(t('preview.errorCanvasUnavailable'));
       ctx.drawImage(bitmap, 0, 0);
       return await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/png');
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error(t('preview.errorEncodeFailed')))), 'image/png');
       });
     } finally {
       URL.revokeObjectURL(url);

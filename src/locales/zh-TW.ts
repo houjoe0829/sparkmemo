@@ -290,7 +290,31 @@ const dictionary: TranslationDictionary = {
   "stats.cellTitleNoData": "{{date}} · 未寫",
   "myclaudian.suggestion.extend": "順著這個往下想，還能推出什麼",
   "myclaudian.suggestion.question": "順著這條追問我",
-  "myclaudian.suggestion.connect": "找找庫裡跟這條呼應的舊想法"
+  "myclaudian.suggestion.connect": "找找庫裡跟這條呼應的舊想法",
+  "capture.placeholder.happening": "最近發生了什麼？",
+  "capture.placeholder.onYourMind": "現在在想什麼？",
+  "capture.placeholder.goingOn": "最近怎麼樣？",
+  "capture.placeholder.jotDown": "想記點什麼嗎？",
+  "capture.placeholder.justHappened": "剛剛發生了什麼？",
+  "capture.placeholder.worthRemembering": "有什麼值得記住的事嗎？",
+  "capture.placeholder.upTo": "你在忙什麼？",
+  "capture.placeholder.saySomething": "說點什麼吧。",
+  "capture.placeholder.whatsNew": "有什麼新鮮事？",
+  "capture.placeholder.beforeItFades": "趁還記得，寫下來吧。",
+  "location.emptyPlaceholder.noFootprints": "地圖上還沒有足跡。",
+  "location.emptyPlaceholder.noPlaceYet": "還沒有留下任何地點。",
+  "location.emptyPlaceholder.blankMap": "地圖暫時還是空白的。",
+  "location.emptyPlaceholder.somewhereSomeday": "總有一天，會在某處留下記錄。",
+  "location.emptyPlaceholder.waitingForStories": "你的地圖，等著你來書寫。",
+  "location.emptyPlaceholder.noDots": "地圖上還沒有地點，也還沒有故事。",
+  "location.emptyPlaceholder.noMarkYet": "這裡還沒有留下生活的印記。",
+  "location.emptyPlaceholder.firstCoordinate": "等你留下第一個座標。",
+  "notice.dailyNoteCreationFailed": "無法建立日記。",
+  "preview.errorNoVaultPath": "這張圖片沒有儲存庫內的檔案路徑。",
+  "preview.errorDecodeFailed": "無法讀取這張圖片。",
+  "preview.errorCanvasUnavailable": "目前無法轉換圖片。",
+  "preview.errorEncodeFailed": "無法將這張圖片轉換為 PNG。",
+  "myclaudian.sendError": "❌ 傳送到 Craftian 失敗：{{error}}"
 };
 
 export default dictionary;
