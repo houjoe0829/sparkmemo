@@ -9,6 +9,8 @@ An Obsidian plugin for journaling — built around two ideas:
 
 Under the hood it highlights `HH:MM` timestamps inside a designated Memo section, rolls up everything you've written into a **yearly heatmap**, and plots every geo-tagged memo on an **offline world map** — so you can look back on a whole year, or a whole map, at a glance.
 
+Available in 简体中文, 繁體中文, English, and 日本語, with place-name lookups that follow your selected language.
+
 ![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7c3aed?style=flat-square&logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/github/manifest-json/v/houjoe0829/sparkmemo?style=flat-square&color=7c3aed&label=version)
 ![License](https://img.shields.io/github/license/houjoe0829/sparkmemo?style=flat-square&color=7c3aed)
@@ -32,11 +34,12 @@ Under the hood it highlights `HH:MM` timestamps inside a designated Memo section
 - **Timestamp highlighting** in the `## Memo` section — pill badges in Source, Live Preview, and Reading view, with customizable colors and an optional read-only mode
 - **Quick-capture sidebar** — write, dictate, paste images, or record audio; entries are appended to today's daily note under `## Memo`
 - **Photo-driven memos** — pasted or uploaded images with EXIF time / GPS are turned into memos at the original moment and place, stored as `[Name](geo:lat,lon)` links
+- Multi-language interface: choose 简体中文, 繁體中文, English, or 日本語. Follow Obsidian’s language by default, or choose a different language just for Spark Memo under Settings → General. Calendar and statistics formatting follow your choice too.
+- Localized place names: new location lookups from photo GPS or mobile positioning use your selected Spark Memo language, showing district or county names where available. Translations depend on OpenStreetMap data, so some places may still appear in their local language. Existing memo labels stay unchanged when you switch languages.
 - **Tag & location roll-ups** — every `#tag` and every geo-tagged memo grouped for review, with rename / merge / delete for tags
 - **Offline world map** — the Locations tab opens on a map of everywhere you've written, drawn from a vector basemap bundled with the plugin: no tile server, no network request, no account. Nearby memos cluster into a single dot sized by how much you wrote there; hover for the count, click to read them, and scroll sideways to wrap around the globe
 - **Yearly heatmap** — GitHub-style grid per year, with total words, writing days, entry count, and longest streak
 - **Random rewind** — open the Search tab and a random past memo greets you, so old thoughts get another moment in the light
-- **Multi-language**: follows Obsidian by default, with an independent 简体中文 / 繁體中文 / English / 日本語 choice under Settings → General. New place-name lookups request only the plugin UI language and display a district/county name when available, with a persistent cache and a serial, rate-limited queue. Existing memo labels are not automatically translated or rewritten.
 
 Requires Obsidian's built-in **Daily Notes** core plugin.
 
