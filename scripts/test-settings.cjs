@@ -50,7 +50,8 @@ class Element {
     (this.listeners.keydown || []).forEach(fn => fn(event));
     return event;
   }
-  focus() { focused = this; }
+  contains(element) { return this === element || this.children.some(child => child.contains(element)); }
+  focus() { focused = this; this.ownerDocument.activeElement = this; }
   getBoundingClientRect() { return { left: 0, bottom: 30 }; }
   querySelectorAll(selector) {
     const matches = el => {
@@ -834,7 +835,9 @@ test('capture shell alone opts into the scoped policy when opened', async () => 
   view.containerEl = new Element(); view.containerEl.createDiv(); const root = view.containerEl.createDiv();
   const otherPlugin = new Element();
   view.app = { vault: { on() {} } }; view.registerEvent = () => {};
-  for (const name of ['buildTabBar', 'buildInputCard', 'buildTimeline', 'setupIntersectionObserver', 'setupMobileToolbarAutoHide', 'loadTagIndex']) view[name] = () => {};
+  view.plugin = { settings: { captureZenMode: false } }; view.zenBtn = new Element('button');
+  view.registerDomEvent = () => {};
+  for (const name of ['setupCapturePlaceholder', 'buildZenExitButton', 'setupZenBackdrop', 'buildTabBar', 'buildInputCard', 'buildTimeline', 'setupIntersectionObserver', 'setupMobileToolbarAutoHide', 'loadTagIndex']) view[name] = () => {};
   view.fullRebuild = async () => {};
   await view.onOpen();
   assert.ok(root.classes.has('jp-capture-root')); assert.ok(root.classes.has('jp-no-tooltip'));
@@ -983,7 +986,9 @@ function composer({ mac = true, mobile = false, ios = false, language = 'en' } =
   view.app = { scope: { sentinel: 'host-scope' }, metadataCache: { on() {} }, vault: { on() {} } };
   view.registerEvent = () => {}; view.registerDomEvent = () => {};
   for (const name of ['renderCaptureTimePill', 'renderLocationPill', 'renderMetadataHintPill', 'renderEditingPill', 'renderAttachmentList', 'autoResizeTextarea']) view[name] = () => {};
-  const root = new Element(); view.buildInputCard(root);
+  const root = new Element();
+  view.containerEl = new Element(); view.containerEl.createDiv(); view.containerEl.children.push(root);
+  view.buildInputCard(root);
   return { view, root };
 }
 function keyEvent(view, overrides = {}) {
@@ -1153,6 +1158,13 @@ test('microphone permission failure restores save availability', async () => {
   await view.startRecordingFn();
   assert.equal(view.recordingBusy, false); assert.equal(view.submitBtn.disabled, false); assert.equal(view.textareaEl.value, 'Draft');
 });
+test('shortcut hint is hover-only across the entire input card and retains its layout slot', () => {
+  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  assert.match(css, /\.jp-capture-submit-shortcut\s*\{\s*display:\s*inline-block;\s*opacity:\s*0;/);
+  assert.match(css, /\.jp-capture-card:hover \.jp-capture-submit-shortcut\s*\{\s*opacity:\s*1;/);
+  assert.doesNotMatch(css, /:focus(?:-within|-visible)?[^{}]*\.jp-capture-submit-shortcut/);
+});
+
 test('keycap styling is local, non-interactive, responsive and disappears with recording controls', () => {
   const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
   assert.match(css, /\.jp-capture-actions\s*\{[^}]*container-name:\s*jp-composer-actions/s);
@@ -1287,6 +1299,269 @@ test('Craftian exceptions include a translated operation message and retain the 
     assert.ok(notices.at(-1).includes('EXTERNAL_CRAFTIAN_FAILURE_422'));
     assert.equal(modal.sendBtn.disabled, false); assert.equal(modal.sendBtn.textContent, t('myclaudian.send'));
   }
+});
+
+
+// Zen behavior uses the real composer/save handlers; no user-vault writes.
+test('desktop Zen toggle sits directly after mention, preserves draft and attachments, and persists both choices', async () => {
+  for (const mac of [true, false]) {
+    const { view, root } = composer({ mac });
+    const saved = [];
+    view.plugin.saveSettings = async () => saved.push(view.plugin.settings.captureZenMode);
+    const row = root.querySelector('.jp-capture-button-row');
+    const mention = row.children.findIndex(child => child.classes.has('jp-capture-mention-btn'));
+    assert.equal(row.children[mention + 1], view.zenBtn);
+    assert.equal(view.zenBtn.getAttribute('title'), undefined);
+    assert.equal(view.zenBtn.getAttribute('aria-label'), t('capture.enterZen'));
+    assert.equal(view.zenBtn.icon, 'maximize');
+    view.setToolbarHidden = () => {};
+    view.textareaEl.value = 'Keep this draft'; view.textareaEl.selectionStart = 4;
+    const image = { path: 'test.jpg' }; view.pendingImages = [image];
+    await view.zenBtn.click(); await view.zenSaveQueue;
+    assert.equal(view.zenMode, true); assert.equal(root.classes.has('jp-capture-zen'), true);
+    assert.equal(view.zenBtn.getAttribute('aria-pressed'), 'true'); assert.equal(view.zenBtn.icon, 'minimize');
+    assert.equal(view.textareaEl.value, 'Keep this draft'); assert.equal(view.textareaEl.selectionStart, 4);
+    assert.equal(view.pendingImages[0], image); assert.equal(focused, view.textareaEl);
+    await view.zenBtn.click(); await view.zenSaveQueue;
+    assert.equal(view.zenMode, false); assert.equal(root.classes.has('jp-capture-zen'), false);
+    assert.equal(view.zenBtn.getAttribute('aria-pressed'), 'false'); assert.equal(view.zenBtn.icon, 'maximize');
+    assert.deepEqual(saved, [true, false]); assert.equal(view.pendingImages[0], image);
+  }
+});
+
+test('remembered Zen state restores before initial timeline render and performs no startup save', async () => {
+  for (const mobile of [false, true]) for (const enabled of [true, false]) {
+    const expected = enabled && !mobile;
+    const view = Object.create(JournalCaptureView.prototype);
+    view.containerEl = new Element(); view.containerEl.createDiv(); const root = view.containerEl.createDiv();
+    view.plugin = { settings: { captureZenMode: enabled }, saveSettings() { assert.fail('Startup must not save'); } };
+    view.app = { vault: { on() {} } }; view.registerEvent = () => {}; view.registerDomEvent = () => {};
+    for (const name of ['setupCapturePlaceholder', 'buildZenExitButton', 'setupZenBackdrop', 'buildTabBar', 'buildTimeline', 'setupIntersectionObserver', 'setupMobileToolbarAutoHide', 'loadTagIndex']) view[name] = () => {};
+    view.buildInputCard = () => { view.zenBtn = mobile ? null : new Element('button'); };
+    view.fullRebuild = async () => { assert.equal(root.classes.has('jp-capture-zen'), expected); };
+    obsidian.Platform.isMobile = mobile;
+    await view.onOpen(); assert.equal(view.zenMode, expected);
+    assert.equal(view.plugin.settings.captureZenMode, enabled);
+  }
+  obsidian.Platform.isMobile = false;
+});
+
+test('phones and tablets have no Zen button, ignore synced Zen and never reset the desktop preference', async () => {
+  for (const ios of [false, true]) for (const saved of [false, true]) {
+    const { view, root } = composer({ mobile: true, ios });
+    view.plugin.settings.captureZenMode = saved;
+    view.plugin.saveSettings = async () => assert.fail('Mobile must not persist Zen');
+    view.textareaEl.value = 'Mobile draft';
+    const image = { path: 'mobile.jpg' }; view.pendingImages = [image];
+    assert.equal(view.zenBtn, null);
+    assert.equal(root.querySelectorAll('.jp-capture-zen-btn').length, 0);
+    const row = root.querySelector('.jp-capture-button-row');
+    assert.deepEqual(row.children.map(child => child.getAttribute('aria-label')), [
+      t('capture.add'), t('capture.addTag'), t('capture.addMention'), t('capture.addLocation'),
+    ]);
+    assert.equal(row.children[3], view.geoBtnEl); assert.equal(view.geoBtnEl.icon, 'map-pin');
+    assert.equal(root.querySelectorAll('.jp-capture-submit-shortcut').length, 0);
+    view.applyZenMode(true); view.toggleZenMode(); await view.zenSaveQueue;
+    assert.equal(view.zenMode, false); assert.equal(root.classes.has('jp-capture-zen'), false);
+    assert.equal(view.plugin.settings.captureZenMode, saved);
+    const escape = keyEvent(view, { key: 'Escape', keyCode: 27, metaKey: false, ctrlKey: false });
+    assert.equal(view.handleZenEscape(escape), false); assert.equal(escape.defaultPrevented, false);
+    assert.equal(view.textareaEl.value, 'Mobile draft'); assert.equal(view.pendingImages[0], image);
+  }
+});
+
+test('Zen setting defaults off and survives the real settings save/load path', async () => {
+  assert.equal(DEFAULT_SETTINGS.captureZenMode, false);
+  for (const enabled of [true, false, undefined]) {
+    const plugin = new SparkMemoPlugin({ workspace: { iterateAllLeaves() {} } });
+    const stored = enabled === undefined ? { targetHeading: 'Custom' } : { targetHeading: 'Custom', captureZenMode: enabled };
+    plugin.loadData = async () => plain(stored);
+    await plugin.loadSettings(); assert.equal(plugin.settings.captureZenMode, enabled === true);
+    assert.equal(plugin.settings.targetHeading, 'Custom');
+    plugin.applyCSSVariables = () => {}; let disk;
+    plugin.saveData = async value => { disk = plain(value); };
+    plugin.settings.captureZenMode = !plugin.settings.captureZenMode;
+    await plugin.saveSettings();
+    plugin.loadData = async () => disk;
+    await plugin.loadSettings(); assert.equal(plugin.settings.captureZenMode, enabled !== true);
+  }
+});
+
+test('Zen Escape dismisses suggestions first, does not reopen on keyup, then exits and remembers', async () => {
+  for (const popup of ['mention', 'tag']) {
+    const { view } = composer(); view.plugin.saveSettings = async () => {};
+    view.applyZenMode(true);
+    view[popup + 'SuggestRange'] = { start: 0, end: 1 };
+    const first = textareaKey(view, { key: 'Escape', keyCode: 27, metaKey: false, ctrlKey: false });
+    assert.equal(first.defaultPrevented, true); assert.equal(view.zenMode, true);
+    assert.equal(view[popup + 'SuggestRange'], null);
+    let reopened = 0;
+    view.updateMentionSuggestions = view.updateTagSuggestions = () => reopened++;
+    view.textareaEl.listeners.keyup.forEach(fn => fn({ key: 'Escape' })); assert.equal(reopened, 0);
+    textareaKey(view, { key: 'Escape', keyCode: 27, metaKey: false, ctrlKey: false });
+    await view.zenSaveQueue;
+    assert.equal(view.zenMode, false); assert.equal(view.plugin.settings.captureZenMode, false);
+  }
+});
+
+test('scoped Zen Escape never intercepts IME, repeated keys, modifier keys, other panes or ordinary mode', async () => {
+  const { view } = composer(); view.plugin.saveSettings = async () => {}; view.applyZenMode(true);
+  const escape = { key: 'Escape', keyCode: 27, metaKey: false, ctrlKey: false };
+  for (const extra of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }, { metaKey: true },
+    { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { defaultPrevented: true }, { target: new Element() }]) {
+    assert.equal(view.handleZenEscape(keyEvent(view, { ...escape, ...extra })), false);
+    assert.equal(view.zenMode, true);
+  }
+  view.inputComposing = true; assert.equal(view.handleZenEscape(keyEvent(view, escape)), false); view.inputComposing = false;
+  const binding = view.scope.bindings.find(binding => binding.key === 'Escape');
+  assert.deepEqual(plain(binding.modifiers), []);
+  const buttonEvent = keyEvent(view, { ...escape, target: view.zenBtn });
+  assert.equal(binding.callback(buttonEvent), false); assert.equal(buttonEvent.defaultPrevented, true);
+  await view.zenSaveQueue; assert.equal(view.zenMode, false);
+  assert.equal(view.handleZenEscape(keyEvent(view, escape)), false);
+});
+
+test('Zen cannot navigate to hidden tabs but all normal tabs remain available after exit', () => {
+  const { view } = composer(); view.applyZenMode(true);
+  for (const tab of ['search', 'tag', 'location', 'stats']) view.switchTab(tab);
+  assert.equal(view.currentTab, 'capture');
+  view.applyZenMode(false);
+  // The existing navigation tests cover real tab contents; this guard must be lifted.
+  view.currentTab = 'search'; view.captureTabBtn = new Element(); view.searchTabBtn = new Element();
+  view.statsTabBtn = new Element(); view.locationTabBtn = new Element(); view.tagAggTabBtn = new Element();
+  for (const field of ['capturePaneEl', 'statsPaneEl', 'searchBarEl', 'locationBarEl', 'tagAggBarEl']) view[field] = new Element();
+  view.fullRebuild = async () => {};
+  view.switchTab('capture'); assert.equal(view.currentTab, 'capture');
+});
+
+test('Zen save and edit keep composer-only mode, clear content, retain focus and skip timeline highlighting', async () => {
+  for (const edit of [false, true]) {
+    const { view, root } = composer(); readyToWrite(view); view.applyZenMode(true);
+    view.textareaEl.focus();
+    let writes = 0;
+    view.plugin.writeJournalEntry = async () => { writes++; return true; };
+    if (edit) { view.editingEntry = {}; view.updateEditedEntry = async () => { writes++; return true; }; }
+    await view.handleSubmit();
+    assert.equal(writes, 1); assert.equal(view.textareaEl.value, ''); assert.equal(view.zenMode, true);
+    assert.equal(root.classes.has('jp-capture-zen'), true); assert.equal(focused, view.textareaEl);
+    assert.equal(view.pendingHighlight, null);
+  }
+});
+
+test('Zen failed/backdated saves keep the correct draft/mode and never steal focus outside the composer', async () => {
+  const { view, root } = composer(); readyToWrite(view); view.applyZenMode(true);
+  view.plugin.writeJournalEntry = async () => false;
+  await view.handleSubmit(); assert.equal(view.textareaEl.value, 'A memo'); assert.equal(view.zenMode, true);
+  const outside = new Element(); outside.focus();
+  const target = require('moment')().subtract(2, 'days');
+  view.pendingCaptureOverride = { date: target, time: '08:42' };
+  let rebuilds = 0; view.fullRebuild = async () => rebuilds++;
+  view.plugin.writeJournalEntry = async () => true;
+  await view.handleSubmit(); assert.equal(view.textareaEl.value, ''); assert.equal(rebuilds, 1);
+  assert.equal(view.currentDate.format('YYYY-MM-DD'), target.format('YYYY-MM-DD'));
+  assert.equal(root.classes.has('jp-capture-zen'), true); assert.equal(view.pendingHighlight, null);
+  assert.equal(focused, outside);
+});
+
+test('rapid Zen toggles serialize writes, recover after persistence errors and retain final choice', async () => {
+  const { view } = composer(); const gate = deferred(); const saved = [];
+  view.plugin.saveSettings = async () => { const state = view.plugin.settings.captureZenMode; saved.push(state); if (saved.length === 1) await gate.promise; };
+  view.toggleZenMode(); await settle(); view.toggleZenMode();
+  assert.deepEqual(saved, [true]); gate.resolve(); await view.zenSaveQueue;
+  assert.deepEqual(saved, [true, false]); assert.equal(view.plugin.settings.captureZenMode, false);
+  view.plugin.saveSettings = async () => { throw Error('Test settings failure'); };
+  view.toggleZenMode(); await view.zenSaveQueue; assert.ok(notices.at(-1).includes(t('capture.zenSaveFailed')));
+  view.plugin.saveSettings = async () => saved.push(view.plugin.settings.captureZenMode);
+  view.toggleZenMode(); await view.zenSaveQueue; assert.equal(saved.at(-1), false);
+});
+
+test('only Zen removes its fill and border in normal and hovered states', () => {
+  const css = require('node:fs').readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const rule = rules.find(([, selectors, body]) => selectors.trim() === '.jp-capture-zen-btn,\n.jp-capture-zen-btn:hover');
+  assert.ok(rule, 'Zen-only style override must cover normal and hover');
+  assert.match(rule[2], /background:\s*transparent !important;/);
+  assert.match(rule[2], /border:\s*none !important;/);
+  // The original insertion tools still use their existing filled round buttons.
+  const shared = rules.find(([, selectors, body]) => selectors.includes('.jp-capture-plus-btn,') && body.includes('background: color-mix'));
+  assert.ok(shared); assert.match(shared[2], /border:\s*1px solid/);
+});
+
+test('only Zen centers the natural-size composer, with safe scrolling when it exceeds the pane', () => {
+  const css = require('node:fs').readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const pane = rules.find(([, selector]) => selector.trim() === '.jp-capture-zen > .jp-pane-capture');
+  const card = rules.find(([, selector]) => selector.trim() === '.jp-capture-zen > .jp-pane-capture > .jp-capture-card');
+  assert.ok(pane); assert.ok(card);
+  assert.match(pane[2], /overflow-y:\s*auto;/);
+  assert.match(card[2], /flex-shrink:\s*0;/);
+  assert.match(card[2], /margin-block:\s*auto;/);
+  assert.doesNotMatch(pane[2] + card[2], /(?:^|;)\s*(?:width|height|font-size|position|transform)\s*:/);
+});
+
+test('desktop Zen styles scope hidden tabs/timeline and retain hover, keyboard, touch and recording rules', () => {
+  const css = require('node:fs').readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+  assert.match(css, /\.jp-capture-zen-btn\s*\{\s*opacity:\s*0;\s*pointer-events:\s*none;/);
+  assert.match(css, /\.jp-capture-card:hover \.jp-capture-zen-btn,/);
+  assert.match(css, /\.jp-capture-zen-btn:focus-visible,/);
+  assert.match(css, /\.jp-capture-zen \.jp-capture-zen-btn\s*\{/);
+  assert.doesNotMatch(css, /\.is-mobile \.jp-capture-zen-btn/);
+  assert.match(css, /@media \(hover: none\)/);
+  assert.match(css, /\.jp-capture-zen > \.jp-tab-bar,\s*\.jp-capture-zen > \.jp-pane-capture > \.jp-timeline-scroll\s*\{\s*display:\s*none !important;/);
+  assert.match(css, /\.jp-capture-geo-btn svg,\s*\.jp-capture-zen-btn svg\s*\{[^}]*width:\s*18px !important;[^}]*flex-shrink:\s*0 !important;/);
+  assert.match(css, /\.jp-capture-zen \.jp-capture-actions\.is-recording \.jp-capture-button-row/);
+});
+
+test('Zen background shares in-flight reads and caches coordinates without rendering the Locations tab', async () => {
+  const { view } = composer(); const gate = deferred(); let reads = 0; const painted = [];
+  view.zenMode = true; view.zenBackdrop = { setLocations: data => painted.push(data) };
+  view.collectZenLocations = () => { reads++; return gate.promise; };
+  view.renderLocationMap = () => assert.fail('Background must not use interactive map renderer');
+  const first = view.refreshZenBackdrop(); const second = view.refreshZenBackdrop();
+  assert.equal(first, second); assert.equal(reads, 1);
+  const coords = [{latitude:31, longitude:121}]; gate.resolve(coords); await first;
+  await view.refreshZenBackdrop(); assert.equal(reads, 1); assert.equal(painted.length, 2);
+  assert.equal(view.zenLocations, coords);
+});
+test('Zen background discards stale reads and ignores results after panel closes', async () => {
+  const { view } = composer(); const gate = deferred(); let reads = 0; const painted = [];
+  view.zenMode = true; view.zenBackdrop = { setLocations: data => painted.push(data) };
+  view.collectZenLocations = () => ++reads === 1 ? gate.promise : Promise.resolve([{latitude:1,longitude:2}]);
+  const first = view.refreshZenBackdrop(); view.zenMapRevision++; gate.resolve([{latitude:3,longitude:4}]);
+  await first; if (view.zenLocationLoad) await view.zenLocationLoad;
+  assert.equal(reads, 2); assert.equal(painted.length, 1); assert.equal(painted[0][0].latitude, 1);
+  const closed = deferred(); view.zenLocations = null; view.collectZenLocations = () => closed.promise;
+  const pending = view.refreshZenBackdrop(); view.zenClosed = true; closed.resolve([]); await pending;
+  assert.equal(painted.length, 1);
+});
+test('mobile Zen never creates or refreshes a map background', async () => {
+  const { view, root } = composer({mobile:true});
+  view.setupZenBackdrop(root); assert.equal(view.zenBackdrop, null);
+  view.collectZenLocations = () => assert.fail('Mobile must not scan locations');
+  await view.refreshZenBackdrop(); view.invalidateZenBackdrop(); assert.equal(view.zenMapRevision, 0);
+});
+
+test('desktop corner X exits through the existing Zen toggle without closing the panel or losing draft', async () => {
+  const {view, root} = composer(); view.buildZenExitButton(root);
+  assert.equal(view.zenCloseBtn.icon, 'x');
+  assert.equal(view.zenCloseBtn.getAttribute('aria-label'), t('capture.exitZen'));
+  assert.equal(view.zenCloseBtn.getAttribute('title'), undefined);
+  const saved=[];view.plugin.saveSettings=async()=>saved.push(view.plugin.settings.captureZenMode);
+  view.textareaEl.value='Keep this draft';const image={path:'image.png'};view.pendingImages=[image];
+  view.applyZenMode(true);await view.zenCloseBtn.click();await view.zenSaveQueue;
+  assert.equal(view.zenMode,false);assert.equal(view.textareaEl.value,'Keep this draft');assert.equal(view.pendingImages[0],image);
+  assert.deepEqual(saved,[false]);await view.zenCloseBtn.click();await view.zenSaveQueue;
+  assert.deepEqual(saved,[false]); // Hidden button cannot re-enter Zen via a stale click.
+});
+test('mobile does not create a corner exit button', () => {
+  const {view,root}=composer({mobile:true});view.buildZenExitButton(root);
+  assert.equal(view.zenCloseBtn,null);assert.equal(root.querySelector('.jp-zen-close-btn'),null);
+});
+test('corner exit is scoped to Zen background hover and keyboard focus, without fill or normal-layout space', () => {
+  const css=require('node:fs').readFileSync(path.resolve(__dirname,'../styles.css'),'utf8');
+  assert.match(css,/\.jp-capture-root > \.jp-zen-close-btn\s*\{[^}]*position:\s*absolute;[^}]*display:\s*none;[^}]*background:\s*transparent !important;/);
+  assert.ok(css.includes('.jp-capture-zen:hover:not(:has(.jp-capture-card:hover)) > .jp-zen-close-btn,'));
+  assert.match(css,/\.jp-capture-zen > \.jp-zen-close-btn:focus-visible\s*\{\s*opacity:\s*1;\s*pointer-events:\s*auto;/);
 });
 
 })().catch(error => { console.error(error); process.exitCode = 1; });

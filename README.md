@@ -56,9 +56,13 @@ Manual install: download `main.js`, `manifest.json`, and `styles.css` from the l
 ## Usage
 
 1. Click the feather-pen icon in the ribbon (or run **"Open Quick Capture sidebar"** from the Command Palette) to open the sidebar
-2. Type into the input, then click submit or press `Cmd+Enter` on macOS / `Ctrl+Enter` on Windows and Linux while the input is focused. Plain `Enter` inserts a new line. The memo is written to today's daily note as `- HH:MM text`. A keycap hint appears beside submit on desktop when space permits.
+2. Type into the input, then click submit or press `Cmd+Enter` on macOS / `Ctrl+Enter` on Windows and Linux while the input is focused. Plain `Enter` inserts a new line. The memo is written to today's daily note as `- HH:MM text`. A keycap hint appears beside submit on desktop only while hovering over the input card and when space permits.
 3. Paste an image or hit record to attach media; images with EXIF time / GPS will prompt you to use their moment and place
 4. Switch to the `Search` / `Tags` / `Locations` / `Stats` tabs to browse across days — `Locations` opens on the world map, with the city list one click away
+
+Empty capture inputs cycle their existing localized hints with Remix Desk-style typing (42ms/character), a 1.9s hold, faster deletion (22ms/character) and a 320ms gap. Focusing the input hides and pauses the decorative hint; typed text is never replaced. Hidden views pause, and reduced motion uses whole-sentence swaps.
+
+Zen mode is desktop-only. The button beside `@` keeps only the composer visible and centered in the panel, including after saving. The composer keeps its normal size; short panels scroll instead of clipping its controls. Entering and exiting uses a short translation and crossfade into a read-only offline map background with existing location dots, without counts or map interactions. The map and dots drift left slowly in a seamless loop while the composer stays fixed and opaque. Background motion pauses when Zen is off, the pane/app is hidden, or reduced motion is enabled. Reopening remembered Zen skips the transition; reduced-motion preferences disable it. Hover over the input card to reveal the entry button. Exit using the same button, Esc, or the top-right X. The X appears over the map when the pointer is outside the composer, or when the button receives keyboard focus. Suggestions consume the first Esc, and the last Zen state is remembered when reopening the panel or restarting Obsidian. Phones and tablets keep the normal interface and ignore the synced Zen preference without resetting it.
 
 ---
 

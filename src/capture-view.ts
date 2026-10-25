@@ -71,6 +71,8 @@ import {
   pickCenterLon,
 } from './map-view';
 import { LAND_PATH } from './land-data';
+import { ZenBackdrop, ZenLocation, runZenTransition } from './zen-presentation';
+import { CapturePlaceholder } from './capture-placeholder';
 import { readExifCaptureDate, readExifGpsLocation } from './exif';
 import { reverseGeocodeCity } from './geocode';
 import { encodeWebp } from './webp-encoder';
@@ -143,6 +145,18 @@ export class JournalCaptureView extends ItemView {
   // Top-level tab state
   private currentTab: 'capture' | 'stats' | 'search' | 'location' | 'tag' = 'capture';
   private tabBarEl!: HTMLElement;
+  private zenMode = false;
+  private zenBackdrop: ZenBackdrop | null = null;
+  private zenTransition: (() => void) | null = null;
+  private zenLocations: ZenLocation[] | null = null;
+  private zenLocationLoad: Promise<void> | null = null;
+  private zenMapRevision = 0;
+  private zenRefreshTimer: number | null = null;
+  private zenClosed = false;
+  private zenBtn: HTMLButtonElement | null = null;
+  private zenCloseBtn: HTMLButtonElement | null = null;
+  /** Serialize rapid toggles so the last choice is the last persisted write. */
+  private zenSaveQueue: Promise<void> = Promise.resolve();
   private capturePaneEl!: HTMLElement;
   private statsPaneEl!: HTMLElement;
   private captureTabBtn!: HTMLButtonElement;
@@ -255,6 +269,7 @@ export class JournalCaptureView extends ItemView {
   /** Includes microphone permission, recording and the final attachment/transcript flush. */
   private recordingBusy = false;
   private inputComposing = false;
+  private capturePlaceholder: CapturePlaceholder | null = null;
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
   private locationPillEl!: HTMLElement;
@@ -433,6 +448,7 @@ export class JournalCaptureView extends ItemView {
     const root = this.containerEl.children[1];
     root.empty();
     root.addClass('jp-capture-root', 'jp-no-tooltip');
+    this.zenClosed = false;
 
     // Top-level tab bar — switches between "Quick capture" and "Yearly stats".
     this.buildTabBar(root as HTMLElement);
@@ -440,13 +456,19 @@ export class JournalCaptureView extends ItemView {
     // Capture pane (default visible)
     this.capturePaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-capture' });
     this.buildInputCard(this.capturePaneEl);
+    this.setupCapturePlaceholder();
     this.buildTimeline(this.capturePaneEl);
+    this.buildZenExitButton(root as HTMLElement);
+    // Apply before the first async render so a remembered Zen view never flashes the tabs.
+    this.applyZenMode(this.plugin.settings.captureZenMode === true);
+    this.registerDomEvent(root as HTMLElement, 'keydown', (e: KeyboardEvent) => {
+      this.handleZenEscape(e);
+    });
 
     // Stats pane (hidden initially; built lazily on first switch)
     this.statsPaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-stats' });
     this.statsPaneEl.hide();
-
-
+    this.setupZenBackdrop(root as HTMLElement);
 
     // ── Vault listeners ──
     // modify: refresh the affected day's section in place (no full rebuild)
@@ -461,6 +483,7 @@ export class JournalCaptureView extends ItemView {
           this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
+          this.invalidateZenBackdrop();
           this.tagAggIndex = null;
           this.scheduleTagIndexRefresh();
         }
@@ -474,6 +497,7 @@ export class JournalCaptureView extends ItemView {
           this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
+          this.invalidateZenBackdrop();
           this.tagAggIndex = null;
           this.scheduleTagIndexRefresh();
         }
@@ -489,6 +513,7 @@ export class JournalCaptureView extends ItemView {
           this.markStatsDirtyForFile(file);
           this.scheduleStatsRefresh();
           this.locationIndex = null;
+          this.invalidateZenBackdrop();
           this.tagAggIndex = null;
           this.scheduleTagIndexRefresh();
         }
@@ -501,6 +526,8 @@ export class JournalCaptureView extends ItemView {
     this.registerEvent(
       this.app.vault.on('rename', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
+          this.locationIndex = null;
+          this.invalidateZenBackdrop();
           this.dirtyYears = null;
           this.scheduleStatsRefresh();
         }
@@ -518,6 +545,15 @@ export class JournalCaptureView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.zenClosed = true;
+    this.capturePlaceholder?.dispose();
+    this.capturePlaceholder = null;
+    this.zenTransition?.();
+    this.zenTransition = null;
+    this.zenBackdrop?.dispose();
+    this.zenBackdrop = null;
+    if (this.zenRefreshTimer !== null) window.clearTimeout(this.zenRefreshTimer);
+    this.zenRefreshTimer = null;
     this.teardownMap();
     if (this.rerenderTimer !== null) {
       window.clearTimeout(this.rerenderTimer);
@@ -687,6 +723,7 @@ export class JournalCaptureView extends ItemView {
   }
 
   private switchTab(tab: 'capture' | 'stats' | 'search' | 'location' | 'tag') {
+    if (this.zenMode && tab !== 'capture') return;
     if (this.currentTab === tab) return;
     const prevTab = this.currentTab;
     this.currentTab = tab;
@@ -1298,6 +1335,17 @@ export class JournalCaptureView extends ItemView {
     return t(pool[Math.floor(Math.random() * pool.length)]);
   }
 
+  private setupCapturePlaceholder() {
+    this.capturePlaceholder = new CapturePlaceholder(this.textareaEl, this.textareaEl.parentElement!,
+      () => JournalCaptureView.INPUT_PLACEHOLDERS.map(key => t(key)),
+      () => !this.editingEntry && !this.inputComposing && !this.isSubmitting);
+  }
+
+  private resetCapturePlaceholder() {
+    this.textareaEl.placeholder = this.pickRandomPlaceholder();
+    this.capturePlaceholder?.reset();
+  }
+
   private buildInputCard(root: HTMLElement) {
     this.inputCardEl = root.createDiv({ cls: 'jp-capture-card' });
 
@@ -1345,7 +1393,9 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.addEventListener('keyup', (e: KeyboardEvent) => {
       // Navigation/selection keys are handled (and preventDefault'd) on
       // keydown below when a popup is open — nothing left to do here.
-      const navKey = ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key);
+      // Closing a suggestion on Escape must not immediately reopen it on keyup.
+      if (e.key === 'Escape') return;
+      const navKey = ['ArrowUp', 'ArrowDown', 'Enter', 'Tab'].includes(e.key);
       if (!(this.tagSuggestRange && navKey)) this.updateTagSuggestions();
       if (!(this.mentionSuggestRange && navKey)) this.updateMentionSuggestions();
     });
@@ -1367,6 +1417,7 @@ export class JournalCaptureView extends ItemView {
       // IME confirmation must never save or select a tag/note suggestion.
       if (e.isComposing || this.inputComposing || e.keyCode === 229) return;
       if (this.handleSubmitShortcut(e)) return;
+      if (this.handleZenEscape(e)) return;
       // Mention popup takes priority when both would otherwise react, since
       // the two triggers ('#' and '@') can never be active at the same time.
       if (this.mentionSuggestRange) {
@@ -2023,6 +2074,16 @@ export class JournalCaptureView extends ItemView {
       textarea.dispatchEvent(new Event('input'));
     });
 
+    // Zen is desktop-only; mobile keeps its original toolbar without an empty slot.
+    if (!Platform.isMobile) {
+      this.zenBtn = buttonRow.createEl('button', {
+        cls: 'jp-capture-zen-btn',
+        attr: { type: 'button', 'aria-label': t('capture.enterZen'), 'aria-pressed': 'false' },
+      });
+      setIcon(this.zenBtn, 'maximize');
+      this.zenBtn.addEventListener('click', () => this.toggleZenMode());
+    }
+
     // "📍" button — grabs the current GPS coordinate via the browser
     // Geolocation API, reverse-geocodes it, and drops the result into
     // `pendingLocation` (same pill / same submit path as the EXIF flow).
@@ -2144,6 +2205,10 @@ export class JournalCaptureView extends ItemView {
     this.scope = new Scope(this.app.scope);
     this.scope.register(['Mod'], 'Enter', (e) => {
       if (this.handleSubmitShortcut(e)) return false;
+    });
+
+    this.scope.register([], 'Escape', (e) => {
+      if (this.handleZenEscape(e)) return false;
     });
 
     this.refreshSubmitState();
@@ -2653,7 +2718,7 @@ export class JournalCaptureView extends ItemView {
   private cancelEdit() {
     this.editingEntry = null;
     this.textareaEl.value = '';
-    this.textareaEl.placeholder = this.pickRandomPlaceholder();
+    this.resetCapturePlaceholder();
     this.pendingImages = [];
     this.pendingAudio = [];
     this.pendingFiles = [];
@@ -3275,7 +3340,131 @@ export class JournalCaptureView extends ItemView {
     return true;
   }
 
+  /** An additional exit, not a panel-close action; CSS scopes background hover to Zen. */
+  private buildZenExitButton(root: HTMLElement) {
+    if (Platform.isMobile) return;
+    this.zenCloseBtn = root.createEl('button', {
+      cls: 'jp-zen-close-btn',
+      attr: { type: 'button', 'aria-label': t('capture.exitZen') },
+    });
+    setIcon(this.zenCloseBtn, 'x');
+    this.zenCloseBtn.addEventListener('click', () => {
+      if (this.zenMode) this.toggleZenMode();
+    });
+  }
+
+  /** Separate from the interactive Locations tab; never clears its timeline or navigation state. */
+  private setupZenBackdrop(root: HTMLElement) {
+    if (Platform.isMobile) return;
+    this.zenBackdrop = new ZenBackdrop(root);
+    this.zenBackdrop.setActive(this.zenMode);
+    if (this.zenMode) void this.refreshZenBackdrop();
+  }
+
+  private invalidateZenBackdrop() {
+    if (Platform.isMobile) return;
+    this.zenLocations = null;
+    this.zenMapRevision++;
+    if (!this.zenMode || this.zenClosed) return;
+    if (this.zenRefreshTimer !== null) window.clearTimeout(this.zenRefreshTimer);
+    this.zenRefreshTimer = window.setTimeout(() => {
+      this.zenRefreshTimer = null;
+      void this.refreshZenBackdrop();
+    }, 200);
+  }
+
+  private async collectZenLocations(revision: number): Promise<ZenLocation[]> {
+    if (this.locationIndex) return Array.from(this.locationIndex.values()).flatMap(group => group.entries.map(e => e.location));
+    const locations: ZenLocation[] = [];
+    if (!appHasDailyNotesPluginLoaded()) return locations;
+    for (const file of Object.values(getAllDailyNotes()) as TFile[]) {
+      if (this.zenClosed || revision !== this.zenMapRevision) break;
+      if (!(file instanceof TFile)) continue;
+      let content: string;
+      try { content = await this.app.vault.cachedRead(file); } catch { continue; }
+      const section = findSection(content, this.plugin.settings.targetHeading, this.plugin.settings.headingLevel);
+      if (!section) continue;
+      for (const entry of parseJournalEntries(content.slice(section.from, section.to), this.plugin.settings.timestampPattern)) {
+        const { location } = extractLocationTag(entry.text);
+        if (location) locations.push(location);
+      }
+    }
+    return locations;
+  }
+
+  private refreshZenBackdrop(): Promise<void> {
+    if (Platform.isMobile || this.zenClosed || !this.zenMode || !this.zenBackdrop) return Promise.resolve();
+    if (this.zenLocations) { this.zenBackdrop.setLocations(this.zenLocations); return Promise.resolve(); }
+    if (this.zenLocationLoad) return this.zenLocationLoad;
+    const revision = this.zenMapRevision;
+    this.zenLocationLoad = this.collectZenLocations(revision).then(locations => {
+      if (this.zenClosed || revision !== this.zenMapRevision) return;
+      this.zenLocations = locations;
+      this.zenBackdrop?.setLocations(locations);
+    }).catch(err => {
+      // Keep the basemap on read failures; never alter notes or the Locations tab's error UI.
+      console.warn('[Spark Memo] Zen background locations unavailable', err);
+    }).finally(() => {
+      this.zenLocationLoad = null;
+      if (!this.zenClosed && revision !== this.zenMapRevision) void this.refreshZenBackdrop();
+    });
+    return this.zenLocationLoad;
+  }
+
+  /** Presentation only: preserve the live composer, its draft and attachments through motion. */
+  private applyZenMode(enabled: boolean, animate = false) {
+    enabled = enabled && !Platform.isMobile;
+    const root = this.containerEl.children[1] as HTMLElement;
+    const update = () => {
+      this.zenMode = enabled;
+      root.toggleClass('jp-capture-zen', enabled);
+      if (this.zenBtn) {
+        this.zenBtn.setAttribute('aria-label', t(enabled ? 'capture.exitZen' : 'capture.enterZen'));
+        this.zenBtn.setAttribute('aria-pressed', String(enabled));
+        setIcon(this.zenBtn, enabled ? 'minimize' : 'maximize');
+      }
+      if (enabled) this.pendingHighlight = null;
+      this.zenBackdrop?.setActive(enabled);
+    };
+    if (animate) this.zenTransition = runZenTransition(root, this.inputCardEl,
+      [this.tabBarEl, this.timelineScrollEl].filter(Boolean), enabled, update, this.zenTransition);
+    else { this.zenTransition?.(); this.zenTransition = null; update(); }
+    if (enabled) void this.refreshZenBackdrop();
+  }
+
+  private toggleZenMode() {
+    if (Platform.isMobile) return;
+    this.plugin.settings.captureZenMode = !this.zenMode;
+    this.applyZenMode(this.plugin.settings.captureZenMode, true);
+    this.textareaEl.focus({ preventScroll: true });
+    this.zenSaveQueue = this.zenSaveQueue.then(() => this.plugin.saveSettings()).catch(err => {
+      console.error('[Spark Memo] save Zen mode failed', err);
+      notice(t('capture.zenSaveFailed'));
+    });
+  }
+
+  /** Scoped to this panel: IME, suggestions and modal scopes retain Escape priority. */
+  private handleZenEscape(e: KeyboardEvent): boolean {
+    if (Platform.isMobile || !this.zenMode || this.currentTab !== 'capture' || e.key !== 'Escape'
+      || e.defaultPrevented || e.isComposing || this.inputComposing || e.keyCode === 229
+      || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
+      || !(this.containerEl.children[1] as HTMLElement).contains(e.target as Node)) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.mentionSuggestRange) this.closeMentionSuggest();
+    else if (this.tagSuggestRange) this.closeTagSuggest();
+    else this.toggleZenMode();
+    return true;
+  }
+
+  private focusZenComposer() {
+    // Do not steal focus if the user left the composer while a write was pending.
+    if (this.zenMode && this.currentTab === 'capture'
+      && this.inputCardEl.contains(this.textareaEl.ownerDocument.activeElement)) this.textareaEl.focus();
+  }
+
   private refreshSubmitState() {
+    this.capturePlaceholder?.sync();
     const hasContent = this.textareaEl.value.trim().length > 0
       || this.pendingImages.length > 0
       || this.pendingAudio.length > 0
@@ -3984,7 +4173,7 @@ export class JournalCaptureView extends ItemView {
         // platform and font size, so it's measured at scroll time rather than
         // hardcoded as a scroll-margin.
         const scroller = this.timelineScrollEl;
-        if (!scroller) return;
+        if (!scroller || this.zenMode) return;
         const header = target.parentElement?.querySelector<HTMLElement>(
           '.jp-timeline-entry--header',
         );
@@ -6003,6 +6192,7 @@ export class JournalCaptureView extends ItemView {
     }
 
     this.isSubmitting = true;
+    this.capturePlaceholder?.sync();
     this.submitBtn.disabled = true;
     this.submitBtn.addClass('jp-capture-submit--disabled');
     this.submitBtn.addClass('jp-capture-submit--loading');
@@ -6015,7 +6205,7 @@ export class JournalCaptureView extends ItemView {
 
         this.editingEntry = null;
         this.textareaEl.value = '';
-        this.textareaEl.placeholder = this.pickRandomPlaceholder();
+        this.resetCapturePlaceholder();
         this.pendingImages = [];
         this.pendingAudio = [];
         this.pendingFiles = [];
@@ -6029,6 +6219,7 @@ export class JournalCaptureView extends ItemView {
         this.renderMetadataHintPill();
         this.renderEditingPill();
         this.autoResizeTextarea();
+        this.focusZenComposer();
         notice(t('notice.memoUpdated'));
         return;
       }
@@ -6047,13 +6238,13 @@ export class JournalCaptureView extends ItemView {
       // Flag the new entry so the next renderDayContent pass scrolls to it
       // and paints a brief highlight — done for today's entries and
       // backdated ones alike.
-      this.pendingHighlight = {
+      this.pendingHighlight = this.zenMode ? null : {
         dateKey: writtenDay.format('YYYY-MM-DD'),
         timestamp: stamp,
       };
 
       this.textareaEl.value = '';
-      this.textareaEl.placeholder = this.pickRandomPlaceholder();
+      this.resetCapturePlaceholder();
       this.pendingImages = [];
       this.pendingAudio = [];
       this.pendingFiles = [];
@@ -6080,6 +6271,7 @@ export class JournalCaptureView extends ItemView {
       // Scrolling + brief highlight of the new row happens inside
       // renderDayContent as it renders the entry matching `pendingHighlight`.
       // A toast confirms the write for both today's and backdated entries.
+      this.focusZenComposer();
       if (writtenDay.isSame(moment(), 'day')) {
         notice(t('notice.recorded'));
       } else {

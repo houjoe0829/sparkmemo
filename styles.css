@@ -101,6 +101,35 @@
   background: var(--background-primary);
 }
 
+/* One scoped stacking context: the offline map is behind the existing live UI. */
+.jp-capture-root { position: relative; isolation: isolate; }
+.jp-capture-root > :not(.jp-zen-backdrop) { position: relative; z-index: 1; }
+.jp-zen-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background: var(--background-secondary);
+  opacity: 0;
+  transition: opacity 400ms cubic-bezier(.2,.7,.2,1);
+}
+.jp-capture-zen > .jp-zen-backdrop { opacity: 1; }
+.jp-zen-backdrop > svg { display: block; width: 100%; height: 100%; }
+.jp-zen-land { fill: var(--background-modifier-border); fill-opacity: .65; }
+.jp-zen-dot {
+  fill: var(--text-accent);
+  fill-opacity: .32;
+  stroke: var(--background-primary);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.jp-zen-moving { position: relative; z-index: 2; will-change: transform; }
+@media (prefers-reduced-motion: reduce) {
+  .jp-zen-backdrop { transition: none; }
+}
+
 /* Only the timeline list scrolls; the input card (and tab / search / location
    bars above it) stay pinned so the user always has the composer in view. */
 .jp-timeline-scroll {
@@ -254,6 +283,36 @@
 .jp-capture-input-wrapper {
   position: relative;
 }
+/* Decorative hints use the existing input metrics; no input value or layout changes. */
+.jp-capture-placeholder-managed::placeholder { color: transparent; }
+.jp-capture-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.jp-capture-placeholder[hidden] { display: none; }
+.jp-capture-placeholder-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: jp-placeholder-caret 1050ms steps(1, end) infinite;
+}
+@keyframes jp-placeholder-caret { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+.is-mobile .jp-capture-placeholder { top: 4px; left: 6px; right: 4px; }
+@media (prefers-reduced-motion: reduce) { .jp-capture-placeholder-caret { display: none; animation: none; } }
+
 .jp-tag-suggest {
   position: absolute;
   z-index: 50;
@@ -302,7 +361,8 @@
 .jp-capture-plus-btn,
 .jp-capture-tag-btn,
 .jp-capture-mention-btn,
-.jp-capture-geo-btn {
+.jp-capture-geo-btn,
+.jp-capture-zen-btn {
   background: color-mix(in srgb, var(--jp-tl-dot) 8%, var(--background-primary)) !important;
   border: 1px solid color-mix(in srgb, var(--jp-tl-dot) 18%, transparent) !important;
   outline: none !important;
@@ -331,9 +391,76 @@
 .jp-capture-plus-btn:hover,
 .jp-capture-tag-btn:hover,
 .jp-capture-mention-btn:hover,
-.jp-capture-geo-btn:hover {
+.jp-capture-geo-btn:hover,
+.jp-capture-zen-btn:hover {
   color: var(--jp-tl-dot) !important;
   background-color: color-mix(in srgb, var(--jp-tl-dot) 14%, transparent) !important;
+}
+/* Zen is a mode switch, not an insertion tool: no fill or frame, even on hover. */
+.jp-capture-zen-btn,
+.jp-capture-zen-btn:hover {
+  background: transparent !important;
+  border: none !important;
+}
+/* Keep the slot to prevent toolbar movement; keyboard focus reveals the button too. */
+.jp-capture-zen-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+.jp-capture-card:hover .jp-capture-zen-btn,
+.jp-capture-zen-btn:focus-visible,
+.jp-capture-zen .jp-capture-zen-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .jp-capture-zen-btn { opacity: 1; pointer-events: auto; }
+}
+/* Outside-card hover reveals the corner exit, including its own hit area.
+   Keep it out of normal layout and retain a visible keyboard focus target. */
+.jp-capture-root > .jp-zen-close-btn {
+  position: absolute;
+  top: var(--jp-pane-pad);
+  right: var(--jp-pane-pad);
+  z-index: 3;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: none !important;
+  border-radius: 6px;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+.jp-capture-zen > .jp-zen-close-btn { display: inline-flex; }
+.jp-capture-zen:hover:not(:has(.jp-capture-card:hover)) > .jp-zen-close-btn,
+.jp-capture-zen > .jp-zen-close-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.jp-capture-root > .jp-zen-close-btn:hover { color: var(--text-normal); }
+.jp-capture-root > .jp-zen-close-btn:focus-visible { outline: 2px solid var(--text-accent); outline-offset: 2px; }
+.jp-zen-close-btn svg { width: 18px; height: 18px; }
+
+.jp-capture-zen > .jp-tab-bar,
+.jp-capture-zen > .jp-pane-capture > .jp-timeline-scroll {
+  display: none !important;
+}
+/* Auto margins center the unchanged card when it fits, and become zero when it
+   overflows, so short panes can scroll from the start without clipped controls. */
+.jp-capture-zen > .jp-pane-capture {
+  overflow-y: auto;
+}
+.jp-capture-zen > .jp-pane-capture > .jp-capture-card {
+  flex-shrink: 0;
+  margin-block: auto;
 }
 .jp-capture-geo-btn.is-disabled,
 .jp-capture-geo-btn:disabled {
@@ -362,7 +489,8 @@
 .jp-capture-plus-btn svg,
 .jp-capture-tag-btn svg,
 .jp-capture-mention-btn svg,
-.jp-capture-geo-btn svg {
+.jp-capture-geo-btn svg,
+.jp-capture-zen-btn svg {
   width: 18px !important;
   height: 18px !important;
   min-width: 18px !important;
@@ -847,6 +975,7 @@
 }
 .jp-capture-submit-shortcut {
   display: inline-block;
+  opacity: 0;
   padding: 3px 6px;
   border: 0;
   border-radius: 6px;
@@ -858,6 +987,10 @@
   line-height: 1.4;
   white-space: nowrap;
   pointer-events: none;
+}
+/* Reveal only on card hover; opacity preserves the submit button position. */
+.jp-capture-card:hover .jp-capture-submit-shortcut {
+  opacity: 1;
 }
 @container jp-composer-actions (max-width: 260px) {
   .jp-capture-submit-shortcut { display: none; }
@@ -2732,6 +2865,16 @@
   margin-top: 0;
   min-height: 0;
   transition: margin-top 0.3s ease, min-height 0.3s ease;
+}
+/* Recording may collapse other tools, never the Zen exit control. */
+.jp-capture-zen .jp-capture-actions.is-recording .jp-capture-button-row {
+  opacity: 1;
+  transform: none;
+  max-width: none !important;
+  pointer-events: auto;
+}
+.jp-capture-zen .jp-capture-actions.is-recording .jp-capture-button-row > button:not(.jp-capture-zen-btn) {
+  visibility: hidden;
 }
 /* Settings navigation mirrors RSS Dashboard without styling other plugins. */
 .jp-settings .jp-settings-tab-bar {

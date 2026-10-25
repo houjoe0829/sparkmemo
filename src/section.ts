@@ -15,6 +15,8 @@ import { Decoration, DecorationSet } from '@codemirror/view';
 export interface SparkMemoSettings {
   /** Plugin UI language; system preserves the existing Obsidian-language behavior. */
   language: LanguagePreference;
+  /** Desktop-only composer mode; mobile ignores synced values without resetting them. */
+  captureZenMode: boolean;
   /** The heading text that activates the plugin (without # symbols) */
   targetHeading: string;
   /** Heading level: 1 → #, 2 → ##, … */
@@ -62,6 +64,7 @@ export interface SparkMemoSettings {
 
 export const DEFAULT_SETTINGS: SparkMemoSettings = {
   language: 'system',
+  captureZenMode: false,
   targetHeading: 'Memo',
   headingLevel: 2,
   timestampPattern: '\\d{2}:\\d{2}',

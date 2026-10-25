@@ -32,6 +32,7 @@
 | 字段 | 类型 | 默认值 | 用途 | 修改后的副作用 |
 |---|---|---|---|---|
 | `language` | `system` / `zh` / `zh-TW` / `en` / `ja` | `system` | 插件界面和新地名查询的语言 | 更新翻译语言并刷新设置页 |
+| `captureZenMode` | boolean | `false` | 记忆桌面端输入卡片的 Zen 模式状态，移动端忽略且不改写，不在设置页增加控件 | 隐藏或恢复记录面板的标签栏与时间线 |
 | `targetHeading` | string | `"Memo"` | 激活插件的 heading 文本 | `refreshEditors()` 重新扫描 section |
 | `headingLevel` | number | `2` | Heading 级别（1–6，对应 `#`–`######`） | `refreshEditors()` |
 | `timestampPattern` | string | `\d{2}:\d{2}` | 时间戳识别正则 | `refreshEditors()` |
