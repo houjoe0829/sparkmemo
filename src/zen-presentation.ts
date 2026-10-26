@@ -154,17 +154,14 @@ export function runZenTransition(root: HTMLElement, card: HTMLElement, chrome: H
       el.inert = true;
       if (enabled) {
         if (display === 'none' || rect.width <= 0) continue;
-        el.style.setProperty('position', 'absolute');
+        el.setCssStyles({ position: 'absolute', boxSizing: 'border-box', margin: '0', pointerEvents: 'none' });
         el.style.setProperty('display', display, 'important');
-        el.style.setProperty('box-sizing', 'border-box');
         const parent = el.offsetParent as HTMLElement | null;
         const origin = parent?.getBoundingClientRect() ?? rootRect;
         el.style.setProperty('left', `${rect.left - origin.left + (parent?.scrollLeft ?? 0)}px`);
         el.style.setProperty('top', `${rect.top - origin.top + (parent?.scrollTop ?? 0)}px`);
         el.style.setProperty('width', `${rect.width}px`);
         el.style.setProperty('height', `${rect.height}px`);
-        el.style.setProperty('margin', '0');
-        el.style.setProperty('pointer-events', 'none');
       }
       animations.push(el.animate([{ opacity }, { opacity: enabled ? 0 : 1 }], options));
     }

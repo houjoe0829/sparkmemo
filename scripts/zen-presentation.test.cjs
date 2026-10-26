@@ -13,7 +13,14 @@ function node(doc,tag='div'){
   getAttribute:k=>attrs.get(k)??null,setAttribute:(k,v)=>attrs.set(k,v),removeAttribute:k=>attrs.delete(k),
   appendChild(c){this.children.push(c);return c},replaceChildren(){this.children=[]},remove(){this.removed=true},
   getBoundingClientRect(){return this.rect??{left:0,top:0,width:360,height:720}},
-  style:{setProperty:(k,v)=>attrs.set(k,v)},animate(frames,options){
+  setCssStyles(styles){
+   (this.cssStyleCalls??=[]).push({...styles});
+   for(const [key,value] of Object.entries(styles))this.style.setProperty(key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase()),value);
+  },
+  style:{setProperty:(k,v,priority='')=>{
+   const declarations=(attrs.get('style')??'').split(';').map(s=>s.trim()).filter(s=>s&&!s.startsWith(k+':'));
+   declarations.push(`${k}: ${v}${priority?' !'+priority:''}`);attrs.set('style',declarations.join('; ')+';');
+  }},animate(frames,options){
    let resolve;const a={frames,options,finished:new Promise(r=>resolve=r),pause(){this.playState='paused'},play(){this.playState='running'},currentTime:0,cancel(){this.cancelled=true;resolve()},finish:()=>resolve()};
    (this.animations??=[]).push(a);return a;
   }};return n;
@@ -96,4 +103,23 @@ test('offscreen pane pauses drift and intersection observer is disconnected on c
   callback([{target:root,isIntersecting:false}]);assert.equal(animation.playState,'paused');
   callback([{target:root,isIntersecting:true}]);assert.equal(animation.playState,'running');layer.dispose();assert.equal(disconnected,true);
  }finally{global.IntersectionObserver=old;}
+});
+
+test('transition applies fixed styles through the supported Obsidian helper',()=>{
+ const {root,card,chrome}=fixture();
+ const cancel=runZenTransition(root,card,[chrome],true,()=>{},null);
+ assert.deepEqual(chrome.cssStyleCalls,[{position:'absolute',boxSizing:'border-box',margin:'0',pointerEvents:'none'}]);
+ for(const declaration of ['position: absolute','box-sizing: border-box','margin: 0','pointer-events: none','display: flex !important']){
+  assert.ok(chrome.getAttribute('style').includes(declaration),declaration);
+ }
+ cancel();assert.equal(chrome.getAttribute('style'),null);assert.equal(chrome.inert,false);
+});
+test('finishing and cancelling preserve existing inline styles and inert state',async()=>{
+ for(const finish of [true,false]){
+  const {root,card,chrome}=fixture();const original='color: red; margin: 8px;';
+  chrome.setAttribute('style',original);chrome.inert=true;
+  const cancel=runZenTransition(root,card,[chrome],true,()=>{},null);
+  if(finish){card.animations[0].finish();chrome.animations[0].finish();await new Promise(r=>setImmediate(r));}else cancel();
+  assert.equal(chrome.getAttribute('style'),original);assert.equal(chrome.inert,true);
+ }
 });
