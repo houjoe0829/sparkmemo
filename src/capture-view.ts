@@ -877,7 +877,7 @@ export class JournalCaptureView extends ItemView {
     this.renderTopLevelMessage(t('search.searching'));
 
     // Build the sorted file queue (newest → oldest) once, then scan lazily
-    const allNotes = getAllDailyNotes() as Record<string, TFile>;
+    const allNotes = getAllDailyNotes();
     const queue: Array<{ date: moment.Moment; file: TFile }> = [];
     for (const file of Object.values(allNotes)) {
       if (!(file instanceof TFile)) continue;
@@ -2240,7 +2240,7 @@ export class JournalCaptureView extends ItemView {
   private async resolveAttachmentPath(configuredFolder: string, baseName: string): Promise<string> {
     const configured = configuredFolder.trim();
     if (configured.length === 0) {
-      const todayNote = getDailyNote(moment(), getAllDailyNotes()) as TFile | null;
+      const todayNote = getDailyNote(moment(), getAllDailyNotes());
       const sourcePath = todayNote?.path ?? '';
       return this.app.fileManager.getAvailablePathForAttachment(baseName, sourcePath);
     }
@@ -3301,11 +3301,11 @@ export class JournalCaptureView extends ItemView {
     if (!appHasDailyNotesPluginLoaded()) return result;
 
     const daysInMonth = monthStart.daysInMonth();
-    const allNotes = getAllDailyNotes() as Record<string, TFile>;
+    const allNotes = getAllDailyNotes();
     for (let d = 1; d <= daysInMonth; d++) {
       const date = monthStart.clone().date(d);
       try {
-        const file = getDailyNote(date, allNotes) as TFile | null;
+        const file = getDailyNote(date, allNotes);
         if (!file) continue;
         const content = await this.app.vault.cachedRead(file);
         const section = findSection(
@@ -3640,7 +3640,7 @@ export class JournalCaptureView extends ItemView {
       );
     }
     mirror.addClass('jp-caret-mirror');
-    mirror.setCssStyles(copied as Partial<CSSStyleDeclaration>);
+    mirror.setCssStyles(copied);
     mirror.textContent = ta.value.slice(0, charIndex);
     const marker = activeDocument.createElement('span');
     marker.textContent = '​';
@@ -3823,7 +3823,7 @@ export class JournalCaptureView extends ItemView {
       );
     }
     mirror.addClass('jp-caret-mirror');
-    mirror.setCssStyles(copied as Partial<CSSStyleDeclaration>);
+    mirror.setCssStyles(copied);
     mirror.textContent = ta.value.slice(0, charIndex);
     const marker = activeDocument.createElement('span');
     marker.textContent = '​';
@@ -3983,7 +3983,7 @@ export class JournalCaptureView extends ItemView {
   ): Promise<DaySection | null> {
     let file: TFile | null = null;
     try {
-      file = getDailyNote(date, getAllDailyNotes()) as TFile | null;
+      file = getDailyNote(date, getAllDailyNotes());
     } catch (err) {
       console.error('[Spark Memo] daily note resolve failed', err);
     }
@@ -4027,7 +4027,7 @@ export class JournalCaptureView extends ItemView {
     let entries: JournalEntry[] = [];
     let file: TFile | null = null;
     try {
-      file = getDailyNote(day.date, getAllDailyNotes()) as TFile | null;
+      file = getDailyNote(day.date, getAllDailyNotes());
       if (file) {
         const content = await this.app.vault.cachedRead(file);
         const section = findSection(
@@ -4214,7 +4214,7 @@ export class JournalCaptureView extends ItemView {
         return;
       }
 
-      const all = getAllDailyNotes() as Record<string, TFile>;
+      const all = getAllDailyNotes();
       const index = new Map<string, { count: number; lastTs: number; entries: Array<LocatedEntry> }>();
 
       for (const file of Object.values(all)) {
@@ -4638,7 +4638,7 @@ export class JournalCaptureView extends ItemView {
         return;
       }
 
-      const all = getAllDailyNotes() as Record<string, TFile>;
+      const all = getAllDailyNotes();
       const index = new Map<
         string,
         { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
@@ -5057,7 +5057,7 @@ export class JournalCaptureView extends ItemView {
 
   /** Reads every daily note, rewrites tag tokens in its Memo section via `mapTag`, and writes back only the files that actually changed. */
   private async applyTagRewrite(mapTag: (tag: string) => string | null): Promise<{ filesChanged: number; entriesChanged: number }> {
-    const all = getAllDailyNotes() as Record<string, TFile>;
+    const all = getAllDailyNotes();
     let filesChanged = 0;
     let entriesChanged = 0;
     for (const file of Object.values(all)) {
@@ -5325,7 +5325,7 @@ export class JournalCaptureView extends ItemView {
       return;
     }
 
-    const allNotes = getAllDailyNotes() as Record<string, TFile>;
+    const allNotes = getAllDailyNotes();
     const today = moment().startOf('day');
     const pool = Object.values(allNotes).filter((f): f is TFile => {
       if (!(f instanceof TFile)) return false;
@@ -5561,7 +5561,7 @@ export class JournalCaptureView extends ItemView {
       const fullRescan = this.dirtyYears === null;
       const yearsToScan = this.dirtyYears;
 
-      const all = getAllDailyNotes() as Record<string, TFile>;
+      const all = getAllDailyNotes();
       const yearMap = new Map<number, Array<{ key: string; sectionText: string }>>();
       const yearCitiesUpdate = new Map<number, Set<string>>();
 

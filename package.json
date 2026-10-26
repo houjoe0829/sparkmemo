@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/build.js --watch",
     "build": "tsc -noEmit -skipLibCheck && node scripts/build.js",
+    "lint": "eslint src",
     "deploy": "bash deploy.sh"
   },
   "keywords": [
@@ -20,6 +21,8 @@
     "@codemirror/view": "^6.26.3",
     "@types/node": "^22.0.0",
     "esbuild": "^0.21.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-obsidianmd": "0.4.2",
     "obsidian": "latest",
     "tslib": "^2.6.2",
     "typescript": "^5.5.3"

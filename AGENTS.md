@@ -21,6 +21,9 @@ The project started as a fork of [zhaohongxuan/journal-partner](https://github.c
 # Install dependencies
 npm install
 
+# Local source review (does not replace community review)
+npm run lint
+
 # Development mode (watch and rebuild on save)
 npm run dev
 

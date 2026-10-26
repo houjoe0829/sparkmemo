@@ -52,7 +52,7 @@ export function districtName(data: unknown): string | null {
     throw new Error('Invalid geocode response');
   }
   if (data.features.length === 0) return null;
-  const feature = data.features[0];
+  const feature: unknown = data.features[0];
   const geo = record(feature) && record(feature.properties) ? feature.properties.geocoding : null;
   if (!record(geo)) throw new Error('Invalid geocode response');
   const admin = record(geo.admin) ? geo.admin : {};
@@ -111,7 +111,7 @@ export class ReverseGeocoder {
     const cached = this.cached(key);
     if (cached !== undefined) return cached;
     const existing = this.pending.get(key);
-    if (existing) return existing;
+    if (existing !== undefined) return existing;
     const job = this.tail.then(() => this.lookup(lat, lon, locale, key));
     this.pending.set(key, job);
     this.tail = job.then(() => { this.pending.delete(key); }, () => { this.pending.delete(key); });
@@ -165,7 +165,7 @@ export class ReverseGeocoder {
         if (abandoned && !this.disposed) this.restrict(response);
         return { type: 'response' as const, response };
       },
-      error => ({ type: 'error' as const, error }),
+      (error: unknown) => ({ type: 'error' as const, error }),
     ).finally(() => { this.transportActive = false; });
     // requestUrl cannot abort. Time out the caller, but guard against starting
     // another transport until the real request settles, even after our deadline.
@@ -175,7 +175,7 @@ export class ReverseGeocoder {
       this.cancelRequest = () => resolve({ type: 'cancelled' });
     });
     const outcome = await Promise.race([request, deadline]);
-    clearTimeout(timer!);
+    clearTimeout(timer);
     this.cancelRequest = null;
     if (this.disposed || outcome.type === 'cancelled') return null;
     if (outcome.type === 'timeout') {
@@ -223,7 +223,10 @@ export class ReverseGeocoder {
   }
   private remember(key: string, result: string | null): string | null {
     this.cache.set(key, { name: result, expiresAt: result === null ? this.now() + DAY : null });
-    while (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value!);
+    while (this.cache.size > CACHE_LIMIT) {
+      const [oldestKey] = this.cache.keys();
+      this.cache.delete(oldestKey);
+    }
     this.persist();
     return result;
   }

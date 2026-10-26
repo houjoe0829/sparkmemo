@@ -453,3 +453,38 @@ test('Obsidian traditional/Japanese aliases and explicit preferences reach the s
   assert.equal(await api.reverseGeocodeCity(30, 114), 'ja');
   assert.equal(urls.length, 2);
 });
+
+test('district parser rejects unverified feature values before reading their properties', () => {
+  for (const feature of [null, undefined, false, 42, 'private response', [],
+    { properties: null }, { properties: [] }, { properties: { geocoding: 'not an object' } }]) {
+    assert.throws(() => districtName({ type: 'FeatureCollection', features: [feature] }), /Invalid geocode response/);
+  }
+});
+test('non-Error rejection values retain timeout classification without leaking their contents', async () => {
+  for (const [error, kind] of [
+    [null, 'network'], [undefined, 'network'], ['private response', 'network'], [42, 'network'],
+    [{ message: 'private coordinates' }, 'network'], [{ name: 'TimeoutError', message: 'private' }, 'timeout'],
+    [{ code: 'ETIMEDOUT', message: 'private' }, 'timeout'], [{ code: 'OTHER', message: 'private' }, 'network'],
+  ]) {
+    const h = harness({ request: () => Promise.reject(error) });
+    assert.equal(await h.client.resolve(30, 114, 'zh'), null);
+    assert.deepEqual(h.reports, [{ kind, status: undefined }]);
+    assert.equal(h.calls.length, 1);
+    await h.client.flush(); h.client.dispose();
+  }
+});
+test('cache eviction keeps insertion order even after a hit and survives reload', async () => {
+  const entries = Array.from({ length: 2000 }, (_, i) => ({ key: `${i / 10000},114:en`, name: `Cached county ${i}`, expiresAt: null }));
+  const h = harness({ raw: JSON.stringify({ version: 1, format: 'geocodejson-district-v1', entries }) });
+  assert.equal(await h.client.resolve(0, 114, 'en'), 'Cached county 0');
+  assert.equal(h.calls.length, 0);
+  assert.equal(await h.client.resolve(30, 114, 'en'), '江岸区');
+  await h.client.flush();
+  assert.deepEqual(JSON.parse(h.raw()).entries.map(entry => entry.key), [...entries.slice(1).map(entry => entry.key), '30,114:en']);
+  await h.restart();
+  assert.equal(await h.client.resolve(0.0001, 114, 'en'), 'Cached county 1');
+  assert.equal(h.calls.length, 1);
+  assert.equal(await h.client.resolve(0, 114, 'en'), '江岸区');
+  assert.equal(h.calls.length, 2);
+  await h.client.flush(); h.client.dispose();
+});

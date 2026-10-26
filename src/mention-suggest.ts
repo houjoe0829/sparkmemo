@@ -251,7 +251,7 @@ export class MentionSuggest {
         return a.path.localeCompare(b.path);
       })
       .slice(0, MAX_RESULTS)
-      .map(({ kind, name, path }) => ({ kind, name, path } as MentionItem));
+      .map(({ kind, name, path }) => ({ kind, name, path }));
   }
 
   private move(delta: number): void {

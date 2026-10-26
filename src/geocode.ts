@@ -19,7 +19,7 @@ export function initializeGeocoding(plugin: Plugin): void {
         headers: { 'User-Agent': 'SparkMemo-Obsidian-Plugin' },
         throw: false,
       });
-      return { status: response.status, headers: response.headers, readJson: () => response.json };
+      return { status: response.status, headers: response.headers, readJson: (): unknown => response.json };
     },
     storage: {
       read: async () => {

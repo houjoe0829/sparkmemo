@@ -40,7 +40,7 @@ Obsidian 插件商店 admin 页面有两个按钮：
 
 ## 推荐顺序
 ```
-改代码 → push → 商店点 "Review branch" 确认代码干净
+改代码 → npm run lint → push → 商店点 "Review branch" 确认代码干净
                     ↓
                 有 Error 就修完再 push，重新点一次 Review
                     ↓
@@ -52,9 +52,9 @@ Obsidian 插件商店 admin 页面有两个按钮：
 ```
 这样把「代码问题」和「发版流程问题」拆开处理。
 
-「Review branch」这一步不能省。本地没有 eslint 环境（项目里没有任何 eslint 配置和依赖），商店那次 review 是唯一的 lint 检查。0.2.4 就是靠它拦下一个 Error：`chat-pane.ts` 里 `style.height = 'auto'` 违反 `obsidianmd/no-static-styles-assignment`，改用 `setCssStyles({ height: 'auto' })` 才过。因为 tag 还没推，那次没烧掉版本号。
+先运行 `npm run lint`，使用 ESLint 和 Obsidian 官方检查插件的推荐规则检查 `src/` 源码，排除构建产物。不自动修复、不关闭规则，也不调整错误或警告级别；有 Error 时先核对原因，Warning 不作为本地命令失败条件。本地检查与社区审核可能使用不同的规则版本和环境，因此「Review branch」这一步仍不能省。当前检查工具固定为 ESLint 9.39.5 和 eslint-plugin-obsidianmd 0.4.2；后者依赖的 eslint-plugin-import 2.32.0 尚未声明支持 ESLint 10，ESLint 9 已结束维护，因此该开发工具组合存在维护限制，后续需随上游兼容情况评估升级。0.2.4 就是靠它拦下一个 Error：`chat-pane.ts` 里 `style.height = 'auto'` 违反 `obsidianmd/no-static-styles-assignment`，改用 `setCssStyles({ height: 'auto' })` 才过。因为 tag 还没推，那次没烧掉版本号。
 
-Review 结果里只有 Error 阻断审核，Warning 不阻断。当前 main 上还有几十处 `@typescript-eslint/no-unsafe-assignment` 的 Warning，主要来自 Obsidian 的 `moment` 类型退化成 any、`requestUrl` 的 json 返回 any、以及 `chat-runtime.ts` 里刻意的动态 `require`，不是真实缺陷，留待单独一轮处理，不要混在发版里改。
+社区 Review 结果里只有 Error 阻断审核，Warning 不阻断。本地推荐规则可能将社区的某些 Warning 记为 Error，因此两边的数量和级别不能直接等同。类型、异步回调及弃用警告需要结合代码和实际行为核实，既不能直接视为故障，也不能一概认定无害；在单独确认范围后处理，不为清空警告批量修改发版代码。
 
 ## 铁律：tag 不可回收
 Tag 一旦推到远端就别改指向。商店 review 系统会认死第一次看到的 SHA，force-push tag 之后也不会重跑。如果 Release 内容有问题，直接跳下一个版本号重发（例如 0.2.1 出错就跳 0.2.2），别在原版本号上打补丁。历史教训：0.2.1 因为 tag 打在了修复前的 commit 上，改了 tag 指向后审核依然认旧 SHA，最终只能跳到 0.2.2 才通过。
