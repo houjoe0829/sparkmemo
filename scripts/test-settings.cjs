@@ -704,10 +704,34 @@ test('stats rendering separates 萬/万 units and localizes heatmap dates indepe
       assert.equal(view.statsBodyEl.querySelector('.jp-stats-monthlabel').textContent, month);
       const cells = view.statsBodyEl.querySelectorAll('.jp-stats-cell').filter(el => el.getAttribute('title'));
       assert.equal(cells.length, 365); assert.ok(cells[0].getAttribute('title').startsWith(firstDate));
-      assert.ok(view.statsBodyEl.querySelector('.jp-stats-footer').textContent.includes('32,000'));
+      assert.equal(view.statsBodyEl.querySelector('.jp-stats-hero-num').textContent, locale === 'en' ? '32K' : '3.2');
+      assert.ok(view.statsBodyEl.querySelector('.jp-stats-footer').textContent.includes(
+        locale === 'zh' || locale === 'zh-TW' ? '32000' : '32,000'));
       assert.equal(moment.locale(), original);
     }
   } finally { obsidian.moment = stub; }
+});
+
+test('annual word totals preserve exact digits, grouping rules and audio summaries', () => {
+  for (const locale of ['zh', 'zh-TW', 'en', 'ja']) {
+    setup(); setLanguage(locale);
+    for (const words of [0, 999, 1000, 9999, 123456, 1234567]) {
+      for (const audios of [0, 2]) {
+        const view = Object.create(JournalCaptureView.prototype);
+        view.statsBodyEl = new Element();
+        view.renderStatsHeatmap = () => {};
+        view.renderStatsHeatmapSection(2026, {
+          writingDays: 1234, totalWords: words, totalEntries: 12345, totalAudios: audios,
+        });
+        const wordText = locale === 'zh' || locale === 'zh-TW'
+          ? String(words) : words.toLocaleString(locale === 'en' ? 'en-US' : 'ja-JP');
+        assert.equal(view.statsBodyEl.querySelector('.jp-stats-footer').textContent,
+          t('stats.footerSummary', { days: '1234', words: wordText, entries: '12345' })
+          + (audios ? t('stats.footerAudioSuffix', { count: String(audios) }) : ''),
+          `${locale}:${words}:${audios}`);
+      }
+    }
+  }
 });
 
 test('select menus use the owning settings document in a separate window', async () => {

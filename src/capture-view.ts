@@ -5749,10 +5749,13 @@ export class JournalCaptureView extends ItemView {
 
     // Footer summary
     const footer = section.createDiv({ cls: 'jp-stats-footer' });
+    const locale = currentLocale();
     footer.setText(
       t('stats.footerSummary', {
         days: String(stats.writingDays),
-        words: stats.totalWords.toLocaleString(LANGUAGE_PROFILES[currentLocale()].numberLocale),
+        words: stats.totalWords.toLocaleString(LANGUAGE_PROFILES[locale].numberLocale, {
+          useGrouping: locale !== 'zh' && locale !== 'zh-TW',
+        }),
         entries: String(stats.totalEntries),
       }) + (stats.totalAudios > 0 ? t('stats.footerAudioSuffix', { count: String(stats.totalAudios) }) : ''),
     );
