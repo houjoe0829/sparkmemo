@@ -6,6 +6,15 @@ const vm = require('node:vm');
 const path = require('node:path');
 const esbuild = require('esbuild');
 
+// Geometry assertions ignore redundant specificity weights, but retain declarations and states.
+function assertionCss(file) {
+  let css = require('node:fs').readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(\.jp-[\w-]+)(?:\1)+/g, '$1');
+  for (let i = 0; i < 3; i++) css = css.replace(/([^{}]+)\{([^{}]*)\}\s*([^{}]+)\{([^{}]*)\}/g,
+    (whole, a, bodyA, b, bodyB) => a.trim() === b.trim() ? `${a}{${bodyA}${bodyB}}` : whole);
+  return css;
+}
+
 // Small DOM/Obsidian doubles keep these tests independent of a running vault.
 // They exercise render structure and callbacks, not layout or visual acceptance.
 let focused;
@@ -206,6 +215,10 @@ vm.runInNewContext(output, {
   module: loaded, exports: loaded.exports,
   require: name => name === 'obsidian' ? obsidian : require(name),
   Buffer, URL, Blob, Math: runtimeMath, Image: TestImage, document: ownerDocument, window: runtimeWindow, navigator: runtimeNavigator, MediaRecorder: TestMediaRecorder, performance,
+  createEl: tag => tag === 'canvas' ? previewCanvas : new Element(tag),
+  createDiv: opts => new Element('div', opts),
+  createSpan: opts => new Element('span', opts),
+  createFragment: () => new Element('fragment'),
   activeDocument: {
     createElement: tag => tag === 'canvas' ? previewCanvas : new Element(tag),
     createDocumentFragment: () => new Element('fragment'),
@@ -465,7 +478,7 @@ test('email launch errors are localized and preserve the manual copy fallback', 
   assert.equal(modal.contentEl.querySelectorAll('button').length, 2); modal.close();
 });
 test('email icon and dialog use scoped styles while retaining the existing brand icon treatment', () => {
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   assert.match(css, /\.jp-settings \.jp-settings-about-icon \.svg-icon\s*\{[^}]*stroke:\s*none;/s);
   assert.match(css, /\.jp-settings \.jp-settings-about-email \.svg-icon\s*\{[^}]*fill:\s*none;[^}]*stroke:\s*currentColor;/s);
   assert.match(css, /\.jp-email-contact-address\s*\{[^}]*user-select:\s*text;/s);
@@ -491,14 +504,14 @@ test('About title reuses the product sparkle beside the smaller name without ext
     assert.equal(title.textContent, 'Spark Memo');
     assert.equal(plugin.saved.length, 0);
   }
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   const titleRule = css.match(/\.jp-settings \.jp-settings-about-title\s*\{([^}]*)\}/)[1];
   assert.match(titleRule, /font-size:\s*24px;/);
   assert.match(titleRule, /display:\s*flex;/);
   assert.match(titleRule, /align-items:\s*center;/);
   assert.match(titleRule, /justify-content:\s*center;/);
   assert.match(titleRule, /gap:\s*8px;/);
-  assert.match(css, /\.jp-settings \.jp-settings-about-product-icon \.svg-icon\s*\{[^}]*width:\s*24px !important;[^}]*height:\s*24px !important;/s);
+  assert.match(css, /\.jp-settings \.jp-settings-about-product-icon \.svg-icon\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s);
 });
 
 test('regrouping renders every existing setting exactly once and never migrates saved values', async () => {
@@ -589,17 +602,17 @@ test('stats settings button occupies the existing left spacer and retains year/b
   assert.equal(view.statsToolbarEl.children.length, 2); assert.deepEqual(calls, []);
 });
 test('stats settings background is transparent until hover, scoped above host button defaults without changing focus or dimensions', () => {
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   const base = css.match(/\.jp-stats-toolbar \.jp-stats-settings-btn\s*\{([^}]*)\}/)[1];
   const hover = css.match(/\.jp-stats-toolbar \.jp-stats-settings-btn:hover\s*\{([^}]*)\}/)[1];
   const focus = css.match(/\.jp-stats-toolbar \.jp-stats-settings-btn:focus-visible\s*\{([^}]*)\}/)[1];
   assert.match(base, /background:\s*transparent;/);
   assert.match(hover, /background:\s*var\(--background-modifier-hover\);/);
-  assert.match(base, /width:\s*28px !important;/);
-  assert.match(base, /height:\s*100% !important;/);
-  assert.match(base, /padding:\s*0 !important;/);
+  assert.match(base, /width:\s*28px;/);
+  assert.match(base, /height:\s*100%;/);
+  assert.match(base, /padding:\s*0;/);
   assert.match(focus, /outline:\s*2px solid var\(--interactive-accent\);/);
-  assert.match(css, /\.is-mobile \.jp-stats-toolbar \.jp-stats-settings-btn\s*\{[^}]*width:\s*32px !important;/s);
+  assert.match(css, /\.is-mobile \.jp-stats-toolbar \.jp-stats-settings-btn\s*\{[^}]*width:\s*32px;/s);
   assert.deepEqual(hover.trim().split('\n').map(line => line.trim()), ['background: var(--background-modifier-hover);']);
 });
 
@@ -776,12 +789,13 @@ test('About icon links preserve exact destinations, accessible names and safe br
 });
 
 test('About brand icon buttons keep equal compact geometry and scoped theme-aware SVG styles', () => {
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   const rule = css.match(/\.jp-settings \.jp-settings-about-btn\s*\{([^}]*)\}/)[1];
   assert.match(rule, /width:\s*38px/); assert.match(rule, /height:\s*38px/);
   assert.match(rule, /display:\s*inline-flex/); assert.match(rule, /align-items:\s*center/);
   assert.match(rule, /justify-content:\s*center/); assert.match(rule, /padding:\s*0/);
-  assert.match(css, /\.jp-settings \.jp-settings-about-icon \.svg-icon\s*\{[^}]*width:\s*18px !important;[^}]*height:\s*18px !important;[^}]*stroke:\s*none/s);
+  const brandSvg = css.match(/\.jp-settings \.jp-settings-about-icon \.svg-icon\s*\{([^}]*)\}/)[1];
+  for (const property of [/width:\s*18px;/, /height:\s*18px;/, /stroke:\s*none/]) assert.match(brandSvg, property);
 });
 
 test('all toolbar tabs, tag/location controls and search actions keep accessible names without native hover titles', () => {
@@ -935,7 +949,7 @@ test('random memo heading shares the search dice glyph without adding another ra
   }
 });
 test('random heading dice keeps the existing header anchor and matches search icon size with mobile-safe SVG sizing', () => {
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   const rule = selector => {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const found = css.match(new RegExp('(?:^|\\n)' + escaped + '\\s*\\{([^}]+)\\}'));
@@ -1183,14 +1197,14 @@ test('microphone permission failure restores save availability', async () => {
   assert.equal(view.recordingBusy, false); assert.equal(view.submitBtn.disabled, false); assert.equal(view.textareaEl.value, 'Draft');
 });
 test('shortcut hint is hover-only across the entire input card and retains its layout slot', () => {
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   assert.match(css, /\.jp-capture-submit-shortcut\s*\{\s*display:\s*inline-block;\s*opacity:\s*0;/);
   assert.match(css, /\.jp-capture-card:hover \.jp-capture-submit-shortcut\s*\{\s*opacity:\s*1;/);
   assert.doesNotMatch(css, /:focus(?:-within|-visible)?[^{}]*\.jp-capture-submit-shortcut/);
 });
 
 test('keycap styling is local, non-interactive, responsive and disappears with recording controls', () => {
-  const css = require('node:fs').readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const css = assertionCss(path.join(root, 'styles.css'));
   assert.match(css, /\.jp-capture-actions\s*\{[^}]*container-name:\s*jp-composer-actions/s);
   assert.match(css, /@container jp-composer-actions \(max-width: 260px\)\s*\{\s*\.jp-capture-submit-shortcut\s*\{\s*display:\s*none/s);
   assert.match(css, /\.jp-capture-submit-shortcut\s*\{[^}]*background:\s*var\(--background-secondary\)[^}]*pointer-events:\s*none/s);
@@ -1500,19 +1514,19 @@ test('rapid Zen toggles serialize writes, recover after persistence errors and r
 });
 
 test('only Zen removes its fill and border in normal and hovered states', () => {
-  const css = require('node:fs').readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+  const css = assertionCss(path.resolve(__dirname, '../styles.css'));
   const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)];
   const rule = rules.find(([, selectors, body]) => selectors.trim() === '.jp-capture-zen-btn,\n.jp-capture-zen-btn:hover');
   assert.ok(rule, 'Zen-only style override must cover normal and hover');
-  assert.match(rule[2], /background:\s*transparent !important;/);
-  assert.match(rule[2], /border:\s*none !important;/);
+  assert.match(rule[2], /background:\s*transparent;/);
+  assert.match(rule[2], /border:\s*none;/);
   // The original insertion tools still use their existing filled round buttons.
   const shared = rules.find(([, selectors, body]) => selectors.includes('.jp-capture-plus-btn,') && body.includes('background: color-mix'));
   assert.ok(shared); assert.match(shared[2], /border:\s*1px solid/);
 });
 
 test('only Zen centers the natural-size composer, with safe scrolling when it exceeds the pane', () => {
-  const css = require('node:fs').readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+  const css = assertionCss(path.resolve(__dirname, '../styles.css'));
   const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)];
   const pane = rules.find(([, selector]) => selector.trim() === '.jp-capture-zen > .jp-pane-capture');
   const card = rules.find(([, selector]) => selector.trim() === '.jp-capture-zen > .jp-pane-capture > .jp-capture-card');
@@ -1524,15 +1538,15 @@ test('only Zen centers the natural-size composer, with safe scrolling when it ex
 });
 
 test('desktop Zen styles scope hidden tabs/timeline and retain hover, keyboard, touch and recording rules', () => {
-  const css = require('node:fs').readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
+  const css = assertionCss(path.resolve(__dirname, '../styles.css'));
   assert.match(css, /\.jp-capture-zen-btn\s*\{\s*opacity:\s*0;\s*pointer-events:\s*none;/);
   assert.match(css, /\.jp-capture-card:hover \.jp-capture-zen-btn,/);
   assert.match(css, /\.jp-capture-zen-btn:focus-visible,/);
   assert.match(css, /\.jp-capture-zen \.jp-capture-zen-btn\s*\{/);
   assert.doesNotMatch(css, /\.is-mobile \.jp-capture-zen-btn/);
   assert.match(css, /@media \(hover: none\)/);
-  assert.match(css, /\.jp-capture-zen > \.jp-tab-bar,\s*\.jp-capture-zen > \.jp-pane-capture > \.jp-timeline-scroll\s*\{\s*display:\s*none !important;/);
-  assert.match(css, /\.jp-capture-geo-btn svg,\s*\.jp-capture-zen-btn svg\s*\{[^}]*width:\s*18px !important;[^}]*flex-shrink:\s*0 !important;/);
+  assert.match(css, /\.jp-capture-zen > \.jp-tab-bar,\s*\.jp-capture-zen > \.jp-pane-capture > \.jp-timeline-scroll\s*\{\s*display:\s*none;/);
+  assert.match(css, /\.jp-capture-geo-btn svg,\s*\.jp-capture-zen-btn svg\s*\{[^}]*width:\s*18px;[^}]*flex-shrink:\s*0;/);
   assert.match(css, /\.jp-capture-zen \.jp-capture-actions\.is-recording \.jp-capture-button-row/);
 });
 
@@ -1582,10 +1596,31 @@ test('mobile does not create a corner exit button', () => {
   assert.equal(view.zenCloseBtn,null);assert.equal(root.querySelector('.jp-zen-close-btn'),null);
 });
 test('corner exit is scoped to Zen background hover and keyboard focus, without fill or normal-layout space', () => {
-  const css=require('node:fs').readFileSync(path.resolve(__dirname,'../styles.css'),'utf8');
-  assert.match(css,/\.jp-capture-root > \.jp-zen-close-btn\s*\{[^}]*position:\s*absolute;[^}]*display:\s*none;[^}]*background:\s*transparent !important;/);
-  assert.ok(css.includes('.jp-capture-zen:hover:not(:has(.jp-capture-card:hover)) > .jp-zen-close-btn,'));
+  const css=assertionCss(path.resolve(__dirname,'../styles.css'));
+  assert.match(css,/\.jp-capture-root > \.jp-zen-close-btn\s*\{[^}]*position:\s*absolute;[^}]*display:\s*none;[^}]*background:\s*transparent;/);
+  assert.ok(css.includes('.jp-capture-zen:hover:not(.jp-capture-card-hovered) > .jp-zen-close-btn,'));
   assert.match(css,/\.jp-capture-zen > \.jp-zen-close-btn:focus-visible\s*\{\s*opacity:\s*1;\s*pointer-events:\s*auto;/);
+});
+
+test('explicit metadata-row state matches all combinations of visible and hidden pills', () => {
+  for (let mask = 0; mask < 16; mask++) {
+    let hidden;
+    const view = Object.create(JournalCaptureView.prototype);
+    view.topPillRowEl = {
+      children: Array.from({ length: 4 }, (_, i) => ({ matches: () => !(mask & (1 << i)) })),
+      toggleClass(name, value) { assert.equal(name, 'jp-capture-top-pill-row--empty'); hidden = value; },
+    };
+    view.syncTopPillRow(); assert.equal(hidden, mask === 0);
+  }
+});
+
+test('attachment callbacks stay synchronous and report rejected operations without unhandled promises', async () => {
+  const view = Object.create(JournalCaptureView.prototype);
+  const previous = notices.length;
+  assert.equal(view.runAttachmentAction(() => Promise.reject('test attachment failure')), undefined);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(notices.length, previous + 1);
+  assert.ok(notices.at(-1).includes('test attachment failure'));
 });
 
 })().catch(error => { console.error(error); process.exitCode = 1; });

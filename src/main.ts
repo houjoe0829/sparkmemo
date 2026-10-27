@@ -59,7 +59,7 @@ export default class SparkMemoPlugin extends Plugin {
     initializeGeocoding(this);
     this.applyCSSVariables();
     this.registerEditorExtension(this.createEditorExtensions());
-    this.registerMarkdownPostProcessor(this.postProcessor.bind(this));
+    this.registerMarkdownPostProcessor((el, ctx) => this.postProcessor(el, ctx));
     this.addSettingTab(new SparkMemoSettingTab(this.app, this));
 
     // Capture sidebar view
@@ -409,9 +409,9 @@ export default class SparkMemoPlugin extends Plugin {
 
       const before = raw.slice(0, m.index);
       const after = raw.slice(m.index + m[0].length);
-      const span = createEl('span', { cls: 'jp-timestamp', text: m[0] });
+      const span = createSpan({ cls: 'jp-timestamp', text: m[0] });
 
-      const parent = textNode.parentNode!;
+      const parent = textNode.parentNode;
       if (before) parent.insertBefore(activeDocument.createTextNode(before), textNode);
       parent.insertBefore(span, textNode);
       if (after) parent.insertBefore(activeDocument.createTextNode(after), textNode);
@@ -428,11 +428,10 @@ export default class SparkMemoPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign(
-      {},
-      DEFAULT_SETTINGS,
-      await this.loadData(),
-    );
+    const saved: unknown = await this.loadData();
+    const settings = saved !== null && typeof saved === 'object' && !Array.isArray(saved)
+      ? saved as Partial<SparkMemoSettings> : {};
+    this.settings = { ...DEFAULT_SETTINGS, ...settings };
     this.settings.language = normalizeLanguage(this.settings.language);
     setLanguage(this.settings.language);
   }

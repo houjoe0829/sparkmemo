@@ -17,20 +17,26 @@ import wasmBinary from '@jsquash/webp/codec/enc/webp_enc.wasm';
 import { defaultOptions, type EncodeOptions } from '@jsquash/webp/meta.js';
 import type { WebPModule } from '@jsquash/webp/codec/enc/webp_enc';
 
+// Describe the factory boundary actually used here, including its instance callback.
+interface WebpModuleOptions {
+  noInitialRun: boolean;
+  instantiateWasm(imports: WebAssembly.Imports, callback: (instance: WebAssembly.Instance) => void): WebAssembly.Exports;
+}
+const createModule = createWebpModule as (options: WebpModuleOptions) => Promise<WebPModule>;
 let modulePromise: Promise<WebPModule> | null = null;
 
 function getModule(): Promise<WebPModule> {
-  if (!modulePromise) {
+  if (modulePromise === null) {
     modulePromise = (async () => {
-      const wasmModule = await WebAssembly.compile(wasmBinary as BufferSource);
-      return createWebpModule({
+      const wasmModule = await WebAssembly.compile(wasmBinary);
+      return createModule({
         noInitialRun: true,
         instantiateWasm: (imports, callback) => {
           const instance = new WebAssembly.Instance(wasmModule, imports);
           callback(instance);
           return instance.exports;
         },
-      }) as unknown as Promise<WebPModule>;
+      });
     })();
   }
   return modulePromise;

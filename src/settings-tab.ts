@@ -327,15 +327,15 @@ export class SparkMemoSettingTab extends PluginSettingTab {
 
     // Preview badge
     const previewEl = containerEl.createDiv({ cls: 'jp-settings-preview' });
-    previewEl.createEl('span', {
+    previewEl.createSpan({
       cls: 'jp-settings-preview-label',
       text: t('settings.preview.label'),
     });
-    previewEl.createEl('span', {
+    previewEl.createSpan({
       cls: 'jp-timestamp',
       text: '07:31',
     });
-    previewEl.createEl('span', { text: t('settings.preview.sampleText') });
+    previewEl.createSpan({ text: t('settings.preview.sampleText') });
 
   }
 

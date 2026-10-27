@@ -26,6 +26,7 @@ interface Dependencies {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
+  timers?: Pick<Window, 'setTimeout' | 'clearTimeout'>;
 }
 type RecordValue = Record<string, unknown>;
 interface CacheEntry { name: string | null; expiresAt: number | null }
@@ -97,9 +98,11 @@ export class ReverseGeocoder {
   private cancelWait: (() => void) | null = null;
   private cancelRequest: (() => void) | null = null;
   private readonly now: () => number;
+  private readonly timers: Pick<Window, 'setTimeout' | 'clearTimeout'>;
 
   constructor(private readonly deps: Dependencies) {
     this.now = deps.now ?? Date.now;
+    this.timers = deps.timers ?? window;
     this.ready = this.load();
   }
   async resolve(lat: number, lon: number, locale: GeocodeLocale): Promise<string | null> {
@@ -138,8 +141,8 @@ export class ReverseGeocoder {
     if (ms <= 0) return;
     if (this.deps.sleep) { await this.deps.sleep(ms); return; }
     await new Promise<void>(resolve => {
-      const timer = setTimeout(() => { this.cancelWait = null; resolve(); }, ms);
-      this.cancelWait = () => { clearTimeout(timer); this.cancelWait = null; resolve(); };
+      const timer = this.timers.setTimeout(() => { this.cancelWait = null; resolve(); }, ms);
+      this.cancelWait = () => { this.timers.clearTimeout(timer); this.cancelWait = null; resolve(); };
     });
   }
   private guarded(): boolean {
@@ -169,13 +172,13 @@ export class ReverseGeocoder {
     ).finally(() => { this.transportActive = false; });
     // requestUrl cannot abort. Time out the caller, but guard against starting
     // another transport until the real request settles, even after our deadline.
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: number;
     const deadline = new Promise<{ type: 'timeout' } | { type: 'cancelled' }>(resolve => {
-      timer = setTimeout(() => resolve({ type: 'timeout' }), this.deps.timeoutMs ?? 20000);
+      timer = this.timers.setTimeout(() => resolve({ type: 'timeout' }), this.deps.timeoutMs ?? 20000);
       this.cancelRequest = () => resolve({ type: 'cancelled' });
     });
     const outcome = await Promise.race([request, deadline]);
-    clearTimeout(timer);
+    this.timers.clearTimeout(timer);
     this.cancelRequest = null;
     if (this.disposed || outcome.type === 'cancelled') return null;
     if (outcome.type === 'timeout') {

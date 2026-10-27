@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/build.js --watch",
     "build": "tsc -noEmit -skipLibCheck && node scripts/build.js",
-    "lint": "eslint src",
+    "lint": "eslint src && node scripts/check-css.cjs",
     "deploy": "bash deploy.sh"
   },
   "keywords": [

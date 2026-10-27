@@ -11,7 +11,7 @@ interface LanguageProfile {
   largeNumberUnit: string | null;
 }
 
-export const LANGUAGE_PROFILES = {
+const profiles = {
   zh: {
     nativeName: '简体中文', hostAliases: ['zh', 'zh-CN', 'zh-SG', 'zh-Hans'],
     requestLanguage: 'zh-CN', momentLocale: 'zh-cn', numberLocale: 'zh-CN',
@@ -38,12 +38,14 @@ export const LANGUAGE_PROFILES = {
   },
 } satisfies Record<string, LanguageProfile>;
 
+// Explicit values keep null-only properties typed even without strictNullChecks.
+export const LANGUAGE_PROFILES: Record<keyof typeof profiles, LanguageProfile> = profiles;
 export type Locale = keyof typeof LANGUAGE_PROFILES;
 export type LanguagePreference = 'system' | Locale;
 export const SUPPORTED_LOCALES = Object.keys(LANGUAGE_PROFILES) as Locale[];
 
 export function isLocale(value: unknown): value is Locale {
-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(LANGUAGE_PROFILES, value);
+  return typeof value === 'string' && Object.keys(LANGUAGE_PROFILES).includes(value);
 }
 
 /** Prefer a specific script/region over a generic language prefix. */

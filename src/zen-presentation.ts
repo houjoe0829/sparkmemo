@@ -44,13 +44,12 @@ export class ZenBackdrop {
 
   constructor(private readonly root: HTMLElement) {
     const doc = root.ownerDocument;
-    this.layer = doc.createElement('div');
+    this.layer = root.createDiv();
     this.layer.className = 'jp-zen-backdrop';
     this.layer.setAttribute('aria-hidden', 'true');
     this.svg = doc.createElementNS(SVG_NS, 'svg');
     this.svg.setAttribute('focusable', 'false');
     this.layer.appendChild(this.svg);
-    root.appendChild(this.layer);
     this.reducedMotion = doc.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
     this.reducedMotion?.addEventListener?.('change', this.syncMotion);
     doc.addEventListener('visibilitychange', this.syncMotion);

@@ -76,6 +76,7 @@ import { CapturePlaceholder } from './capture-placeholder';
 import { readExifCaptureDate, readExifGpsLocation } from './exif';
 import { reverseGeocodeCity } from './geocode';
 import { encodeWebp } from './webp-encoder';
+import { readPreviewImage } from './image-blob';
 import {
   YearStats,
   AllTimeStats,
@@ -411,8 +412,11 @@ export class JournalCaptureView extends ItemView {
       await this.startRecordingFn();
     } else {
       // If the view isn't fully built yet, retry once the event loop settles
-      window.setTimeout(async () => {
-        if (this.startRecordingFn) await this.startRecordingFn();
+      window.setTimeout(() => {
+        if (this.startRecordingFn) void this.startRecordingFn().catch((error: unknown) => {
+          console.error('[Spark Memo] recording retry failed', error);
+          notice(t('notice.micAccessFailed', { error: error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error' }));
+        });
       }, 200);
     }
   }
@@ -448,6 +452,7 @@ export class JournalCaptureView extends ItemView {
     const root = this.containerEl.children[1];
     root.empty();
     root.addClass('jp-capture-root', 'jp-no-tooltip');
+    root.removeClass('jp-capture-card-hovered');
     this.zenClosed = false;
 
     // Top-level tab bar — switches between "Quick capture" and "Yearly stats".
@@ -456,6 +461,8 @@ export class JournalCaptureView extends ItemView {
     // Capture pane (default visible)
     this.capturePaneEl = (root as HTMLElement).createDiv({ cls: 'jp-pane jp-pane-capture' });
     this.buildInputCard(this.capturePaneEl);
+    this.registerDomEvent(this.inputCardEl, 'pointerenter', () => root.addClass('jp-capture-card-hovered'));
+    this.registerDomEvent(this.inputCardEl, 'pointerleave', () => root.removeClass('jp-capture-card-hovered'));
     this.setupCapturePlaceholder();
     this.buildTimeline(this.capturePaneEl);
     this.buildZenExitButton(root as HTMLElement);
@@ -982,8 +989,8 @@ export class JournalCaptureView extends ItemView {
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
-    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: t('search.matchCount', { count: String(entries.length) }) });
+    headerText.createDiv({ cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createDiv({ cls: 'jp-timeline-header-sub', text: t('search.matchCount', { count: String(entries.length) }) });
     this.addOpenNoteBtn(headerCard, day);
 
     const sourcePath = day.filePath ?? '';
@@ -996,7 +1003,7 @@ export class JournalCaptureView extends ItemView {
       row.createDiv({ cls: 'jp-timeline-dot' });
 
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
-      head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+      head.createSpan({ cls: 'jp-timestamp', text: entry.timestamp });
       const { text: bodyText, location } = extractLocationTag(entry.text);
       if (location) this.renderLocationChip(head, day, entry, location);
 
@@ -1078,6 +1085,9 @@ export class JournalCaptureView extends ItemView {
    * always did, and the full address remains its accessible name.
    */
   private shortenBareLinks(bubble: HTMLElement) {
+    for (const embed of Array.from(bubble.querySelectorAll<HTMLElement>('.internal-embed'))) {
+      embed.toggleClass('jp-timeline-audio-embed', embed.querySelector('audio') !== null);
+    }
     for (const a of Array.from(bubble.querySelectorAll('a'))) {
       const href = a.getAttribute('href') ?? '';
       if (!/^https?:\/\//i.test(href)) continue;
@@ -1105,7 +1115,7 @@ export class JournalCaptureView extends ItemView {
       const parent = embed.parentElement;
       if (!parent) continue;
       if (!byParent.has(parent)) byParent.set(parent, []);
-      byParent.get(parent)!.push(embed);
+      byParent.get(parent).push(embed);
     }
 
     for (const [parent, group] of byParent) {
@@ -1117,7 +1127,7 @@ export class JournalCaptureView extends ItemView {
       const between = elementChildren.slice(first, last + 1);
       if (between.some(el => !group.includes(el) && el.tagName !== 'BR')) continue;
 
-      const wrapper = activeDocument.createElement('div');
+      const wrapper = createDiv();
       wrapper.className = 'jp-timeline-image-grid';
       wrapper.setAttribute('data-count', String(group.length));
       parent.insertBefore(wrapper, group[0]);
@@ -1140,7 +1150,7 @@ export class JournalCaptureView extends ItemView {
       (el): el is HTMLElement => !!el.querySelector('img'),
     );
     const items: ImagePreviewItem[] = embeds.map(el => {
-      const img = el.querySelector('img')!;
+      const img = el.querySelector('img');
       // `.internal-embed[src]` holds the raw wikilink text; resolve it to a
       // real vault path so the preview can offer "copy image link".
       const linktext = el.getAttribute('src') ?? '';
@@ -1183,7 +1193,7 @@ export class JournalCaptureView extends ItemView {
       if (ext === 'md' || ext === '') continue;
       if (/^(png|jpe?g|gif|webp|bmp|svg|heic|heif|tiff?)$/.test(ext)) continue;
 
-      const card = activeDocument.createElement('a');
+      const card = createEl('a');
       card.className = 'jp-timeline-file-card';
       card.setAttribute('href', '#');
       card.setAttribute('aria-label', t('capture.openFile'));
@@ -1282,12 +1292,12 @@ export class JournalCaptureView extends ItemView {
       const idx = text.toLowerCase().indexOf(lower);
       if (idx === -1) continue;
 
-      const frag = activeDocument.createDocumentFragment();
+      const frag = createFragment();
       let cursor = 0;
       let pos = text.toLowerCase().indexOf(lower, cursor);
       while (pos !== -1) {
         if (pos > cursor) frag.appendChild(activeDocument.createTextNode(text.slice(cursor, pos)));
-        const mark = activeDocument.createElement('mark');
+        const mark = createEl('mark');
         mark.className = 'jp-search-highlight';
         mark.textContent = text.slice(pos, pos + query.length);
         frag.appendChild(mark);
@@ -1336,7 +1346,7 @@ export class JournalCaptureView extends ItemView {
   }
 
   private setupCapturePlaceholder() {
-    this.capturePlaceholder = new CapturePlaceholder(this.textareaEl, this.textareaEl.parentElement!,
+    this.capturePlaceholder = new CapturePlaceholder(this.textareaEl, this.textareaEl.parentElement,
       () => JournalCaptureView.INPUT_PLACEHOLDERS.map(key => t(key)),
       () => !this.editingEntry && !this.inputComposing && !this.isSubmitting);
   }
@@ -1439,7 +1449,7 @@ export class JournalCaptureView extends ItemView {
     this.registerEvent(this.app.vault.on('rename', () => { this.mentionCache = null; }));
     // Attachment paste (images + generic files): intercept at document level
     // (capture phase) for reliability
-    this.registerDomEvent(document, 'paste', async (e: ClipboardEvent) => {
+    this.registerDomEvent(document, 'paste', (e: ClipboardEvent) => this.runAttachmentAction(async () => {
       const items = e.clipboardData?.items;
       if (!items) return;
       // Only intercept if focus is inside our textarea
@@ -1459,10 +1469,10 @@ export class JournalCaptureView extends ItemView {
       e.stopImmediatePropagation();
       if (images.length > 0) await this.addImageFiles(images);
       if (others.length > 0) await this.addFiles(others);
-    }, true);
+    }), true);
     // Attachment drag & drop (images route to image pipeline for compression;
     // non-image files go through the file pipeline with the 10MB cap).
-    this.textareaEl.addEventListener('drop', async (e) => {
+    this.textareaEl.addEventListener('drop', (e) => this.runAttachmentAction(async () => {
       const files = e.dataTransfer?.files;
       if (!files) return;
       const all = Array.from(files);
@@ -1473,7 +1483,7 @@ export class JournalCaptureView extends ItemView {
       e.stopPropagation();
       if (images.length > 0) await this.addImageFiles(images);
       if (others.length > 0) await this.addFiles(others);
-    });
+    }));
     this.textareaEl.addEventListener('dragover', (e) => {
       if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
     }, true);
@@ -1488,14 +1498,14 @@ export class JournalCaptureView extends ItemView {
       },
     });
     fileInput.hide();
-    fileInput.addEventListener('change', async () => {
+    fileInput.addEventListener('change', () => this.runAttachmentAction(async () => {
       const files = fileInput.files;
       if (!files || files.length === 0) return;
       const images = Array.from(files).filter(f => f.type.startsWith('image/'));
       fileInput.value = '';
       if (images.length === 0) return;
       await this.addImageFiles(images);
-    });
+    }));
 
     // Hidden file input for generic-file upload. Accepts any type; images
     // picked through here still get routed to the image pipeline (with
@@ -1508,7 +1518,7 @@ export class JournalCaptureView extends ItemView {
       },
     });
     genericFileInput.hide();
-    genericFileInput.addEventListener('change', async () => {
+    genericFileInput.addEventListener('change', () => this.runAttachmentAction(async () => {
       const files = genericFileInput.files;
       if (!files || files.length === 0) return;
       const arr = Array.from(files);
@@ -1517,7 +1527,7 @@ export class JournalCaptureView extends ItemView {
       const others = arr.filter(f => !f.type.startsWith('image/'));
       if (images.length > 0) await this.addImageFiles(images);
       if (others.length > 0) await this.addFiles(others);
-    });
+    }));
 
     // Hidden file input for image upload
     const recBar = this.inputCardEl.createDiv({ cls: 'jp-recording-bar' });
@@ -1525,8 +1535,8 @@ export class JournalCaptureView extends ItemView {
     const recWaveRow = recBar.createDiv({ cls: 'jp-recording-wave-row' });
     const recCanvas = recWaveRow.createEl('canvas', { cls: 'jp-recording-waveform' });
     const recMeta = recWaveRow.createDiv({ cls: 'jp-recording-meta' });
-    const recTime = recMeta.createEl('span', { cls: 'jp-recording-time', text: '00:00' });
-    const recStatus = recMeta.createEl('span', { cls: 'jp-recording-status', text: t('capture.recording') });
+    const recTime = recMeta.createSpan({ cls: 'jp-recording-time', text: '00:00' });
+    const recStatus = recMeta.createSpan({ cls: 'jp-recording-status', text: t('capture.recording') });
     // Centered stop button shown beneath the waveform while recording.
     const recStopBtn = recBar.createEl('button', {
       cls: 'jp-recording-stop',
@@ -1610,6 +1620,7 @@ export class JournalCaptureView extends ItemView {
       return ''; // let the UA decide
     };
 
+    const waveformSmoothing = new Float32Array(48);
     const drawWaveform = () => {
       if (!analyser || !recCanvas) {
         rafId = null;
@@ -1641,10 +1652,7 @@ export class JournalCaptureView extends ItemView {
       const samplesPerBar = buf.length / barCount;
       const r = barW / 2; // fully rounded → capsule
       // Per-bar smoothing state, created once and reused across frames.
-      if (!(drawWaveform as any)._smooth) {
-        (drawWaveform as any)._smooth = new Float32Array(barCount);
-      }
-      const smooth = (drawWaveform as any)._smooth as Float32Array;
+      const smooth = waveformSmoothing;
       const gain = 2.4; // amplify raw mic level (typically 0.1–0.3)
 
       for (let i = 0; i < barCount; i++) {
@@ -1949,7 +1957,7 @@ export class JournalCaptureView extends ItemView {
         // Wire up the live waveform + duration. Do NOT connect analyser to
         // destination — that would route mic back to speakers and cause feedback.
         try {
-          const Ctor = window.AudioContext || (window as any).webkitAudioContext;
+          const Ctor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
           audioCtx = new Ctor();
           const source = audioCtx.createMediaStreamSource(stream);
           analyser = audioCtx.createAnalyser();
@@ -2218,6 +2226,14 @@ export class JournalCaptureView extends ItemView {
     this.renderEditingPill();
   }
 
+  /** DOM callbacks are synchronous; failures remain visible instead of becoming unhandled rejections. */
+  private runAttachmentAction(action: () => Promise<void>): void {
+    void action().catch((error: unknown) => {
+      console.error('[Spark Memo] attachment action failed', error);
+      notice(t('notice.fileSaveFailed', { error: error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error' }));
+    });
+  }
+
   /**
    * Resolve the full vault path to save an attachment at.
    *
@@ -2357,7 +2373,7 @@ export class JournalCaptureView extends ItemView {
         attr: { 'aria-label': t('capture.removeAudio') },
       });
       setIcon(removeBtn, 'x');
-      removeBtn.addEventListener('click', async () => {
+      removeBtn.addEventListener('click', () => this.runAttachmentAction(async () => {
         this.pendingAudio = this.pendingAudio.filter(a => a !== audio);
         this.renderAttachmentList();
         this.refreshSubmitState();
@@ -2366,7 +2382,7 @@ export class JournalCaptureView extends ItemView {
         } catch (err) {
           console.error('[Spark Memo] trash pending audio failed', err);
         }
-      });
+      }));
     }
 
     for (const file of this.pendingFiles) {
@@ -2389,7 +2405,7 @@ export class JournalCaptureView extends ItemView {
         attr: { 'aria-label': t('capture.removeFile') },
       });
       setIcon(removeBtn, 'x');
-      removeBtn.addEventListener('click', async (evt) => {
+      removeBtn.addEventListener('click', (evt) => this.runAttachmentAction(async () => {
         evt.stopPropagation();
         this.pendingFiles = this.pendingFiles.filter(f => f !== file);
         this.renderAttachmentList();
@@ -2399,7 +2415,7 @@ export class JournalCaptureView extends ItemView {
         } catch (err) {
           console.error('[Spark Memo] trash pending file failed', err);
         }
-      });
+      }));
     }
   }
 
@@ -2419,6 +2435,12 @@ export class JournalCaptureView extends ItemView {
     void this.app.workspace.openLinkText(file.path, '', false);
   }
 
+  private syncTopPillRow(): void {
+    this.topPillRowEl.toggleClass('jp-capture-top-pill-row--empty',
+      Array.from(this.topPillRowEl.children).every(child =>
+        child.matches('.jp-capture-time-pill--hidden, .jp-location-pill--hidden')));
+  }
+
   /**
    * Shows/hides the capture-time override pill next to the image/mic
    * buttons. Visible only while `pendingCaptureOverride` is set; clicking
@@ -2428,6 +2450,7 @@ export class JournalCaptureView extends ItemView {
     this.captureTimePillEl.empty();
     const override = this.pendingCaptureOverride;
     this.captureTimePillEl.toggleClass('jp-capture-time-pill--hidden', !override);
+    this.syncTopPillRow();
     if (!override) return;
 
     const iconEl = this.captureTimePillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
@@ -2459,6 +2482,7 @@ export class JournalCaptureView extends ItemView {
     this.locationPillEl.empty();
     const loc = this.pendingLocation;
     this.locationPillEl.toggleClass('jp-location-pill--hidden', !loc);
+    this.syncTopPillRow();
     // Keep the 📍 button in sync: disabled while a location is already
     // pending, so the user can't accidentally overwrite it — they have to
     // clear the existing pill first.
@@ -2523,6 +2547,7 @@ export class JournalCaptureView extends ItemView {
     this.metadataHintPillEl.empty();
     const hint = this.pendingMetadataHint;
     this.metadataHintPillEl.toggleClass('jp-location-pill--hidden', !hint);
+    this.syncTopPillRow();
     if (!hint) return;
 
     const iconEl = this.metadataHintPillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
@@ -2624,6 +2649,7 @@ export class JournalCaptureView extends ItemView {
     this.editingPillEl.empty();
     const editing = !!this.editingEntry;
     this.editingPillEl.toggleClass('jp-location-pill--hidden', !editing);
+    this.syncTopPillRow();
     if (!editing) return;
 
     const iconEl = this.editingPillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
@@ -2884,7 +2910,7 @@ export class JournalCaptureView extends ItemView {
         height = Math.max(1, Math.round(height * scale));
       }
 
-      const canvas = activeDocument.createElement('canvas');
+      const canvas = createEl('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
@@ -2996,7 +3022,7 @@ export class JournalCaptureView extends ItemView {
     // this resolves, we can still apply the name once it lands — the modal
     // resolves with whatever it had *at click time* and won't update after.
     const geocodePromise = gpsCoord ? reverseGeocodeCity(gpsCoord.latitude, gpsCoord.longitude) : null;
-    if (geocodePromise) void geocodePromise.then(name => modalRef?.setLocationName(name));
+    if (geocodePromise !== null) void geocodePromise.then(name => modalRef?.setLocationName(name));
 
     const result = await resultPromise;
 
@@ -3038,7 +3064,7 @@ export class JournalCaptureView extends ItemView {
       // instant and won't tell us anything more. Piggyback on the same
       // in-flight request so the pill still fills in the place name once it
       // lands, instead of being stuck showing raw coordinates forever.
-      if (finalName === null && geocodePromise) {
+      if (finalName === null && geocodePromise !== null) {
         void geocodePromise.then(name => {
           if (
             this.pendingLocation &&
@@ -3220,10 +3246,11 @@ export class JournalCaptureView extends ItemView {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
       },
-      body: body.buffer as ArrayBuffer,
+      body: body.buffer,
     });
-    const text = resp.json?.text;
-    return typeof text === 'string' ? text : '';
+    const json: unknown = resp.json;
+    if (json === null || typeof json !== 'object' || !('text' in json)) return '';
+    return typeof json.text === 'string' ? json.text : '';
   }
 
   private buildTimeline(root: HTMLElement) {
@@ -3377,7 +3404,7 @@ export class JournalCaptureView extends ItemView {
     if (this.locationIndex) return Array.from(this.locationIndex.values()).flatMap(group => group.entries.map(e => e.location));
     const locations: ZenLocation[] = [];
     if (!appHasDailyNotesPluginLoaded()) return locations;
-    for (const file of Object.values(getAllDailyNotes()) as TFile[]) {
+    for (const file of Object.values<TFile>(getAllDailyNotes())) {
       if (this.zenClosed || revision !== this.zenMapRevision) break;
       if (!(file instanceof TFile)) continue;
       let content: string;
@@ -3395,7 +3422,7 @@ export class JournalCaptureView extends ItemView {
   private refreshZenBackdrop(): Promise<void> {
     if (Platform.isMobile || this.zenClosed || !this.zenMode || !this.zenBackdrop) return Promise.resolve();
     if (this.zenLocations) { this.zenBackdrop.setLocations(this.zenLocations); return Promise.resolve(); }
-    if (this.zenLocationLoad) return this.zenLocationLoad;
+    if (this.zenLocationLoad !== null) return this.zenLocationLoad;
     const revision = this.zenMapRevision;
     this.zenLocationLoad = this.collectZenLocations(revision).then(locations => {
       if (this.zenClosed || revision !== this.zenMapRevision) return;
@@ -3626,7 +3653,7 @@ export class JournalCaptureView extends ItemView {
   /** Positions the popup just below the line containing `charIndex`, using a hidden mirror div to measure caret pixel position. */
   private positionTagSuggest(charIndex: number) {
     const ta = this.textareaEl;
-    const mirror = activeDocument.createElement('div');
+    const mirror = createDiv();
     const style = window.getComputedStyle(ta);
     const props: string[] = [
       'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
@@ -3642,7 +3669,7 @@ export class JournalCaptureView extends ItemView {
     mirror.addClass('jp-caret-mirror');
     mirror.setCssStyles(copied);
     mirror.textContent = ta.value.slice(0, charIndex);
-    const marker = activeDocument.createElement('span');
+    const marker = createSpan();
     marker.textContent = '​';
     mirror.appendChild(marker);
     activeDocument.body.appendChild(mirror);
@@ -3747,7 +3774,7 @@ export class JournalCaptureView extends ItemView {
     // tab state changes independently of vault mtime.
     const openPaths = new Set<string>();
     this.app.workspace.getLeavesOfType('markdown').forEach((leaf) => {
-      const file = (leaf.view as any)?.file as TFile | undefined;
+      const file = leaf.view instanceof MarkdownView ? leaf.view.file : null;
       if (file) openPaths.add(file.path);
     });
     const byOpenThenRecency = (a: TFile, b: TFile) => {
@@ -3809,7 +3836,7 @@ export class JournalCaptureView extends ItemView {
   /** Positions the popup just below the line containing `charIndex` — reuses the tag popup's mirror-div measurement approach. */
   private positionMentionSuggest(charIndex: number) {
     const ta = this.textareaEl;
-    const mirror = activeDocument.createElement('div');
+    const mirror = createDiv();
     const style = window.getComputedStyle(ta);
     const props: string[] = [
       'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
@@ -3825,7 +3852,7 @@ export class JournalCaptureView extends ItemView {
     mirror.addClass('jp-caret-mirror');
     mirror.setCssStyles(copied);
     mirror.textContent = ta.value.slice(0, charIndex);
-    const marker = activeDocument.createElement('span');
+    const marker = createSpan();
     marker.textContent = '​';
     mirror.appendChild(marker);
     activeDocument.body.appendChild(mirror);
@@ -4064,8 +4091,8 @@ export class JournalCaptureView extends ItemView {
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
-    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
+    headerText.createDiv({ cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createDiv({ cls: 'jp-timeline-header-sub', text: headerLabel.subtitle });
     this.buildDayNavControls(headerCard);
     this.updateDayNavState();
 
@@ -4132,7 +4159,7 @@ export class JournalCaptureView extends ItemView {
 
       // Header: timestamp pill anchored to the dot via a short connector line.
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
-      head.createEl('span', { cls: 'jp-timestamp', text: entry.timestamp });
+      head.createSpan({ cls: 'jp-timestamp', text: entry.timestamp });
       const { text: bodyText, location } = extractLocationTag(entry.text);
       if (location) this.renderLocationChip(head, day, entry, location);
 
@@ -4546,7 +4573,7 @@ export class JournalCaptureView extends ItemView {
     // The map sits inside .jp-timeline-scroll — measure against that directly
     // so paddings and gaps above don't matter. Floor to defeat sub-pixel
     // rounding that would otherwise let the map overshoot by a hair.
-    const scroll = wrap.closest('.jp-timeline-scroll') as HTMLElement | null;
+    const scroll = wrap.closest<HTMLElement>('.jp-timeline-scroll');
     if (!scroll) return 400;
     return Math.max(240, Math.floor(scroll.clientHeight));
   }
@@ -4558,8 +4585,8 @@ export class JournalCaptureView extends ItemView {
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
-    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: t('capture.memoCount', { count: String(entries.length) }) });
+    headerText.createDiv({ cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createDiv({ cls: 'jp-timeline-header-sub', text: t('capture.memoCount', { count: String(entries.length) }) });
     this.addOpenNoteBtn(headerCard, day);
 
     const sourcePath = day.filePath ?? '';
@@ -4572,7 +4599,7 @@ export class JournalCaptureView extends ItemView {
       row.createDiv({ cls: 'jp-timeline-dot' });
 
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
-      const tsEl = head.createEl('span', {
+      const tsEl = head.createSpan({
         cls: 'jp-timestamp jp-location-jump',
         text: entry.timestamp,
         attr: { 'aria-label': t('capture.jumpToSource') },
@@ -4609,7 +4636,7 @@ export class JournalCaptureView extends ItemView {
   /** Kicks off the scan on first call; concurrent/later callers await the same in-flight promise. */
   private loadTagIndex(): Promise<void> {
     if (this.tagAggIndex) return Promise.resolve();
-    if (this.tagAggLoadPromise) return this.tagAggLoadPromise;
+    if (this.tagAggLoadPromise !== null) return this.tagAggLoadPromise;
     this.tagAggLoadPromise = this.buildTagIndex().finally(() => {
       this.tagAggLoadPromise = null;
     });
@@ -5167,8 +5194,8 @@ export class JournalCaptureView extends ItemView {
     headerRow.createDiv({ cls: 'jp-timeline-dot jp-timeline-dot--header' });
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
-    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: headerLabel.title });
-    headerText.createEl('div', { cls: 'jp-timeline-header-sub', text: t('capture.memoCount', { count: String(entries.length) }) });
+    headerText.createDiv({ cls: 'jp-timeline-header-title', text: headerLabel.title });
+    headerText.createDiv({ cls: 'jp-timeline-header-sub', text: t('capture.memoCount', { count: String(entries.length) }) });
     this.addOpenNoteBtn(headerCard, day);
 
     const sourcePath = day.filePath ?? '';
@@ -5181,7 +5208,7 @@ export class JournalCaptureView extends ItemView {
       row.createDiv({ cls: 'jp-timeline-dot' });
 
       const head = row.createDiv({ cls: 'jp-timeline-entry-head' });
-      const tsEl = head.createEl('span', {
+      const tsEl = head.createSpan({
         cls: 'jp-timestamp jp-location-jump',
         text: entry.timestamp,
         attr: { 'aria-label': t('capture.jumpToSource') },
@@ -5365,7 +5392,7 @@ export class JournalCaptureView extends ItemView {
         if (entries.length === 0) continue;
         entry = entries[Math.floor(Math.random() * entries.length)];
         pickedFile = file;
-        pickedDate = getDateFromFile(file, 'day')!.clone().startOf('day');
+        pickedDate = getDateFromFile(file, 'day').clone().startOf('day');
       } catch (err) {
         console.error('[Spark Memo] random memo read failed', err);
       }
@@ -5401,7 +5428,7 @@ export class JournalCaptureView extends ItemView {
     setIcon(randomIcon, 'dice');
     const headerCard = headerRow.createDiv({ cls: 'jp-timeline-header-card' });
     const headerText = headerCard.createDiv({ cls: 'jp-timeline-header-text' });
-    headerText.createEl('div', { cls: 'jp-timeline-header-title', text: t('search.randomMemoLabel') });
+    headerText.createDiv({ cls: 'jp-timeline-header-title', text: t('search.randomMemoLabel') });
     const jumpBtn = headerCard.createEl('button', {
       cls: 'jp-timeline-open-btn',
       attr: { 'aria-label': t('capture.jumpToDay') },
@@ -5425,7 +5452,7 @@ export class JournalCaptureView extends ItemView {
     // which day this randomly-picked entry came from.
     const isCurrentYear = day.date.year() === moment().year();
     const dateTimeLabel = `${day.date.format(isCurrentYear ? 'M/D' : 'YYYY/M/D')} ${entry.timestamp}`;
-    head.createEl('span', { cls: 'jp-timestamp', text: dateTimeLabel });
+    head.createSpan({ cls: 'jp-timestamp', text: dateTimeLabel });
     const { text: bodyText, location } = extractLocationTag(entry.text);
     if (location) this.renderLocationChip(head, day, entry, location);
     const bubble = row.createDiv({ cls: 'jp-timeline-bubble' });
@@ -5572,7 +5599,7 @@ export class JournalCaptureView extends ItemView {
         const year = d.year();
         // Cheap to determine (no disk read) — only years actually touched
         // since the last pass get the expensive cachedRead below.
-        if (!fullRescan && !yearsToScan!.has(year)) continue;
+        if (!fullRescan && !yearsToScan.has(year)) continue;
         const key = d.format('YYYY-MM-DD');
 
         let sectionText = '';
@@ -5591,16 +5618,16 @@ export class JournalCaptureView extends ItemView {
         }
 
         if (!yearMap.has(year)) yearMap.set(year, []);
-        yearMap.get(year)!.push({ key, sectionText });
+        yearMap.get(year).push({ key, sectionText });
 
         if (!yearCitiesUpdate.has(year)) yearCitiesUpdate.set(year, new Set());
-        const citySet = yearCitiesUpdate.get(year)!;
+        const citySet = yearCitiesUpdate.get(year);
         for (const m of sectionText.matchAll(LOCATION_TAG_RE_GLOBAL)) citySet.add(m[1]);
       }
 
       // Years we actually rescanned this pass — full rescan means every year
       // present in the vault; otherwise just the previously-dirty ones.
-      const rescannedYears = fullRescan ? [...yearMap.keys()] : [...yearsToScan!];
+      const rescannedYears = fullRescan ? [...yearMap.keys()] : [...yearsToScan];
       for (const year of rescannedYears) {
         const dayInputs = yearMap.get(year);
         if (!dayInputs || dayInputs.length === 0) {
@@ -5707,7 +5734,7 @@ export class JournalCaptureView extends ItemView {
       .filter(year => yearsWithData.has(year))
       .sort((a, b) => b - a);
     for (const year of years) {
-      const ys = this.allYearStats.get(year)!;
+      const ys = this.allYearStats.get(year);
       this.renderStatsHeatmapSection(year, ys);
     }
   }
@@ -5783,7 +5810,7 @@ export class JournalCaptureView extends ItemView {
     const firstDow = allDays[0].date.day();
     const startPad = firstDow === 0 ? 6 : firstDow - 1;
     const paddedDays: (typeof allDays[number] | null)[] = [
-      ...Array(startPad).fill(null),
+      ...new Array<null>(startPad).fill(null),
       ...allDays,
     ];
     const totalWeeks = Math.ceil(paddedDays.length / 7);
@@ -6301,7 +6328,7 @@ export class JournalCaptureView extends ItemView {
    * if the underlying file changed under us since the menu was opened.
    */
   private async updateEditedEntry(raw: string): Promise<boolean> {
-    const { day, entry } = this.editingEntry!;
+    const { day, entry } = this.editingEntry;
     if (!day.filePath) {
       notice(t('notice.journalFileNotFound'));
       return false;
@@ -6641,11 +6668,11 @@ class DeleteConfirmModal extends Modal {
 
     // Preview card — timestamp + body preview
     const preview = contentEl.createDiv({ cls: 'jp-delete-confirm-preview' });
-    preview.createEl('span', {
+    preview.createSpan({
       cls: 'jp-timestamp',
       text: this.opts.timestamp,
     });
-    preview.createEl('span', {
+    preview.createSpan({
       cls: 'jp-delete-confirm-preview-text',
       text: this.opts.preview.length > 0 ? this.opts.preview : t('capture.emptyMemoPlaceholder'),
     });
@@ -6653,7 +6680,7 @@ class DeleteConfirmModal extends Modal {
     // Audio file list (only when audio is being trashed)
     if (this.opts.audioPaths.length > 0) {
       const audioBlock = contentEl.createDiv({ cls: 'jp-delete-confirm-audio' });
-      audioBlock.createEl('div', {
+      audioBlock.createDiv({
         cls: 'jp-delete-confirm-audio-label',
         text:
           this.opts.mode === 'audio-only'
@@ -7132,8 +7159,7 @@ class ImagePreviewModal extends Modal {
 
   /** Fetch the currently displayed image as a Blob. */
   private async currentBlob(): Promise<Blob> {
-    const res = await fetch(this.items[this.index].src);
-    return await res.blob();
+    return readPreviewImage(this.app.vault, this.items[this.index]);
   }
 
   /** Best-effort file name for the current image (falls back to `image.png`). */
@@ -7154,7 +7180,7 @@ class ImagePreviewModal extends Modal {
     try {
       const blob = await this.currentBlob();
       const url = URL.createObjectURL(blob);
-      const a = activeDocument.createElement('a');
+      const a = createEl('a');
       a.href = url;
       a.download = this.currentFileName();
       activeDocument.body.appendChild(a);
@@ -7208,7 +7234,7 @@ class ImagePreviewModal extends Modal {
         im.onerror = () => reject(new Error(t('preview.errorDecodeFailed')));
         im.src = url;
       });
-      const canvas = activeDocument.createElement('canvas');
+      const canvas = createEl('canvas');
       canvas.width = bitmap.naturalWidth;
       canvas.height = bitmap.naturalHeight;
       const ctx = canvas.getContext('2d');

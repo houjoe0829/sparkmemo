@@ -7,6 +7,7 @@ function fixture({reduced=false,pool=['你好','记下这一刻']}={}){
  const win={matchMedia:()=>preference,setTimeout:(fn,ms)=>{timers.set(++id,{fn,at:now+ms});return id},clearTimeout:i=>timers.delete(i)};
  const doc={defaultView:win,visibilityState:'visible',activeElement:null,addEventListener:(k,fn)=>events.set(k,fn),removeEventListener:k=>events.delete(k)};
  function node(){const listeners=new Map(),classes=new Set();return {ownerDocument:doc,value:'',placeholder:pool[0],children:[],hidden:false,attrs:{},
+  createDiv(){return this.appendChild(node())},createSpan(){return this.appendChild(node())},
   classList:{add:k=>classes.add(k),remove:k=>classes.delete(k)},setAttribute(k,v){this.attrs[k]=v},appendChild(c){this.children.push(c);return c},remove(){this.removed=true},
   getBoundingClientRect:()=>({width:320,height:65}),addEventListener:(k,fn)=>listeners.set(k,fn),removeEventListener:k=>listeners.delete(k),
   fire(k){if(k==='focus')doc.activeElement=this;if(k==='blur')doc.activeElement=null;listeners.get(k)?.()},listeners};}

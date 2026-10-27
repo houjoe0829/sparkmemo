@@ -6,6 +6,7 @@ export default [
   {
     files: ['src/**/*.ts'],
     languageOptions: {
+      globals: { __PLUGIN_VERSION__: 'readonly', __BUILD_NUMBER__: 'readonly' },
       parserOptions: { projectService: true },
     },
   },

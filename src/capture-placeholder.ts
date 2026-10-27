@@ -40,13 +40,11 @@ export class CapturePlaceholder {
     private readonly phrases: () => string[], private readonly allowed: () => boolean = () => true) {
     const doc = textarea.ownerDocument;
     this.win = doc.defaultView!;
-    this.layer = doc.createElement('div');
+    this.layer = wrapper.createDiv();
     this.layer.className = 'jp-capture-placeholder';
     this.layer.setAttribute('aria-hidden', 'true');
-    this.text = doc.createElement('span');
-    this.layer.appendChild(this.text);
-    const caret = doc.createElement('span'); caret.className = 'jp-capture-placeholder-caret';
-    this.layer.appendChild(caret); wrapper.appendChild(this.layer);
+    this.text = this.layer.createSpan();
+    const caret = this.layer.createSpan(); caret.className = 'jp-capture-placeholder-caret';
     textarea.classList.add('jp-capture-placeholder-managed');
     this.query = this.win.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
     this.query?.addEventListener?.('change', this.sync);

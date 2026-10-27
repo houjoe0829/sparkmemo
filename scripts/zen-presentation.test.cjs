@@ -11,7 +11,7 @@ function node(doc,tag='div'){
  const n={ownerDocument:doc,tag,children:[],inert:false,scrollLeft:0,scrollTop:0,
   classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},
   getAttribute:k=>attrs.get(k)??null,setAttribute:(k,v)=>attrs.set(k,v),removeAttribute:k=>attrs.delete(k),
-  appendChild(c){this.children.push(c);return c},replaceChildren(){this.children=[]},remove(){this.removed=true},
+  createDiv(){return this.appendChild(node(doc))},appendChild(c){this.children.push(c);return c},replaceChildren(){this.children=[]},remove(){this.removed=true},
   getBoundingClientRect(){return this.rect??{left:0,top:0,width:360,height:720}},
   setCssStyles(styles){
    (this.cssStyleCalls??=[]).push({...styles});

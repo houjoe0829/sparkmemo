@@ -17,7 +17,7 @@ function loadSource(file, obsidian = {}) {
   module.paths = Module._nodeModulePaths(path.dirname(filename));
   const originalRequire = module.require.bind(module);
   module.require = id => id === 'obsidian' ? obsidian : originalRequire(id);
-  module._compile(output, filename);
+  module._compile('const window = { setTimeout, clearTimeout };\n' + output, filename);
   return module.exports;
 }
 const moduleParent = module;
@@ -51,6 +51,7 @@ function harness(options = {}) {
     write: async content => { raw = content; writes.push(content); },
   };
   const create = () => new ReverseGeocoder({
+    timers: { setTimeout, clearTimeout },
     request: async url => { calls.push({ url, at: now });
       return options.request ? options.request(url, calls.length) : response(); },
     report: (kind, status) => reports.push({ kind, status }),
@@ -357,7 +358,8 @@ test('unload stops queued requests, cancels caller waits and ignores late transp
 });
 test('real interval wait is cancelled on unload instead of leaving an idle timer', async () => {
   let calls = 0;
-  const client = new ReverseGeocoder({ request: async () => { calls++; return response(); },
+  const client = new ReverseGeocoder({
+    timers: { setTimeout, clearTimeout }, request: async () => { calls++; return response(); },
     storage: { read: async () => null, write: async () => {} }, report: () => {} });
   await client.resolve(30, 114, 'zh');
   const pending = client.resolve(31, 114, 'zh');
