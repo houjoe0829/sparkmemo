@@ -14,6 +14,7 @@
  * today's file, creating the file or heading if needed.
  */
 
+import { createPcmCapture, type PcmCapture } from './pcm-capture';
 import {
   Component,
   FuzzySuggestModal,
@@ -397,6 +398,8 @@ export class JournalCaptureView extends ItemView {
   // ── Quick-record via URL scheme ──────────────────────────────────────────
   /** Bound to the inner startRecording closure once buildInputCard runs. */
   private startRecordingFn: (() => Promise<void>) | null = null;
+  /** Releases this composer's recording resources when its view closes. */
+  private closeRecordingFn: (() => void) | null = null;
 
   /**
    * Called by the plugin's URL handler when `cmd=record` is received.
@@ -552,6 +555,9 @@ export class JournalCaptureView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.closeRecordingFn?.();
+    this.closeRecordingFn = null;
+    this.startRecordingFn = null;
     this.zenClosed = true;
     this.capturePlaceholder?.dispose();
     this.capturePlaceholder = null;
@@ -1425,7 +1431,7 @@ export class JournalCaptureView extends ItemView {
     this.textareaEl.addEventListener('compositionend', () => { this.inputComposing = false; });
     this.textareaEl.addEventListener('keydown', (e: KeyboardEvent) => {
       // IME confirmation must never save or select a tag/note suggestion.
-      if (e.isComposing || this.inputComposing || e.keyCode === 229) return;
+      if (this.isInputMethodEvent(e)) return;
       if (this.handleSubmitShortcut(e)) return;
       if (this.handleZenEscape(e)) return;
       // Mention popup takes priority when both would otherwise react, since
@@ -1544,15 +1550,18 @@ export class JournalCaptureView extends ItemView {
     });
     setIcon(recStopBtn, 'square');
 
+    // Local to this composer so late permissions/saves cannot affect a reopened view.
+    let recordingClosed = false;
     let mediaRecorder: MediaRecorder | null = null;
     let audioChunks: Blob[] = [];
     let recordingTimeout: number | null = null;
+    let recordingClockTimer: number | null = null;
     let audioCtx: AudioContext | null = null;
     let analyser: AnalyserNode | null = null;
     let rafId: number | null = null;
     let recordStartedAt = 0;
     // Realtime STT state
-    let realtimeProcessor: ScriptProcessorNode | null = null;
+    let realtimeCapture: PcmCapture | null = null;
     let realtimeTimer: number | null = null;
     let segmentFrames: Float32Array[] = []; // current VAD segment being built
     let vadSilenceSamples = 0; // consecutive silent samples within the segment
@@ -1564,7 +1573,6 @@ export class JournalCaptureView extends ItemView {
     let pendingFlush: Promise<void> = Promise.resolve(); // serialize segment sends
     let vadFirstSegment = true; // until the first segment flushes, allow an early first-word cut
     // VAD tuning (sample-based so it adapts to any sample rate).
-    const VAD_FRAME = 4096;            // ScriptProcessor buffer size
     const VAD_ENERGY_RMS = 0.012;      // below this RMS → considered silence (lowered so brief in-speech dips aren't misread as pauses)
     const VAD_SILENCE_CUT_SAMPLES = 0.45; // 450ms of silence ends a segment — long enough to ride through mid-sentence breaths
     const VAD_MAX_SEG_SAMPLES = 4.0;   // force-cut a segment at 4s (caps worst-case latency)
@@ -1578,6 +1586,13 @@ export class JournalCaptureView extends ItemView {
       return `${m}:${s}`;
     };
 
+    const clearRecordingClock = () => {
+      if (recordingClockTimer !== null) {
+        window.clearInterval(recordingClockTimer);
+        recordingClockTimer = null;
+      }
+    };
+
     const teardownAnalyser = () => {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -1587,10 +1602,8 @@ export class JournalCaptureView extends ItemView {
         window.clearInterval(realtimeTimer);
         realtimeTimer = null;
       }
-      if (realtimeProcessor) {
-        try { realtimeProcessor.disconnect(); } catch { /* noop */ }
-        realtimeProcessor = null;
-      }
+      realtimeCapture?.dispose();
+      realtimeCapture = null;
       if (audioCtx) {
         void audioCtx.close();
         audioCtx = null;
@@ -1687,11 +1700,11 @@ export class JournalCaptureView extends ItemView {
         }
       }
 
-      recTime.setText(formatDuration(performance.now() - recordStartedAt));
       rafId = window.requestAnimationFrame(drawWaveform);
     };
 
     const stopRecording = async () => {
+      clearRecordingClock();
       if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
       // Freeze the live UI immediately so the waveform/duration stop the
       // moment the user clicks stop — don't wait for onstop or network.
@@ -1702,10 +1715,6 @@ export class JournalCaptureView extends ItemView {
       if (realtimeTimer !== null) {
         window.clearInterval(realtimeTimer);
         realtimeTimer = null;
-      }
-      if (realtimeProcessor) {
-        try { realtimeProcessor.disconnect(); } catch { /* noop */ }
-        realtimeProcessor = null;
       }
       mediaRecorder.stop();
       mediaRecorder.stream.getTracks().forEach(track => track.stop());
@@ -1725,6 +1734,7 @@ export class JournalCaptureView extends ItemView {
     // Append streamed text right after the streaming cursor, keeping the
     // caret at the end so the next chunk lands next to it.
     const appendStreamedText = (text: string) => {
+      if (recordingClosed) return;
       const ta = this.textareaEl;
       const pos = realtimeBaseCursor;
       const before = ta.value.substring(0, pos);
@@ -1782,6 +1792,7 @@ export class JournalCaptureView extends ItemView {
     // sent in order even if transcription outpaces real time.
     const transcribeSegment = (frames: Float32Array[], sr: number) => {
       pendingFlush = pendingFlush.then(async () => {
+        if (recordingClosed) return;
         const wav = encodeWav(frames, sr);
         if (wav.size < 4000) return; // too short → unstable transcript, skip
         try {
@@ -1858,7 +1869,7 @@ export class JournalCaptureView extends ItemView {
     };
 
     const startRecording = async () => {
-      if (this.isSubmitting || this.recordingBusy) return;
+      if (recordingClosed || this.isSubmitting || this.recordingBusy) return;
       if (this.pendingImages.length > 0) {
         notice(t('notice.imageAddedNoRecording'));
         return;
@@ -1873,8 +1884,13 @@ export class JournalCaptureView extends ItemView {
       }
       this.recordingBusy = true;
       this.refreshSubmitState();
+      let stream: MediaStream | null = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (recordingClosed) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
         audioChunks = [];
         const mime = pickRecordingMime();
         mediaRecorder = mime
@@ -1897,9 +1913,13 @@ export class JournalCaptureView extends ItemView {
           // the UI doesn't appear stuck; only the final text append waits on
           // the network. A genuinely-hung segment is rare; if it happens the
           // user can reload the plugin and the text already on screen is kept.
-          if (realtimeActive && audioCtx) flushCurrentSegment();
+          if (!recordingClosed && realtimeActive && audioCtx) {
+            realtimeCapture?.flush();
+            flushCurrentSegment();
+          }
           const flushChain = pendingFlush;
           const duration = formatDuration(performance.now() - recordStartedAt);
+          clearRecordingClock();
           teardownAnalyser();
           const audioBlob = new Blob(audioChunks, { type: outType });
           const wantSTT = sttConfigured();
@@ -1908,11 +1928,15 @@ export class JournalCaptureView extends ItemView {
           // already stopped) and the icon group + NOTE button stay hidden
           // until the final text has landed (so the user sees the result
           // appear together with the action buttons coming back).
-          recStatus.setText(t('capture.transcribing'));
-          recBar.addClass('is-transcribing');
-          recBar.show();
+          if (!recordingClosed) {
+            recStatus.setText(t('capture.transcribing'));
+            recBar.addClass('is-transcribing');
+            recBar.show();
+          }
           try {
             const audioFile = await this.saveAudioToVault(audioBlob);
+            // The file survives closing; detached controls and new composers stay untouched.
+            if (recordingClosed) return;
             let text = '';
             // In realtime mode, keep the streamed draft as-is (faster, no
             // extra API call). In non-realtime mode, transcribe the full
@@ -1930,6 +1954,7 @@ export class JournalCaptureView extends ItemView {
             // text again, so the transcript is fully settled before we hand
             // control back to the user.
             await flushChain;
+            if (recordingClosed) return;
             if (!realtimeActive && text.length > 0) {
               insertAtCursor(text);
             }
@@ -1940,66 +1965,31 @@ export class JournalCaptureView extends ItemView {
             // RecBar fades out and the action bar (icon group + NOTE button)
             // comes back together — the user sees the result and the controls
             // to act on it arrive in the same beat.
-            recBar.removeClass('is-transcribing');
-            recBar.removeClass('jp-bar-entering');
-            recBar.hide();
-            actions.removeClass('is-recording');
-            this.recordingBusy = false;
-            this.refreshSubmitState();
+            if (!recordingClosed) {
+              recBar.removeClass('is-transcribing');
+              recBar.removeClass('jp-bar-entering');
+              recBar.hide();
+              actions.removeClass('is-recording');
+              this.recordingBusy = false;
+              this.refreshSubmitState();
+            }
           }
         };
 
         mediaRecorder.start();
+        recordStartedAt = performance.now();
+        recTime.setText('00:00');
+        // Keep the clock and stop controls usable even when waveform setup fails.
+        recordingClockTimer = window.setInterval(() => {
+          recTime.setText(formatDuration(performance.now() - recordStartedAt));
+        }, 1000);
 
         // Decide live-streaming for this session.
         realtimeActive = wantRealtime();
-
-        // Wire up the live waveform + duration. Do NOT connect analyser to
-        // destination — that would route mic back to speakers and cause feedback.
-        try {
-          const Ctor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-          audioCtx = new Ctor();
-          const source = audioCtx.createMediaStreamSource(stream);
-          analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 1024;
-          source.connect(analyser);
-
-          // Realtime capture: tap the same source via a ScriptProcessor and
-          // segment by voice activity (silence boundaries) for transcription.
-          if (realtimeActive) {
-            realtimeRegionStart = this.textareaEl.selectionStart;
-            realtimeBaseCursor = realtimeRegionStart;
-            lastTranscript = '';
-            segmentFrames = [];
-            vadSilenceSamples = 0;
-            vadSegmentSamples = 0;
-            vadFirstSegment = true;
-            const sp = audioCtx.createScriptProcessor(VAD_FRAME, 1, 1);
-            sp.onaudioprocess = (ev: AudioProcessingEvent) => {
-              ingestFrame(ev.inputBuffer.getChannelData(0));
-            };
-            source.connect(sp);
-            // ScriptProcessor must connect somewhere to fire; analyser suffices.
-            sp.connect(analyser);
-            realtimeProcessor = sp;
-          }
-
-          // Reveal the bar FIRST, then measure — reading clientWidth while
-          // display:none returns 0 and the canvas ends up 1px wide (invisible).
-          // The `jp-bar-entering` class triggers a one-shot fade+slide
-          // animation; we remove it after hide so the next show replays it.
-          recStatus.setText(realtimeActive ? t('capture.realtimeTranscribing') : t('capture.recording'));
-          recBar.show();
-          recBar.addClass('jp-bar-entering');
-          const dpr = window.devicePixelRatio || 1;
-          recCanvas.width = Math.max(1, recCanvas.clientWidth) * dpr;
-          recCanvas.height = Math.max(1, recCanvas.clientHeight) * dpr;
-          recordStartedAt = performance.now();
-          rafId = window.requestAnimationFrame(drawWaveform);
-        } catch {
-          // Analyser/realtime are optional — recording still works without them.
-        }
-
+        recStatus.setText(realtimeActive ? t('capture.realtimeTranscribing') : t('capture.recording'));
+        // Show before measuring the canvas; hidden elements have zero width.
+        recBar.show();
+        recBar.addClass('jp-bar-entering');
         // Trigger the focus-recording mode (icon group + submit collapse) at
         // the same time as the recBar reveal so the two animations overlap
         // and feel like a single transition rather than a sequence.
@@ -2009,10 +1999,67 @@ export class JournalCaptureView extends ItemView {
           void stopRecording();
           notice(t('notice.recordingAutoStopped'));
         }, 5 * 60 * 1000);
+
+        // Wire up the optional live waveform. Do NOT connect analyser to
+        // destination — that would route mic back to speakers and cause feedback.
+        try {
+          const Ctor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          audioCtx = new Ctor();
+          const source = audioCtx.createMediaStreamSource(stream);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 1024;
+          source.connect(analyser);
+
+          // Realtime capture: tap the same source via an AudioWorklet and
+          // segment by voice activity (silence boundaries) for transcription.
+          if (realtimeActive) {
+            realtimeRegionStart = this.textareaEl.selectionStart;
+            realtimeBaseCursor = realtimeRegionStart;
+            lastTranscript = '';
+            segmentFrames = [];
+            vadSilenceSamples = 0;
+            vadSegmentSamples = 0;
+            vadFirstSegment = true;
+            const capture = await createPcmCapture(audioCtx, source, ingestFrame);
+            if (recordingClosed || mediaRecorder.state !== 'recording') {
+              capture.dispose();
+              return;
+            }
+            realtimeCapture = capture;
+          }
+
+          const dpr = window.devicePixelRatio || 1;
+          recCanvas.width = Math.max(1, recCanvas.clientWidth) * dpr;
+          recCanvas.height = Math.max(1, recCanvas.clientHeight) * dpr;
+          rafId = window.requestAnimationFrame(drawWaveform);
+        } catch (error) {
+          if (recordingClosed || mediaRecorder.state !== 'recording') return;
+          console.error('[Spark Memo] recording waveform setup failed', error);
+          teardownAnalyser();
+          realtimeActive = false;
+          recStatus.setText(t('capture.recording'));
+        }
+
       } catch (err) {
+        // getUserMedia can succeed even when constructing/starting the recorder fails.
+        stream?.getTracks().forEach(track => track.stop());
+        clearRecordingClock();
+        if (recordingClosed) return;
         this.recordingBusy = false;
         this.refreshSubmitState();
         notice(t('notice.micAccessFailed', { error: err instanceof Error ? err.message : String(err) }));
+      }
+    };
+
+    // Stop synchronously on close; onstop still receives final data and saves the audio.
+    this.closeRecordingFn = () => {
+      recordingClosed = true;
+      this.recordingBusy = false;
+      void stopRecording();
+      teardownAnalyser();
+      if (recordingTimeout !== null) {
+        window.clearTimeout(recordingTimeout);
+        recordingTimeout = null;
       }
     };
 
@@ -3352,11 +3399,16 @@ export class JournalCaptureView extends ItemView {
 
   // ── Behaviour ───────────────────────────────────────────────────────────
 
+  /** IME boundary events can report isComposing=false while keyCode remains 229. */
+  private isInputMethodEvent(e: KeyboardEvent): boolean {
+    return e.isComposing || this.inputComposing || e.keyCode === 229;
+  }
+
   /** Consume only this composer's exact platform save chord, never a global key. */
   private handleSubmitShortcut(e: KeyboardEvent): boolean {
     if (e.target !== this.textareaEl || this.currentTab !== 'capture'
       || e.key !== 'Enter' || e.shiftKey || e.altKey
-      || e.isComposing || this.inputComposing || e.keyCode === 229) return false;
+      || this.isInputMethodEvent(e)) return false;
     const apple = Platform.isMacOS || Platform.isIosApp;
     if (apple ? (!e.metaKey || e.ctrlKey) : (!e.ctrlKey || e.metaKey)) return false;
     if (e.defaultPrevented) return true;
@@ -3473,7 +3525,7 @@ export class JournalCaptureView extends ItemView {
   /** Scoped to this panel: IME, suggestions and modal scopes retain Escape priority. */
   private handleZenEscape(e: KeyboardEvent): boolean {
     if (Platform.isMobile || !this.zenMode || this.currentTab !== 'capture' || e.key !== 'Escape'
-      || e.defaultPrevented || e.isComposing || this.inputComposing || e.keyCode === 229
+      || e.defaultPrevented || this.isInputMethodEvent(e)
       || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
       || !(this.containerEl.children[1] as HTMLElement).contains(e.target as Node)) return false;
     e.preventDefault();

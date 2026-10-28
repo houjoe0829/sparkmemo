@@ -198,6 +198,7 @@ class TestImage {
 const runtimeWindow = {
   app: { internalPlugins: { plugins: { 'daily-notes': { enabled: true } } }, plugins: { getPlugin: () => null } },
   setTimeout: () => 0, clearTimeout() {},
+  setInterval: () => 0, clearInterval() {},
   open(url, target) { if (emailOpenError) throw emailOpenError; openedUrls.push({ url, target }); },
 };
 const runtimeNavigator = {
@@ -207,14 +208,30 @@ const runtimeNavigator = {
 class TestMediaRecorder {
   static latest;
   static isTypeSupported() { return false; }
-  constructor(stream) { this.stream = stream; this.state = 'inactive'; TestMediaRecorder.latest = this; }
+  constructor(stream) {
+    if (TestMediaRecorder.constructorError) throw TestMediaRecorder.constructorError;
+    this.stream = stream; this.state = 'inactive'; TestMediaRecorder.latest = this;
+  }
   start() { this.state = 'recording'; }
+  stop() {
+    assert.notEqual(this.state, 'inactive');
+    this.state = 'inactive';
+    // Match the browser: the final data and stop event arrive after stop() returns.
+    this.stopping = Promise.resolve().then(async () => {
+      this.ondataavailable?.({ data: new Blob(['recorded audio'], { type: 'audio/webm' }) });
+      await this.onstop?.();
+    });
+  }
 }
 
+const runtimePerformance = { now: () => performance.now() };
 vm.runInNewContext(output, {
   module: loaded, exports: loaded.exports,
   require: name => name === 'obsidian' ? obsidian : require(name),
-  Buffer, URL, Blob, Math: runtimeMath, Image: TestImage, document: ownerDocument, window: runtimeWindow, navigator: runtimeNavigator, MediaRecorder: TestMediaRecorder, performance,
+  Buffer, URL, Blob, Math: runtimeMath, Image: TestImage, document: ownerDocument, window: runtimeWindow, navigator: runtimeNavigator, MediaRecorder: TestMediaRecorder, performance: runtimePerformance,
+  cancelAnimationFrame: id => runtimeWindow.cancelAnimationFrame(id),
+  AudioWorkletNode: class { constructor(...args) { return new runtimeWindow.AudioWorkletNode(...args); } },
+  Float32Array,
   createEl: tag => tag === 'canvas' ? previewCanvas : new Element(tag),
   createDiv: opts => new Element('div', opts),
   createSpan: opts => new Element('span', opts),
@@ -1191,6 +1208,313 @@ test('microphone permission and recording finalization block saving until the au
     assert.equal(view.recordingBusy, false); assert.equal(view.pendingAudio.length, 1); assert.equal(view.submitBtn.disabled, false);
   } finally { runtimeNavigator.mediaDevices.getUserMedia = previous; }
 });
+// Recording lifecycle uses simulated devices only; never request the real microphone.
+async function withRecordingDevices(run) {
+  const previousMic = runtimeNavigator.mediaDevices.getUserMedia;
+  const previousNow = runtimePerformance.now;
+  const previousWindow = {};
+  const effects = { stoppedTracks: 0, closedContexts: 0, disconnectedProcessors: 0,
+    timers: new Map(), intervals: new Map(), frames: new Set(), now: 100000 };
+  const stream = { getTracks: () => [{ stop() { effects.stoppedTracks++; } }] };
+  let nextId = 1;
+  const overrides = {
+    AudioContext: class {
+      constructor() { this.sampleRate = 48000; this.state = 'running'; this.destination = {}; this.audioWorklet = { addModule: async () => {} }; }
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      createAnalyser() { return {}; }
+      close() { this.state = 'closed'; effects.closedContexts++; return Promise.resolve(); }
+    },
+    AudioWorkletNode: class {
+      constructor() { this.port = { onmessage: null, close() {} }; }
+      connect() {}
+      disconnect() { effects.disconnectedProcessors++; }
+    },
+    requestAnimationFrame() { const id = nextId++; effects.frames.add(id); return id; },
+    cancelAnimationFrame(id) { effects.frames.delete(id); },
+    setTimeout(fn, delay) { const id = nextId++; effects.timers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { effects.timers.delete(id); },
+    setInterval(fn, delay) { const id = nextId++; effects.intervals.set(id, { fn, delay }); return id; },
+    clearInterval(id) { effects.intervals.delete(id); },
+  };
+  for (const key of Object.keys(overrides)) previousWindow[key] = runtimeWindow[key];
+  Object.assign(runtimeWindow, overrides);
+  runtimePerformance.now = () => effects.now;
+  runtimeNavigator.mediaDevices.getUserMedia = async () => stream;
+  try { await run({ stream, effects }); }
+  finally {
+    runtimeNavigator.mediaDevices.getUserMedia = previousMic;
+    runtimePerformance.now = previousNow;
+    Object.assign(runtimeWindow, previousWindow);
+  }
+}
+
+test('closing a recording releases devices and saves the final audio without creating a memo', async () => {
+  await withRecordingDevices(async ({ effects }) => {
+    const { view } = composer();
+    view.teardownMap = () => {}; // The composer harness does not build other panes/toolbars.
+    view.teardownMobileToolbarAutoHide = () => {};
+    view.plugin.settings.sttEndpoint = 'https://example.invalid/transcribe';
+    view.plugin.settings.sttApiKey = 'test-key';
+    const saved = [];
+    view.saveAudioToVault = async blob => { saved.push(blob); return { path: 'Audio/closed.webm' }; };
+    let memoWrites = 0, transcriptions = 0, attachments = 0;
+    view.plugin.writeJournalEntry = async () => { memoWrites++; return true; };
+    view.transcribeAudio = async () => { transcriptions++; return 'Transcript'; };
+    view.addPendingAudio = () => { attachments++; };
+    const staleStart = view.startRecordingFn;
+    await staleStart();
+    const recorder = TestMediaRecorder.latest;
+    assert.equal(recorder.state, 'recording');
+    assert.equal(effects.frames.size, 1);
+    assert.equal(effects.timers.size, 1);
+    await view.onClose();
+    assert.equal(recorder.state, 'inactive');
+    assert.equal(effects.stoppedTracks, 1);
+    assert.equal(effects.closedContexts, 1);
+    assert.equal(effects.disconnectedProcessors, 1);
+    assert.equal(effects.frames.size, 0);
+    assert.equal(effects.timers.size, 0);
+    assert.equal(effects.intervals.size, 0);
+    await recorder.stopping;
+    assert.equal(saved.length, 1);
+    assert.equal(await saved[0].text(), 'recorded audio');
+    assert.equal(memoWrites, 0);
+    assert.equal(transcriptions, 0);
+    assert.equal(attachments, 0);
+    assert.equal(view.recordingBusy, false);
+    assert.equal(view.startRecordingFn, null);
+    await staleStart();
+    await view.onClose();
+    assert.equal(TestMediaRecorder.latest, recorder);
+    assert.equal(effects.stoppedTracks, 1);
+    assert.equal(effects.closedContexts, 1);
+    assert.equal(saved.length, 1);
+  });
+});
+
+test('microphone permission arriving after close releases its stream without starting a recorder', async () => {
+  await withRecordingDevices(async ({ stream, effects }) => {
+    const { view } = composer();
+    view.teardownMap = () => {}; // The composer harness does not build other panes/toolbars.
+    view.teardownMobileToolbarAutoHide = () => {};
+    const permission = deferred();
+    runtimeNavigator.mediaDevices.getUserMedia = () => permission.promise;
+    const previousRecorder = TestMediaRecorder.latest;
+    const starting = view.startRecordingFn();
+    await view.onClose();
+    permission.resolve(stream);
+    await starting;
+    assert.equal(effects.stoppedTracks, 1);
+    assert.equal(TestMediaRecorder.latest, previousRecorder);
+    assert.equal(effects.frames.size, 0);
+    assert.equal(effects.timers.size, 0);
+    assert.equal(effects.intervals.size, 0);
+    assert.equal(view.recordingBusy, false);
+    assert.equal(view.startRecordingFn, null);
+  });
+});
+
+test('closing while audio is being saved preserves the file and avoids updating a reopened view', async () => {
+  await withRecordingDevices(async ({ effects }) => {
+    const { view } = composer();
+    view.teardownMap = () => {}; // The composer harness does not build other panes/toolbars.
+    view.teardownMobileToolbarAutoHide = () => {};
+    const audio = deferred();
+    let saves = 0;
+    view.saveAudioToVault = () => { saves++; return audio.promise; };
+    let attachments = 0;
+    view.addPendingAudio = () => { attachments++; };
+    await view.startRecordingFn();
+    const recorder = TestMediaRecorder.latest;
+    await view.inputCardEl.querySelector('.jp-recording-stop').click();
+    await settle();
+    assert.equal(saves, 1);
+    await view.onClose();
+    // A new composer can become busy before the old save completes.
+    view.buildInputCard(view.containerEl.children[1]);
+    view.recordingBusy = true;
+    audio.resolve({ path: 'Audio/closed.webm' });
+    await recorder.stopping;
+    assert.equal(saves, 1);
+    assert.equal(attachments, 0);
+    assert.equal(view.recordingBusy, true);
+    assert.equal(effects.stoppedTracks, 1);
+    assert.equal(effects.closedContexts, 1);
+  });
+});
+
+test('a save failure after closing stays visible and leaves recording resources released', async () => {
+  await withRecordingDevices(async ({ effects }) => {
+    const { view } = composer();
+    view.teardownMap = () => {};
+    view.teardownMobileToolbarAutoHide = () => {};
+    const before = notices.length;
+    view.saveAudioToVault = async () => { throw Error('closed recording save failed'); };
+    await view.startRecordingFn();
+    const recorder = TestMediaRecorder.latest;
+    await view.onClose();
+    await recorder.stopping;
+    assert.equal(effects.stoppedTracks, 1);
+    assert.equal(effects.closedContexts, 1);
+    assert.equal(effects.timers.size, 0);
+    assert.equal(effects.intervals.size, 0);
+    assert.equal(effects.frames.size, 0);
+    assert.equal(notices.length, before + 1);
+    assert.ok(notices.at(-1).includes('closed recording save failed'));
+    assert.equal(view.recordingBusy, false);
+  });
+});
+
+for (const failure of ['constructor', 'start']) {
+  test(`recorder ${failure} failure releases the microphone, keeps the error and allows retry`, async () => {
+    await withRecordingDevices(async ({ effects }) => {
+      const { view } = composer();
+      view.teardownMap = () => {};
+      view.teardownMobileToolbarAutoHide = () => {};
+      view.textareaEl.value = 'Keep this draft';
+      view.saveAudioToVault = async () => ({ path: 'Audio/retry.webm' });
+      const message = `Simulated recorder ${failure} failure`;
+      const previousStart = TestMediaRecorder.prototype.start;
+      const previousError = TestMediaRecorder.constructorError;
+      try {
+        if (failure === 'constructor') TestMediaRecorder.constructorError = Error(message);
+        else TestMediaRecorder.prototype.start = () => { throw Error(message); };
+        await view.startRecordingFn();
+        assert.equal(effects.stoppedTracks, 1);
+        assert.equal(view.recordingBusy, false);
+        assert.equal(view.submitBtn.disabled, false);
+        assert.equal(view.textareaEl.value, 'Keep this draft');
+        assert.ok(notices.at(-1).includes(message));
+        assert.equal(effects.timers.size, 0);
+        assert.equal(effects.intervals.size, 0);
+      } finally {
+        TestMediaRecorder.prototype.start = previousStart;
+        TestMediaRecorder.constructorError = previousError;
+      }
+      await view.startRecordingFn();
+      assert.equal(TestMediaRecorder.latest.state, 'recording');
+      await view.onClose();
+      await TestMediaRecorder.latest.stopping;
+      assert.equal(effects.stoppedTracks, 2);
+      assert.equal(effects.intervals.size, 0);
+    });
+  });
+}
+
+for (const waveform of ['working', 'context-failure', 'analyser-failure']) {
+  test(`recording controls, clock and saved audio remain usable with ${waveform}`, async () => {
+    await withRecordingDevices(async ({ effects }) => {
+      const Context = runtimeWindow.AudioContext;
+      if (waveform === 'context-failure') {
+        runtimeWindow.AudioContext = class { constructor() { throw Error('Simulated AudioContext failure'); } };
+      } else if (waveform === 'analyser-failure') {
+        runtimeWindow.AudioContext = class extends Context { createAnalyser() { throw Error('Simulated analyser failure'); } };
+      }
+      const { view, root } = composer();
+      const saved = [], attachments = [];
+      let memoWrites = 0;
+      view.saveAudioToVault = async blob => { saved.push(blob); return { path: 'Audio/waveform.webm' }; };
+      view.addPendingAudio = (file, duration) => { attachments.push({ file, duration }); };
+      view.plugin.writeJournalEntry = async () => { memoWrites++; return true; };
+      await view.startRecordingFn();
+      const recorder = TestMediaRecorder.latest;
+      assert.equal(recorder.state, 'recording');
+      assert.equal(root.querySelector('.jp-recording-bar').hidden, false);
+      assert.ok(root.querySelector('.jp-recording-stop'));
+      assert.equal(root.querySelector('.jp-recording-status').textContent, t('capture.recording'));
+      assert.equal(root.querySelector('.jp-recording-time').textContent, '00:00');
+      assert.equal(effects.intervals.size, 1);
+      const clock = [...effects.intervals.values()][0];
+      assert.equal(clock.delay, 1000);
+      effects.now += 65000;
+      clock.fn();
+      assert.equal(root.querySelector('.jp-recording-time').textContent, '01:05');
+      await root.querySelector('.jp-recording-stop').click();
+      await recorder.stopping;
+      assert.equal(saved.length, 1);
+      assert.equal(await saved[0].text(), 'recorded audio');
+      assert.equal(attachments.length, 1);
+      assert.equal(attachments[0].duration, '01:05');
+      assert.equal(memoWrites, 0);
+      assert.equal(recorder.state, 'inactive');
+      assert.equal(effects.stoppedTracks, 1);
+      assert.equal(effects.closedContexts, waveform === 'context-failure' ? 0 : 1);
+      assert.equal(effects.timers.size, 0);
+      assert.equal(effects.intervals.size, 0);
+      assert.equal(effects.frames.size, 0);
+      assert.equal(root.querySelector('.jp-recording-bar').hidden, true);
+      assert.equal(view.recordingBusy, false);
+    });
+  });
+}
+
+for (const action of ['stop', 'close']) {
+  test(`${action} remains available while the realtime worklet module loads`, async () => {
+    await withRecordingDevices(async ({ effects }) => {
+      const loading = deferred();
+      const Context = runtimeWindow.AudioContext;
+      runtimeWindow.AudioContext = class extends Context {
+        constructor() { super(); this.audioWorklet.addModule = () => loading.promise; }
+      };
+      const { view, root } = composer();
+      view.teardownMap = () => {};
+      view.teardownMobileToolbarAutoHide = () => {};
+      Object.assign(view.plugin.settings, { sttEndpoint: 'https://example.invalid/transcribe', sttApiKey: 'test-key' });
+      let saves = 0;
+      view.saveAudioToVault = async () => { saves++; return { path: 'Audio/pending-worklet.webm' }; };
+      view.addPendingAudio = () => {};
+      const starting = view.startRecordingFn();
+      await settle();
+      const recorder = TestMediaRecorder.latest;
+      assert.equal(recorder.state, 'recording');
+      assert.equal(root.querySelector('.jp-recording-bar').hidden, false);
+      assert.ok(root.querySelector('.jp-capture-actions').classes.has('is-recording'));
+      assert.equal(effects.timers.size, 1);
+      if (action === 'close') await view.onClose();
+      else await root.querySelector('.jp-recording-stop').click();
+      await recorder.stopping;
+      loading.resolve(); await starting;
+      assert.equal(recorder.state, 'inactive');
+      assert.equal(effects.stoppedTracks, 1);
+      assert.equal(effects.closedContexts, 1);
+      assert.equal(effects.frames.size, 0);
+      assert.equal(effects.intervals.size, 0);
+      assert.equal(effects.timers.size, 0);
+      assert.equal(view.recordingBusy, false);
+      assert.equal(saves, 1);
+      assert.equal(effects.disconnectedProcessors, 0);
+    });
+  });
+}
+
+test('a rejected realtime worklet keeps local recording and the existing whole-file transcription fallback', async () => {
+  await withRecordingDevices(async ({ effects }) => {
+    const Context = runtimeWindow.AudioContext;
+    runtimeWindow.AudioContext = class extends Context {
+      constructor() { super(); this.audioWorklet.addModule = async () => { throw Error('Worklet module blocked'); }; }
+    };
+    const { view, root } = composer();
+    Object.assign(view.plugin.settings, { sttEndpoint: 'https://example.invalid/transcribe', sttApiKey: 'test-key' });
+    view.textareaEl.selectionStart = 0; view.textareaEl.selectionEnd = 0;
+    view.saveAudioToVault = async () => ({ path: 'Audio/worklet-fallback.webm' });
+    view.addPendingAudio = () => {};
+    let transcriptions = 0;
+    view.transcribeAudio = async blob => { transcriptions++; assert.equal(await blob.text(), 'recorded audio'); return 'Fallback transcript'; };
+    await view.startRecordingFn();
+    assert.equal(root.querySelector('.jp-recording-bar').hidden, false);
+    assert.equal(root.querySelector('.jp-recording-status').textContent, t('capture.recording'));
+    assert.equal(effects.intervals.size, 1);
+    const recorder = TestMediaRecorder.latest;
+    await root.querySelector('.jp-recording-stop').click(); await recorder.stopping;
+    assert.equal(transcriptions, 1);
+    assert.ok(view.textareaEl.value.includes('Fallback transcript'));
+    assert.equal(effects.closedContexts, 1);
+    assert.equal(effects.stoppedTracks, 1);
+    assert.equal(effects.intervals.size, 0);
+    assert.equal(view.recordingBusy, false);
+  });
+});
+
 test('microphone permission failure restores save availability', async () => {
   const { view } = composer(); view.textareaEl.value = 'Draft';
   await view.startRecordingFn();
