@@ -94,12 +94,65 @@ test('stats keep full, incremental and deleted-year scans equivalent after null-
   }
 });
 
-test('CSS guard rejects new important declarations and relational selectors, retaining the keyboard exception', () => {
+test('CSS guard rejects every important declaration, including the former keyboard exception', () => {
   const css = readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
-  assert.deepEqual(checkCss(css), { errors: [], inlineOverrides: 1 });
+  assert.deepEqual(checkCss(css), { errors: [] });
   assert.ok(checkCss(css + '\n.jp-test { color: red !important; }').errors.length);
   assert.ok(checkCss(css + '\n.jp-test:has(button) { display: none; }').errors.length);
-  assert.ok(checkCss(css.replace('padding-bottom: 0 !important;', 'padding-bottom: 0;')).errors.length);
+  assert.ok(checkCss(css + '\n.is-mobile .jp-capture-root { padding-bottom: 0 !important; }').errors.length);
+});
+
+test('all locked Moment copies use the patched version without bundling a second runtime', () => {
+  const pkg = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(path.resolve(__dirname, '../package-lock.json'), 'utf8'));
+  assert.equal(pkg.overrides.moment, '2.31.0');
+  const copies = Object.entries(lock.packages).filter(([name]) => /(?:^|\/)node_modules\/moment$/.test(name));
+  assert.ok(copies.length > 0);
+  for (const [name, entry] of copies) assert.equal(entry.version, '2.31.0', name);
+  assert.equal(require('moment').version, '2.31.0');
+});
+
+test('mobile capture padding removes only the host bottom inset, observes repeat writes and restores on close', () => {
+  const previous = global.MutationObserver;
+  const platform = { isMobile: true }; const observers = [];
+  global.MutationObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe(root, options) { this.root = root; this.options = options; }
+    disconnect() { this.disconnected = true; }
+  };
+  try {
+    const { JournalCaptureView } = load('src/capture-view.ts', {
+      moment: require('moment'), Platform: platform, ItemView: class {}, Modal: class {},
+      FuzzySuggestModal: class {}, getLanguage: () => 'en',
+    });
+    const view = Object.create(JournalCaptureView.prototype);
+    const props = new Map([['padding-bottom', '372px'], ['color', 'purple']]);
+    const root = { style: {
+      getPropertyValue: key => props.get(key) || '',
+      getPropertyPriority: () => '',
+      removeProperty: key => props.delete(key),
+      setProperty: (key, value) => props.set(key, value),
+    } };
+    view.setupMobileRootPadding(root);
+    assert.equal(props.has('padding-bottom'), false);
+    const observer = observers[0];
+    assert.equal(observer.root, root);
+    assert.deepEqual(observer.options, { attributes: true, attributeFilter: ['style'] });
+    props.set('padding-bottom', '284px'); observer.callback();
+    assert.equal(props.has('padding-bottom'), false);
+    observer.callback(); // Its own removal must not spin or reset the last host inset.
+    assert.equal(props.get('color'), 'purple');
+    view.mobilePaddingCleanup();
+    assert.equal(observer.disconnected, true);
+    assert.equal(props.get('padding-bottom'), '284px');
+    platform.isMobile = false; view.mobilePaddingCleanup = null;
+    view.setupMobileRootPadding(root);
+    assert.equal(observers.length, 1);
+    assert.equal(props.get('padding-bottom'), '284px');
+    assert.equal(view.mobilePaddingCleanup, null);
+  } finally {
+    if (previous === undefined) delete global.MutationObserver; else global.MutationObserver = previous;
+  }
 });
 
 test('vault image save/copy reads binary locally without issuing a network request', async () => {

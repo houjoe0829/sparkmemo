@@ -272,6 +272,7 @@ export class JournalCaptureView extends ItemView {
   /** Includes microphone permission, recording and the final attachment/transcript flush. */
   private recordingBusy = false;
   private inputComposing = false;
+  private mobilePaddingCleanup: (() => void) | null = null;
   /** Protect the confirmation key when compositionend arrives before keydown. */
   private compositionEndedAt = -Infinity;
   private capturePlaceholder: CapturePlaceholder | null = null;
@@ -459,6 +460,7 @@ export class JournalCaptureView extends ItemView {
     root.empty();
     root.addClass('jp-capture-root', 'jp-no-tooltip');
     root.removeClass('jp-capture-card-hovered');
+    this.setupMobileRootPadding(root as HTMLElement);
     this.zenClosed = false;
 
     // Top-level tab bar — switches between "Quick capture" and "Yearly stats".
@@ -558,6 +560,8 @@ export class JournalCaptureView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.mobilePaddingCleanup?.();
+    this.mobilePaddingCleanup = null;
     this.closeRecordingFn?.();
     this.closeRecordingFn = null;
     this.startRecordingFn = null;
@@ -594,6 +598,31 @@ export class JournalCaptureView extends ItemView {
     this.teardownMobileToolbarAutoHide();
     this.disposeDays();
     this.containerEl.children[1].empty();
+  }
+
+  /** The mobile leaf already ends above the keyboard; a second host inset collapses the timeline. */
+  private setupMobileRootPadding(root: HTMLElement): void {
+    this.mobilePaddingCleanup?.();
+    this.mobilePaddingCleanup = null;
+    if (!Platform.isMobile) return;
+    let hostPadding = root.style.getPropertyValue('padding-bottom');
+    let hostPriority = root.style.getPropertyPriority('padding-bottom');
+    const removeHostInset = () => {
+      const value = root.style.getPropertyValue('padding-bottom');
+      if (!value) return;
+      hostPadding = value;
+      hostPriority = root.style.getPropertyPriority('padding-bottom');
+      // Let the plugin's CSS supply its normal zero inset; retain all other host styles.
+      root.style.removeProperty('padding-bottom');
+    };
+    removeHostInset();
+    const observer = new MutationObserver(removeHostInset);
+    observer.observe(root, { attributes: true, attributeFilter: ['style'] });
+    this.mobilePaddingCleanup = () => {
+      observer.disconnect();
+      // A reused host content element must not keep our keyboard adjustment after closing.
+      if (hostPadding) root.style.setProperty('padding-bottom', hostPadding, hostPriority);
+    };
   }
 
   // ── DOM construction ────────────────────────────────────────────────────

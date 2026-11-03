@@ -149,21 +149,10 @@
   -ms-overflow-style: none; /* old Edge/IE */
 }
 
-/* Mobile keyboard fix. When the software keyboard opens, Obsidian resizes the
-   app so the leaf already ends exactly at the top of the keyboard — and then
-   *also* pads `.view-content` with a bottom inset the height of the keyboard
-   (measured: 372px on iPhone), the usual trick for views whose content scrolls
-   as a whole. Our root IS that `.view-content`, and it is a fixed-height flex
-   column, so the inset is double compensation: of its 388px only 4px were left
-   for content, `.jp-pane-capture` correctly resolved to 0, and the timeline
-   collapsed with it. Drop the inset back to our own padding; nothing can be
-   hidden behind the keyboard here, because the leaf stops above it.
-   `!important` is required — Obsidian sets the inset as an inline style.
-   Zero rather than the usual pane padding: with the keyboard up every point
-   counts, and a scrolling list running to the edge of the pane is the norm on
-   mobile. The timeline supplies its own breathing room at the bottom. */
+/* The mobile leaf already stops above the keyboard. The view removes the
+   host's duplicate inline bottom inset while open, leaving CSS to control it. */
 .is-mobile .jp-capture-root {
-  padding-bottom: 0 !important;
+  padding-bottom: 0;
 }
 .is-mobile .jp-timeline-scroll {
   padding-bottom: 8px;

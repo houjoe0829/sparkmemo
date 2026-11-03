@@ -1807,7 +1807,7 @@ test('remembered Zen state restores before initial timeline render and performs 
     view.containerEl = new Element(); view.containerEl.createDiv(); const root = view.containerEl.createDiv();
     view.plugin = { settings: { captureZenMode: enabled }, saveSettings() { assert.fail('Startup must not save'); } };
     view.app = { vault: { on() {} } }; view.registerEvent = () => {}; view.registerDomEvent = () => {};
-    for (const name of ['setupCapturePlaceholder', 'buildZenExitButton', 'setupZenBackdrop', 'buildTabBar', 'buildTimeline', 'setupIntersectionObserver', 'setupMobileToolbarAutoHide', 'loadTagIndex']) view[name] = () => {};
+    for (const name of ['setupMobileRootPadding', 'setupCapturePlaceholder', 'buildZenExitButton', 'setupZenBackdrop', 'buildTabBar', 'buildTimeline', 'setupIntersectionObserver', 'setupMobileToolbarAutoHide', 'loadTagIndex']) view[name] = () => {};
     view.buildInputCard = () => { view.zenBtn = mobile ? null : new Element('button'); };
     view.fullRebuild = async () => { assert.equal(root.classes.has('jp-capture-zen'), expected); };
     obsidian.Platform.isMobile = mobile;
