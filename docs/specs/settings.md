@@ -14,8 +14,8 @@
 
 ## 用户可感知行为
 
-- 设置页顶部按顺序显示「通用」「存储位置」「配置」「关于」四个标签，外观参照 RSS Dashboard。
-- 首次打开默认进入「通用」，同一个设置页实例记住本次选择，不新增持久化的标签配置。
+- Obsidian 1.13.0 及以上版本使用官方设置定义接口，在同页按顺序显示「通用」「存储位置」「配置」「关于」四个分组。所有可编辑设置都进入全局设置搜索，搜索结果可以定位到实际控件；每日笔记位置说明仍为只读信息，预览和关于卡片不作为设置项索引。
+- 低于 1.13.0 的版本保留原四标签设置页，首次打开默认进入「通用」，同一个设置页实例记住本次选择，不新增持久化的标签配置。最低运行版本仍为 1.8.7。
 - 通用：语言、Memo 标题、标题层级。
 - 存储位置：每日笔记存放位置说明、图片目录、录音目录。每日笔记存放位置仅作说明，不新增配置：Memo 保存在 Obsidian 的每日笔记（Daily Note）中，存放位置跟随每日笔记的设置。
 - 配置：分为「时间戳设置」和「图片处理」两组。前者包含文字颜色、背景颜色、只读保护、自动插入时间戳、匹配正则、效果预览；后者包含图片压缩开关、质量、最大边长和时间与位置校验。
@@ -56,7 +56,8 @@
 
 - **类型与默认**：[section.ts](../../src/section.ts) 里的 `SparkMemoSettings` interface 与 `DEFAULT_SETTINGS` 常量。
 - **持久化**：`this.saveData()` / `this.loadData()`（Obsidian 官方 API），[main.ts](../../src/main.ts) 里封装为 `loadSettings` / `saveSettings`。
-- **设置 UI**：[main.ts](../../src/main.ts) 注册的 [settings-tab.ts](../../src/settings-tab.ts) 中的 `SparkMemoSettingTab` 用 Obsidian 的 `Setting` 构建器渲染；每项 name/desc 都走 [i18n.ts](../../src/i18n.ts) 的 `t()`。
+- 设置 UI：[main.ts](../../src/main.ts) 注册 [settings-tab.ts](../../src/settings-tab.ts) 中的 `SparkMemoSettingTab`。新版本通过 `getSettingDefinitions()` 提供完整设置定义，原有主题菜单、文件夹选择器和关于卡片通过自定义控件复用；旧版本通过 `display()` 渲染。每项 name/desc 都走 [i18n.ts](../../src/i18n.ts) 的 `t()`。
+- 新接口的控件仍通过 `saveSettings()` 保存，保留标题和边长的规范化、正则校验以及编辑器和颜色更新；语言切换先保存再刷新搜索索引，保存失败时恢复原语言，不重建记录面板。开发 SDK 固定为 1.13.0，新增接口调用使用 `requireApiVersion()` 保护，不提高最低运行版本。
 - **副作用触发**：
   - 装饰相关（正则、颜色开关、只读开关）→ `refreshEditors()` 派发 `forceUpdateEffect`
   - 颜色 → `applyCSSVariables()` 更新 CSS 变量

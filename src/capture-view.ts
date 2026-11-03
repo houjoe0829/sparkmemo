@@ -14,6 +14,8 @@
  * today's file, creating the file or heading if needed.
  */
 
+import { createMoment } from './moment';
+import type { Moment } from 'moment';
 import { createPcmCapture, type PcmCapture } from './pcm-capture';
 import {
   Component,
@@ -28,7 +30,6 @@ import {
   TFile,
   WorkspaceLeaf,
   getAllTags,
-  moment,
   normalizePath,
   requestUrl,
   setIcon,
@@ -111,7 +112,7 @@ interface TagTreeNode {
   /** Full tag path from root, e.g. "#parent/child". */
   fullPath: string;
   /** Aggregated data for memos tagged with exactly `fullPath`, if any were. */
-  own: { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> } | null;
+  own: { count: number; lastTs: number; entries: Array<{ file: TFile; date: Moment; entry: JournalEntry }> } | null;
   children: Map<string, TagTreeNode>;
   /** own.count plus every descendant's count. */
   totalCount: number;
@@ -122,7 +123,7 @@ interface TagTreeNode {
 /** Per-day rendered chunk in the infinite-scroll timeline. */
 interface DaySection {
   /** Local-day moment (00:00) for stable identity. */
-  date: moment.Moment;
+  date: Moment;
   /** Wrapper element for the day's date-header + entry rows. */
   el: HTMLElement;
   /** Lifecycle owner for this day's MarkdownRenderer.render calls. */
@@ -134,7 +135,7 @@ interface DaySection {
 /** One geo-tagged memo, as held by the location index and plotted on the map. */
 interface LocatedEntry {
   file: TFile;
-  date: moment.Moment;
+  date: Moment;
   entry: JournalEntry;
   location: EntryLocation;
   /** Epoch ms of the entry's timestamp, used for newest-first ordering. */
@@ -219,7 +220,7 @@ export class JournalCaptureView extends ItemView {
   /** `#tag` → aggregated memo data, built by a one-time full scan. Invalidated on any md file change. */
   private tagAggIndex: Map<
     string,
-    { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+    { count: number; lastTs: number; entries: Array<{ file: TFile; date: Moment; entry: JournalEntry }> }
   > | null = null;
   private tagAggLoading = false;
   /** Debounce timer for rebuilding `tagAggIndex` after vault writes, so the tag autocomplete stays warm. */
@@ -271,6 +272,8 @@ export class JournalCaptureView extends ItemView {
   /** Includes microphone permission, recording and the final attachment/transcript flush. */
   private recordingBusy = false;
   private inputComposing = false;
+  /** Protect the confirmation key when compositionend arrives before keydown. */
+  private compositionEndedAt = -Infinity;
   private capturePlaceholder: CapturePlaceholder | null = null;
   private attachmentListEl!: HTMLElement;
   private captureTimePillEl!: HTMLElement;
@@ -296,7 +299,7 @@ export class JournalCaptureView extends ItemView {
    * mismatch prompt (see `maybeCheckImageTime`); cleared once the pending
    * images are empty or the entry is submitted.
    */
-  private pendingCaptureOverride: { date: moment.Moment; time: string } | null = null;
+  private pendingCaptureOverride: { date: Moment; time: string } | null = null;
   /**
    * GPS coordinate read from a photo's EXIF, plus its (async-resolved)
    * coarse place name. Set as soon as GPS is found — `name` starts `null`
@@ -382,9 +385,9 @@ export class JournalCaptureView extends ItemView {
   // Cached state
   private days: DaySection[] = [];
   /** The single day currently shown in the capture timeline. Changed via the prev/next/calendar nav. */
-  private currentDate: moment.Moment = moment().startOf('day');
+  private currentDate: Moment = createMoment().startOf('day');
   /** Day immediately older than the oldest loaded day; next `loadMore` starts here. */
-  private nextProbeDate: moment.Moment = moment().startOf('day').subtract(1, 'day');
+  private nextProbeDate: Moment = createMoment().startOf('day').subtract(1, 'day');
   /** True once we've scanned far enough back that nothing earlier exists. */
   private exhausted = false;
   private loadingMore = false;
@@ -891,7 +894,7 @@ export class JournalCaptureView extends ItemView {
 
     // Build the sorted file queue (newest → oldest) once, then scan lazily
     const allNotes = getAllDailyNotes();
-    const queue: Array<{ date: moment.Moment; file: TFile }> = [];
+    const queue: Array<{ date: Moment; file: TFile }> = [];
     for (const file of Object.values(allNotes)) {
       if (!(file instanceof TFile)) continue;
       const date = getDateFromFile(file, 'day');
@@ -1407,6 +1410,7 @@ export class JournalCaptureView extends ItemView {
     // Cursor moves (arrow keys, clicks) don't fire 'input' — re-check the
     // trigger so the popup follows the caret / closes when it leaves the tag.
     this.textareaEl.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === 'Escape') this.compositionEndedAt = -Infinity;
       // Navigation/selection keys are handled (and preventDefault'd) on
       // keydown below when a popup is open — nothing left to do here.
       // Closing a suggestion on Escape must not immediately reopen it on keyup.
@@ -1427,8 +1431,14 @@ export class JournalCaptureView extends ItemView {
         this.closeMentionSuggest();
       }, 0);
     });
-    this.textareaEl.addEventListener('compositionstart', () => { this.inputComposing = true; });
-    this.textareaEl.addEventListener('compositionend', () => { this.inputComposing = false; });
+    this.textareaEl.addEventListener('compositionstart', () => {
+      this.inputComposing = true;
+      this.compositionEndedAt = -Infinity;
+    });
+    this.textareaEl.addEventListener('compositionend', (event: CompositionEvent) => {
+      this.inputComposing = false;
+      this.compositionEndedAt = event.timeStamp;
+    });
     this.textareaEl.addEventListener('keydown', (e: KeyboardEvent) => {
       // IME confirmation must never save or select a tag/note suggestion.
       if (this.isInputMethodEvent(e)) return;
@@ -2303,7 +2313,7 @@ export class JournalCaptureView extends ItemView {
   private async resolveAttachmentPath(configuredFolder: string, baseName: string): Promise<string> {
     const configured = configuredFolder.trim();
     if (configured.length === 0) {
-      const todayNote = getDailyNote(moment(), getAllDailyNotes());
+      const todayNote = getDailyNote(createMoment(), getAllDailyNotes());
       const sourcePath = todayNote?.path ?? '';
       return this.app.fileManager.getAvailablePathForAttachment(baseName, sourcePath);
     }
@@ -2502,7 +2512,7 @@ export class JournalCaptureView extends ItemView {
 
     const iconEl = this.captureTimePillEl.createSpan({ cls: 'jp-capture-time-pill-icon' });
     setIcon(iconEl, 'clock');
-    const label = override.date.isSame(moment(), 'day')
+    const label = override.date.isSame(createMoment(), 'day')
       ? override.time
       : `${override.date.format('MM-DD')} ${override.time}`;
     this.captureTimePillEl.createSpan({ cls: 'jp-capture-time-pill-text', text: label });
@@ -3089,11 +3099,11 @@ export class JournalCaptureView extends ItemView {
 
     const appliedParts: string[] = [];
     if (capturedAt) {
-      const capturedDate = moment(capturedAt);
+      const capturedDate = createMoment(capturedAt);
       this.pendingCaptureOverride = { date: capturedDate, time: formatTimeHHMM(capturedAt) };
       this.renderCaptureTimePill();
       appliedParts.push(
-        capturedDate.isSame(moment(), 'day')
+        capturedDate.isSame(createMoment(), 'day')
           ? t('capture.metadataAppliedTime', { time: this.pendingCaptureOverride.time })
           : t('capture.metadataAppliedTimeOtherDay', { date: capturedDate.format('YYYY-MM-DD') }),
       );
@@ -3334,7 +3344,7 @@ export class JournalCaptureView extends ItemView {
 
   /** Move the capture timeline to the previous/next day (delta = ±1). No-op past today or the lookback floor. */
   private navigateDay(delta: number) {
-    const today = moment().startOf('day');
+    const today = createMoment().startOf('day');
     const next = this.currentDate.clone().add(delta, 'day');
     if (delta > 0 && next.isAfter(today, 'day')) return;
     if (delta < 0 && today.diff(next, 'days') > this.maxLookbackDays) return;
@@ -3345,7 +3355,7 @@ export class JournalCaptureView extends ItemView {
   /** Enable/disable the prev/next buttons at the today / lookback boundaries, and mark the calendar button when on today. */
   private updateDayNavState() {
     if (!this.prevDayBtn) return; // no day header rendered yet (e.g. daily-notes plugin disabled)
-    const today = moment().startOf('day');
+    const today = createMoment().startOf('day');
     const isToday = this.currentDate.isSame(today, 'day');
     const atLookbackFloor = today.diff(this.currentDate, 'days') >= this.maxLookbackDays;
 
@@ -3370,7 +3380,7 @@ export class JournalCaptureView extends ItemView {
   }
 
   /** Which days in `monthStart`'s month have a non-empty journal section — used to mark the calendar grid. */
-  private async getMonthEntryDays(monthStart: moment.Moment): Promise<Set<string>> {
+  private async getMonthEntryDays(monthStart: Moment): Promise<Set<string>> {
     const result = new Set<string>();
     if (!appHasDailyNotesPluginLoaded()) return result;
 
@@ -3399,9 +3409,11 @@ export class JournalCaptureView extends ItemView {
 
   // ── Behaviour ───────────────────────────────────────────────────────────
 
-  /** IME boundary events can report isComposing=false while keyCode remains 229. */
+  /** Like ProseMirror, cover IMEs that end composition before the confirming keydown. */
   private isInputMethodEvent(e: KeyboardEvent): boolean {
-    return e.isComposing || this.inputComposing || e.keyCode === 229;
+    const sinceEnd = e.timeStamp - this.compositionEndedAt;
+    return e.isComposing || this.inputComposing || e.key === 'Process' || e.key === 'Unidentified'
+      || ((e.key === 'Enter' || e.key === 'Escape') && sinceEnd >= 0 && sinceEnd < 500);
   }
 
   /** Consume only this composer's exact platform save chord, never a global key. */
@@ -4024,7 +4036,7 @@ export class JournalCaptureView extends ItemView {
 
     try {
       let probed = 0;
-      const today = moment().startOf('day');
+      const today = createMoment().startOf('day');
 
       while (probed < this.probeWindow) {
         // Floor on lookback window
@@ -4057,7 +4069,7 @@ export class JournalCaptureView extends ItemView {
    * Returns null when the day has no content and `allowEmpty` is false.
    */
   private async buildDaySection(
-    date: moment.Moment,
+    date: Moment,
     allowEmpty: boolean,
   ): Promise<DaySection | null> {
     let file: TFile | null = null;
@@ -4151,7 +4163,7 @@ export class JournalCaptureView extends ItemView {
     if (entries.length === 0) {
       // The input box always writes to today, so the "写点什么吧" nudge only
       // makes sense when today's own section is the one being viewed.
-      const isToday = day.date.isSame(moment().startOf('day'), 'day');
+      const isToday = day.date.isSame(createMoment().startOf('day'), 'day');
       day.el.createDiv({
         cls: 'jp-capture-empty',
         text: isToday ? t('capture.emptyDayNudge') : t('capture.emptyDayNoNudge'),
@@ -4203,7 +4215,7 @@ export class JournalCaptureView extends ItemView {
       // "Latest" highlight only applies on today's section (otherwise every
       // historical day would have its own filled dot, which is noisy).
       if (
-        day.date.isSame(moment().startOf('day'), 'day') &&
+        day.date.isSame(createMoment().startOf('day'), 'day') &&
         entry.timestamp === latestTs
       ) {
         dot.addClass('jp-timeline-dot--latest');
@@ -4402,7 +4414,7 @@ export class JournalCaptureView extends ItemView {
     this.disposeDays();
     this.timelineEl.empty();
 
-    const byDate = new Map<string, { date: moment.Moment; file: TFile; entries: JournalEntry[] }>();
+    const byDate = new Map<string, { date: Moment; file: TFile; entries: JournalEntry[] }>();
     for (const e of entries) {
       const key = e.date.format('YYYY-MM-DD');
       let bucket = byDate.get(key);
@@ -4720,7 +4732,7 @@ export class JournalCaptureView extends ItemView {
       const all = getAllDailyNotes();
       const index = new Map<
         string,
-        { count: number; lastTs: number; entries: Array<{ file: TFile; date: moment.Moment; entry: JournalEntry }> }
+        { count: number; lastTs: number; entries: Array<{ file: TFile; date: Moment; entry: JournalEntry }> }
       >();
 
       for (const file of Object.values(all)) {
@@ -5178,7 +5190,7 @@ export class JournalCaptureView extends ItemView {
     this.disposeDays();
     this.timelineEl.empty();
 
-    const byDate = new Map<string, { date: moment.Moment; file: TFile; entries: JournalEntry[] }>();
+    const byDate = new Map<string, { date: Moment; file: TFile; entries: JournalEntry[] }>();
     for (const e of data.entries) {
       const key = e.date.format('YYYY-MM-DD');
       let bucket = byDate.get(key);
@@ -5317,15 +5329,15 @@ export class JournalCaptureView extends ItemView {
   }
 
   /** Build a human-readable date label. */
-  private formatDateHeader(d: moment.Moment, count: number): { title: string; subtitle: string } {
+  private formatDateHeader(d: Moment, count: number): { title: string; subtitle: string } {
     const weekdayNames = [
       t('capture.weekday.sun'), t('capture.weekday.mon'), t('capture.weekday.tue'),
       t('capture.weekday.wed'), t('capture.weekday.thu'), t('capture.weekday.fri'), t('capture.weekday.sat'),
     ];
     const weekdayLabel = weekdayNames[d.day()];
-    const isCurrentYear = d.year() === moment().year();
+    const isCurrentYear = d.year() === createMoment().year();
     const dateLabel = d.format(isCurrentYear ? 'M/D' : 'YYYY/M/D') + ` · ${weekdayLabel}`;
-    const today = moment().startOf('day');
+    const today = createMoment().startOf('day');
     const diff = d.diff(today, 'days');
     let relative = '';
     if (diff === 0) relative = t('capture.relativeToday');
@@ -5405,7 +5417,7 @@ export class JournalCaptureView extends ItemView {
     }
 
     const allNotes = getAllDailyNotes();
-    const today = moment().startOf('day');
+    const today = createMoment().startOf('day');
     const pool = Object.values(allNotes).filter((f): f is TFile => {
       if (!(f instanceof TFile)) return false;
       const d = getDateFromFile(f, 'day');
@@ -5429,7 +5441,7 @@ export class JournalCaptureView extends ItemView {
 
     let entry: JournalEntry | null = null;
     let pickedFile: TFile | null = null;
-    let pickedDate: moment.Moment | null = null;
+    let pickedDate: Moment | null = null;
 
     while (pool.length > 0 && !entry) {
       const idx = Math.floor(Math.random() * pool.length);
@@ -5502,7 +5514,7 @@ export class JournalCaptureView extends ItemView {
     // Special-cased here only: since the heavy date/weekday header above is
     // gone, the timestamp badge carries the date itself so it's still clear
     // which day this randomly-picked entry came from.
-    const isCurrentYear = day.date.year() === moment().year();
+    const isCurrentYear = day.date.year() === createMoment().year();
     const dateTimeLabel = `${day.date.format(isCurrentYear ? 'M/D' : 'YYYY/M/D')} ${entry.timestamp}`;
     head.createSpan({ cls: 'jp-timestamp', text: dateTimeLabel });
     const { text: bodyText, location } = extractLocationTag(entry.text);
@@ -5570,7 +5582,7 @@ export class JournalCaptureView extends ItemView {
 
     this.statsYearLabelEl = this.statsToolbarEl.createDiv({
       cls: 'jp-stats-year-label',
-      text: t('stats.yearLabel', { year: String(moment().year()) }),
+      text: t('stats.yearLabel', { year: String(createMoment().year()) }),
     });
 
     // Body container
@@ -5637,7 +5649,6 @@ export class JournalCaptureView extends ItemView {
         return;
       }
 
-      const fullRescan = this.dirtyYears === null;
       const yearsToScan = this.dirtyYears;
 
       const all = getAllDailyNotes();
@@ -5651,7 +5662,7 @@ export class JournalCaptureView extends ItemView {
         const year = d.year();
         // Cheap to determine (no disk read) — only years actually touched
         // since the last pass get the expensive cachedRead below.
-        if (!fullRescan && !yearsToScan.has(year)) continue;
+        if (yearsToScan !== null && !yearsToScan.has(year)) continue;
         const key = d.format('YYYY-MM-DD');
 
         let sectionText = '';
@@ -5669,17 +5680,18 @@ export class JournalCaptureView extends ItemView {
           console.error('[Spark Memo] stats read failed', file.path, err);
         }
 
-        if (!yearMap.has(year)) yearMap.set(year, []);
-        yearMap.get(year).push({ key, sectionText });
+        const dayInputs = yearMap.get(year) ?? [];
+        dayInputs.push({ key, sectionText });
+        yearMap.set(year, dayInputs);
 
-        if (!yearCitiesUpdate.has(year)) yearCitiesUpdate.set(year, new Set());
-        const citySet = yearCitiesUpdate.get(year);
+        const citySet = yearCitiesUpdate.get(year) ?? new Set<string>();
         for (const m of sectionText.matchAll(LOCATION_TAG_RE_GLOBAL)) citySet.add(m[1]);
+        yearCitiesUpdate.set(year, citySet);
       }
 
       // Years we actually rescanned this pass — full rescan means every year
       // present in the vault; otherwise just the previously-dirty ones.
-      const rescannedYears = fullRescan ? [...yearMap.keys()] : [...yearsToScan];
+      const rescannedYears = yearsToScan === null ? [...yearMap.keys()] : [...yearsToScan];
       for (const year of rescannedYears) {
         const dayInputs = yearMap.get(year);
         if (!dayInputs || dayInputs.length === 0) {
@@ -5842,12 +5854,12 @@ export class JournalCaptureView extends ItemView {
 
   private renderStatsHeatmap(parent: HTMLElement, stats: YearStats) {
     const year = stats.year;
-    const today = moment().startOf('day');
+    const today = createMoment().startOf('day');
 
     // All days of the year (date + per-day counts).
-    const allDays: { date: moment.Moment; entryCount: number; wordCount: number }[] = [];
-    const start = moment({ year, month: 0, day: 1 }).startOf('day');
-    const end = moment({ year, month: 11, day: 31 }).startOf('day');
+    const allDays: { date: Moment; entryCount: number; wordCount: number }[] = [];
+    const start = createMoment({ year, month: 0, day: 1 }).startOf('day');
+    const end = createMoment({ year, month: 11, day: 31 }).startOf('day');
     for (let d = start.clone(); d.isSameOrBefore(end); d.add(1, 'day')) {
       const ds = stats.dailyMap.get(d.format('YYYY-MM-DD'));
       allDays.push({
@@ -5894,7 +5906,7 @@ export class JournalCaptureView extends ItemView {
     for (let w = 0; w < totalWeeks; w++) {
       const entry = Object.entries(monthWeek).find(([, wk]) => wk === w);
       const monthLabel = entry
-        ? moment().locale(LANGUAGE_PROFILES[currentLocale()].momentLocale)
+        ? createMoment().locale(LANGUAGE_PROFILES[currentLocale()].momentLocale)
           .month(Number(entry[0])).format(LANGUAGE_PROFILES[currentLocale()].heatmapMonthFormat)
         : '';
       monthRow.createDiv({ cls: 'jp-stats-monthlabel', text: monthLabel });
@@ -6282,7 +6294,7 @@ export class JournalCaptureView extends ItemView {
 
     try {
       if (this.editingEntry) {
-        const ok = await this.updateEditedEntry(raw);
+        const ok = await this.updateEditedEntry(raw, this.editingEntry);
         if (!ok) return;
 
         this.editingEntry = null;
@@ -6316,7 +6328,7 @@ export class JournalCaptureView extends ItemView {
       );
       if (!ok) return;
 
-      const writtenDay = (targetDate ?? moment()).clone().startOf('day');
+      const writtenDay = (targetDate ?? createMoment()).clone().startOf('day');
       // Flag the new entry so the next renderDayContent pass scrolls to it
       // and paints a brief highlight — done for today's entries and
       // backdated ones alike.
@@ -6354,7 +6366,7 @@ export class JournalCaptureView extends ItemView {
       // renderDayContent as it renders the entry matching `pendingHighlight`.
       // A toast confirms the write for both today's and backdated entries.
       this.focusZenComposer();
-      if (writtenDay.isSame(moment(), 'day')) {
+      if (writtenDay.isSame(createMoment(), 'day')) {
         notice(t('notice.recorded'));
       } else {
         notice(t('notice.recordedToDate', { date: writtenDay.format('YYYY-MM-DD') }));
@@ -6379,8 +6391,11 @@ export class JournalCaptureView extends ItemView {
    * day's note). Returns false (with a Notice already shown) on failure or
    * if the underlying file changed under us since the menu was opened.
    */
-  private async updateEditedEntry(raw: string): Promise<boolean> {
-    const { day, entry } = this.editingEntry;
+  private async updateEditedEntry(
+    raw: string,
+    editing: { day: DaySection; entry: JournalEntry },
+  ): Promise<boolean> {
+    const { day, entry } = editing;
     if (!day.filePath) {
       notice(t('notice.journalFileNotFound'));
       return false;
@@ -6603,8 +6618,8 @@ class ImageMetadataConfirmModal extends Modal {
 
     const list = contentEl.createEl('ul', { cls: 'jp-image-metadata-confirm-list' });
     if (capturedAt !== null) {
-      const capturedDate = moment(capturedAt);
-      const label = capturedDate.isSame(moment(), 'day')
+      const capturedDate = createMoment(capturedAt);
+      const label = capturedDate.isSame(createMoment(), 'day')
         ? t('capture.metadataModalTimeLabel', { time: formatTimeHHMM(capturedAt) })
         : t('capture.metadataModalTimeLabelOtherDay', { datetime: capturedDate.format('YYYY-MM-DD HH:mm') });
       list.createEl('li', { text: label });
@@ -6925,13 +6940,13 @@ class TagDeleteConfirmModal extends Modal {
  * days in the future. Picking a day calls `onPick` and closes.
  */
 class CalendarPickerModal extends Modal {
-  private viewMonth: moment.Moment;
+  private viewMonth: Moment;
 
   constructor(
     app: import('obsidian').App,
-    private selected: moment.Moment,
-    private getMonthEntryDays: (monthStart: moment.Moment) => Promise<Set<string>>,
-    private onPick: (date: moment.Moment) => void,
+    private selected: Moment,
+    private getMonthEntryDays: (monthStart: Moment) => Promise<Set<string>>,
+    private onPick: (date: Moment) => void,
   ) {
     super(app);
     this.modalEl.addClass('jp-no-tooltip');
@@ -6987,7 +7002,7 @@ class CalendarPickerModal extends Modal {
     if (this.viewMonth !== requestedMonth) return;
     grid.empty();
 
-    const today = moment().startOf('day');
+    const today = createMoment().startOf('day');
     const firstDow = this.viewMonth.clone().startOf('month').day();
     for (let i = 0; i < firstDow; i++) {
       grid.createDiv({ cls: 'jp-cal-cell is-empty' });

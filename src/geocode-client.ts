@@ -245,11 +245,15 @@ export class ReverseGeocoder {
       for (const entry of data.entries.slice(-CACHE_LIMIT)) {
         if (!record(entry) || typeof entry.key !== 'string' || !validKey(entry.key)) continue;
         const storedName = name(entry.name);
-        const expiresAt = entry.expiresAt;
+        const storedExpiry = entry.expiresAt;
         if (entry.name !== null && !storedName) continue;
-        if (expiresAt !== null && (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= this.now())) continue;
+        let expiresAt: number | null = null;
+        if (storedExpiry !== null) {
+          if (typeof storedExpiry !== 'number' || !Number.isFinite(storedExpiry) || storedExpiry <= this.now()) continue;
+          expiresAt = storedExpiry;
+        }
         if (entry.name === null && expiresAt === null) continue;
-        this.cache.set(entry.key, { name: storedName, expiresAt: expiresAt as number | null });
+        this.cache.set(entry.key, { name: storedName, expiresAt });
       }
       for (const field of ['cooldownUntil', 'blockedUntil', 'nextRequestAt'] as const) {
         const value = data[field];

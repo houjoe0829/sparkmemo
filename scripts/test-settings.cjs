@@ -162,6 +162,7 @@ const obsidian = {
     constructor(app) { this.app = app; this.containerEl = new Element(); }
   },
   getLanguage: () => { if (legacyHost) throw Error('Not available'); return hostLanguage; },
+  requireApiVersion: () => false,
   moment: Object.assign(() => ({ year: () => 2026 }), { locale: () => momentLanguage }),
   addIcon: (id, svg) => registeredIcons.set(id, svg),
   setIcon: (el, icon) => { el.icon = icon; },
@@ -291,6 +292,78 @@ test('four tabs render in order with General initially selected', () => {
   assert.deepEqual(tabs(root).map(el => el.textContent), ['通用', '存储位置', '配置', '关于']);
   assert.equal(tabs(root)[0].getAttribute('aria-selected'), 'true');
   assert.deepEqual(rows(root).map(item => item.name), ['语言', '日记标题', '标题层级']);
+});
+test('declarative groups index every editable setting in every language without reading vault data', () => {
+  for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
+    const { tab, plugin, app } = setup({ language });
+    app.vault.getAllFolders = () => { throw Error('Search indexing must not scan vault folders'); };
+    const before = plain(plugin.settings);
+    const groups = tab.getSettingDefinitions();
+    assert.deepEqual(plain(groups.map(group => group.heading)),
+      ['general', 'storage', 'configuration', 'about'].map(key => t(`settings.tabs.${key}`)));
+    const indexed = groups.flatMap(group => group.items).filter(item => item.searchable !== false);
+    assert.equal(indexed.length, 15);
+    assert.equal(new Set(indexed.map(item => item.name)).size, 15);
+    assert.ok(indexed.every(item => !item.name.startsWith('settings.')));
+    assert.deepEqual(plain(indexed.filter(item => item.control).map(item => item.control.key).sort()), [
+      'autoTimestamp', 'imageCompressionEnabled', 'imageCompressionMaxSize', 'imageCompressionQuality',
+      'imageTimeCheck', 'readonlyTimestamps', 'targetHeading', 'timestampBgColor', 'timestampColor', 'timestampPattern',
+    ]);
+    for (const key of ['language', 'headingLevel', 'imageFolder', 'recordingFolder']) {
+      assert.equal(typeof indexed.find(item => item.name === t(`settings.${key === 'language' ? 'language' : key}.name`)).render, 'function');
+    }
+    assert.equal(plugin.saved.length, 0); assert.deepEqual(plain(plugin.settings), before);
+  }
+});
+test('native bound controls retain validation, normalization and saveSettings side effects', async () => {
+  const { tab, plugin } = setup();
+  for (const [key, value, expected] of [
+    ['targetHeading', '  ', 'Memo'], ['targetHeading', '  Thoughts  ', 'Thoughts'],
+    ['timestampColor', '#112233', '#112233'], ['timestampBgColor', '#445566', '#445566'],
+    ['readonlyTimestamps', false, false], ['autoTimestamp', false, false],
+    ['imageCompressionEnabled', false, false], ['imageTimeCheck', false, false],
+    ['imageCompressionQuality', 0.65, 0.65], ['imageCompressionMaxSize', '2560', 2560],
+    ['imageCompressionMaxSize', '-4', 0], ['timestampPattern', '\\d{1,2}:\\d{2}', '\\d{1,2}:\\d{2}'],
+  ]) {
+    const saves = plugin.saved.length; await tab.setControlValue(key, value);
+    assert.equal(plugin.settings[key], expected); assert.equal(plugin.saved.length, saves + 1);
+  }
+  assert.equal(tab.getControlValue('imageCompressionMaxSize'), '0');
+  const saves = plugin.saved.length;
+  const before = plain(plugin.settings);
+  await tab.setControlValue('timestampPattern', '[');
+  await tab.setControlValue('readonlyTimestamps', 'false');
+  await tab.setControlValue('notASetting', true);
+  assert.equal(plugin.saved.length, saves); assert.deepEqual(plain(plugin.settings), before);
+  const pattern = tab.getSettingDefinitions().flatMap(group => group.items).find(item => item.control?.key === 'timestampPattern');
+  assert.ok(pattern.control.validate('[')); assert.equal(pattern.control.validate('\\d{2}:\\d{2}'), undefined);
+});
+test('native custom rows retain menu and folder behavior and rerender without duplicating previews or About', async () => {
+  const { tab, plugin } = setup();
+  const originalVersionCheck = obsidian.requireApiVersion;
+  try {
+    obsidian.requireApiVersion = version => version === '1.13.0';
+    let updates = 0; tab.update = () => { updates++; };
+    let indexed = tab.getSettingDefinitions().flatMap(group => group.items);
+    const language = indexed.find(item => item.name === t('settings.language.name'));
+    const languageRow = new Setting(new Element()).setName(language.name); language.render(languageRow);
+    await control(languageRow).buttonEl.click(); await Menu.latest.choose('English');
+    assert.equal(plugin.settings.language, 'en'); assert.equal(updates, 1);
+    indexed = tab.getSettingDefinitions().flatMap(group => group.items);
+    assert.ok(indexed.some(item => item.name === 'Language'));
+    const folder = indexed.find(item => item.name === t('settings.imageFolder.name'));
+    const folderRow = new Setting(new Element()).setName(folder.name); folder.render(folderRow);
+    await folderRow.controlEl.children.find(el => el.tagName === 'input').component.change('  Photos  ');
+    assert.equal(plugin.settings.imageFolder, 'Photos');
+    for (const definition of indexed.filter(item => item.searchable === false &&
+      [t('settings.preview.label'), t('app.name')].includes(item.name))) {
+      const setting = new Setting(new Element());
+      definition.render(setting); const text = setting.settingEl.textContent;
+      const childCount = setting.settingEl.children.length;
+      definition.render(setting);
+      assert.equal(setting.settingEl.textContent, text); assert.equal(setting.settingEl.children.length, childCount);
+    }
+  } finally { obsidian.requireApiVersion = originalVersionCheck; }
 });
 test('daily note location is translated, explanatory only, and leads the storage tab', async () => {
   const expected = [
@@ -1050,7 +1123,7 @@ function keyEvent(view, overrides = {}) {
   return {
     target: view.textareaEl, key: 'Enter', metaKey: obsidian.Platform.isMacOS || obsidian.Platform.isIosApp,
     ctrlKey: !(obsidian.Platform.isMacOS || obsidian.Platform.isIosApp), shiftKey: false, altKey: false,
-    repeat: false, isComposing: false, keyCode: 13, defaultPrevented: false,
+    repeat: false, isComposing: false, keyCode: 13, timeStamp: performance.now(), defaultPrevented: false,
     preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; },
     ...overrides,
   };
@@ -1127,15 +1200,49 @@ test('composition and long-press never submit or accidentally select a suggestio
   view.handleSubmit = async () => { saves++; };
   view.mentionSuggestRange = { start: 0, end: 2 }; view.mentionSuggestMatches = [{}];
   view.selectMentionSuggestion = () => { selected++; };
-  for (const override of [{ isComposing: true }, { keyCode: 229 }]) {
+  for (const override of [{ isComposing: true }, { key: 'Process' }, { key: 'Unidentified' }]) {
     assert.equal(view.scope.bindings[0].callback(keyEvent(view, override)), undefined);
     textareaKey(view, override); textareaKey(view, { ...override, metaKey: false });
   }
   view.textareaEl.listeners.compositionstart[0]();
   textareaKey(view); textareaKey(view, { metaKey: false }); assert.equal(saves, 0); assert.equal(selected, 0);
-  view.textareaEl.listeners.compositionend[0]();
+  view.textareaEl.listeners.compositionend[0]({ timeStamp: performance.now() });
+  view.textareaEl.listeners.keyup.forEach(fn => fn(keyEvent(view)));
   assert.ok(textareaKey(view, { repeat: true }).defaultPrevented); assert.equal(saves, 0);
   textareaKey(view); assert.equal(saves, 1); assert.equal(selected, 0);
+});
+test('composition boundary order never saves, selects suggestions or exits Zen, without reading keyCode', async () => {
+  for (const endedFirst of [false, true]) {
+    for (const key of ['Enter', 'Escape']) {
+      const { view } = composer(); let saves = 0, selections = 0;
+      view.handleSubmit = async () => saves++;
+      view.selectMentionSuggestion = () => selections++;
+      view.mentionSuggestRange = { start: 0, end: 2 }; view.mentionSuggestMatches = [{}];
+      view.zenMode = true;
+      view.textareaEl.listeners.compositionstart[0]();
+      if (endedFirst) view.textareaEl.listeners.compositionend[0]({ timeStamp: 100 });
+      const event = keyEvent(view, { key, timeStamp: 101, isComposing: !endedFirst });
+      Object.defineProperty(event, 'keyCode', { get() { throw Error('Deprecated keyCode must not be read'); } });
+      for (const binding of view.scope.bindings.filter(binding => binding.key === key)) binding.callback(event);
+      view.textareaEl.listeners.keydown.forEach(fn => fn(event));
+      assert.equal(saves, 0); assert.equal(selections, 0); assert.equal(view.zenMode, true);
+      assert.equal(event.defaultPrevented, false);
+      if (!endedFirst) view.textareaEl.listeners.compositionend[0]({ timeStamp: 102 });
+      view.textareaEl.listeners.keyup.forEach(fn => fn(keyEvent(view, { key, timeStamp: 103 })));
+      assert.equal(view.isInputMethodEvent(keyEvent(view, { key, timeStamp: 104 })), false);
+    }
+  }
+});
+test('composition end guard expires without keyup and never blocks the mouse submit path', async () => {
+  const { view } = composer();
+  view.textareaEl.listeners.compositionend[0]({ timeStamp: 100 });
+  assert.equal(view.isInputMethodEvent(keyEvent(view, { timeStamp: 101 })), true);
+  assert.equal(view.isInputMethodEvent(keyEvent(view, { key: 'Escape', timeStamp: 599 })), true);
+  assert.equal(view.isInputMethodEvent(keyEvent(view, { timeStamp: 600 })), false);
+  assert.equal(view.isInputMethodEvent(keyEvent(view, { key: 'a', timeStamp: 101 })), false);
+  view.textareaEl.value = 'A draft'; let writes = 0;
+  view.plugin.writeJournalEntry = async () => { writes++; return false; };
+  await view.handleSubmit(); assert.equal(writes, 1);
 });
 test('shared submit rejects empty, recording and composition states without writes', async () => {
   const { view } = composer(); let writes = 0;
@@ -1179,7 +1286,9 @@ test('shortcut reuses editing and attachment-only save paths without appending d
     readyToWrite(view); view.editingEntry = { sentinel: 'existing memo' };
     let appended = 0, edited = 0;
     view.plugin.writeJournalEntry = async () => { appended++; return false; };
-    view.updateEditedEntry = async raw => { edited++; assert.equal(raw, 'A memo'); return true; };
+    view.updateEditedEntry = async (raw, editing) => {
+      edited++; assert.equal(raw, 'A memo'); assert.equal(editing, view.editingEntry); return true;
+    };
     textareaKey(view); await settle(); assert.equal(edited, 1); assert.equal(appended, 0); assert.equal(view.editingEntry, null);
     for (const kind of ['pendingImages', 'pendingAudio', 'pendingFiles']) {
       const file = { path: 'Attachments/item' };
@@ -1769,7 +1878,7 @@ test('Zen Escape dismisses suggestions first, does not reopen on keyup, then exi
 test('scoped Zen Escape never intercepts IME, repeated keys, modifier keys, other panes or ordinary mode', async () => {
   const { view } = composer(); view.plugin.saveSettings = async () => {}; view.applyZenMode(true);
   const escape = { key: 'Escape', keyCode: 27, metaKey: false, ctrlKey: false };
-  for (const extra of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }, { metaKey: true },
+  for (const extra of [{ isComposing: true }, { key: 'Process' }, { key: 'Unidentified' }, { repeat: true }, { metaKey: true },
     { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { defaultPrevented: true }, { target: new Element() }]) {
     assert.equal(view.handleZenEscape(keyEvent(view, { ...escape, ...extra })), false);
     assert.equal(view.zenMode, true);

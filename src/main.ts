@@ -1,3 +1,5 @@
+import { createMoment } from './moment';
+import type { Moment } from 'moment';
 import {
   MarkdownPostProcessorContext,
   MarkdownView,
@@ -5,7 +7,6 @@ import {
   Plugin,
   TFile,
   WorkspaceLeaf,
-  moment,
 } from 'obsidian';
 import {
   EditorState,
@@ -121,7 +122,7 @@ export default class SparkMemoPlugin extends Plugin {
     text: string,
     ts?: string,
     audio?: string,
-    targetDate?: moment.Moment,
+    targetDate?: Moment,
   ): Promise<boolean> {
     if (!appHasDailyNotesPluginLoaded()) {
       notice(t('notice.dailyNotesRequired'));
@@ -141,7 +142,7 @@ export default class SparkMemoPlugin extends Plugin {
       ? `${trimmed}${trimmed.length > 0 ? ' ' : ''}![[${audioPath}]]`
       : trimmed;
     const line = buildEntryLine(body.replace(/\r\n/g, '\n'), stamp);
-    const day = targetDate ?? moment();
+    const day = targetDate ?? createMoment();
 
     try {
       const existing: unknown = getDailyNote(day, getAllDailyNotes());

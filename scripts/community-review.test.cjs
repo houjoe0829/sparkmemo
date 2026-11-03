@@ -18,6 +18,82 @@ function load(file, obsidian) {
   return loaded.exports;
 }
 
+test('the date factory delegates to Obsidian without bundling another Moment runtime', () => {
+  const calls = [];
+  const result = { hostMoment: true };
+  const host = { moment: input => { calls.push(input); return result; } };
+  const { createMoment } = load('src/moment.ts', host);
+  for (const input of [undefined, new Date(2026, 0, 15), { year: 2026, month: 0, day: 1 }]) {
+    assert.equal(createMoment(input), result);
+    assert.equal(calls.at(-1), input);
+  }
+  const built = buildSync({ entryPoints: [path.resolve(__dirname, '../src/moment.ts')],
+    bundle: true, format: 'cjs', platform: 'node', write: false, metafile: true,
+    external: ['obsidian'] });
+  assert.ok(!Object.keys(built.metafile.inputs).some(file => file.includes('node_modules/moment/')));
+});
+
+test('stats keep full, incremental and deleted-year scans equivalent after null-safe narrowing', async () => {
+  const previousWindow = global.window;
+  const moment = require('moment');
+  class TFile {
+    constructor(basename, text) { this.basename = basename; this.path = `${basename}.md`; this.text = text; }
+  }
+  class TFolder { constructor() { this.children = []; } }
+  const folder = new TFolder();
+  const reads = [];
+  const vault = {
+    getAbstractFileByPath: () => folder,
+    cachedRead: async file => { reads.push(file.basename); return file.text; },
+  };
+  global.window = { moment, app: { vault,
+    internalPlugins: { plugins: { 'daily-notes': { enabled: true } },
+      getPluginById: () => ({ instance: { options: {} } }) },
+    plugins: { getPlugin: () => null },
+  } };
+  try {
+    const { JournalCaptureView } = load('src/capture-view.ts', {
+      moment, TFile, TFolder, ItemView: class {}, Modal: class {}, FuzzySuggestModal: class {},
+      getLanguage: () => 'en', normalizePath: value => value,
+      Vault: { recurseChildren: (root, callback) => root.children.forEach(callback) },
+    });
+    const view = Object.create(JournalCaptureView.prototype);
+    view.app = { vault };
+    view.plugin = { settings: { targetHeading: 'Memo', headingLevel: 2, timestampPattern: '\\d{2}:\\d{2}' } };
+    view.statsLoading = false; view.dirtyYears = null;
+    view.allYearStats = new Map(); view.yearCities = new Map();
+    view.renderStatsLoading = () => {}; view.renderStatsContent = () => {};
+    view.renderStatsError = message => assert.fail(message);
+    folder.children = [
+      new TFile('2025-01-01', '## Memo\n- 10:00 First [A](geo:30,114)\n'),
+      new TFile('2026-01-01', '## Memo\n- 10:00 Second [B](geo:31,114)\n'),
+      new TFile('2026-01-02', '## Memo\n- 11:00 Third [B](geo:31,114)\n'),
+    ];
+    await view.loadAllStats();
+    assert.equal(view.allYearStats.get(2025).totalEntries, 1);
+    assert.equal(view.allYearStats.get(2026).totalEntries, 2);
+    assert.equal(view.statsLocationCount, 2);
+    assert.equal(view.dirtyYears.size, 0);
+    const untouched = view.allYearStats.get(2025);
+    reads.length = 0; view.dirtyYears = new Set([2026]);
+    await view.loadAllStats();
+    assert.deepEqual(reads, ['2026-01-01', '2026-01-02']);
+    assert.equal(view.allYearStats.get(2025), untouched);
+    assert.equal(view.allYearStats.get(2026).totalEntries, 2);
+    folder.children = folder.children.filter(file => file.basename.startsWith('2025'));
+    reads.length = 0; view.dirtyYears = new Set([2026]);
+    await view.loadAllStats();
+    assert.deepEqual(reads, []);
+    assert.equal(view.allYearStats.has(2026), false);
+    assert.equal(view.yearCities.has(2026), false);
+    assert.equal(view.statsLocationCount, 1);
+    assert.equal(view.statsLoading, false);
+  } finally {
+    if (previousWindow === undefined) delete global.window;
+    else global.window = previousWindow;
+  }
+});
+
 test('CSS guard rejects new important declarations and relational selectors, retaining the keyboard exception', () => {
   const css = readFileSync(path.resolve(__dirname, '../styles.css'), 'utf8');
   assert.deepEqual(checkCss(css), { errors: [], inlineOverrides: 1 });

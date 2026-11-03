@@ -310,6 +310,29 @@ test('invalid cache entries cannot inject a name, coordinate or never-expiring m
   assert.equal(await h.client.resolve(32, 114, 'zh'), '江岸区');
   assert.equal(h.calls.length, 3);
 });
+test('cache expiry narrowing retains permanent names, timed names and timed misses, rejecting invalid expiry values', async () => {
+  const entries = [
+    { key: '30,114:en', name: 'Permanent county', expiresAt: null },
+    { key: '31,114:en', name: 'Timed county', expiresAt: BASE + DAY },
+    { key: '32,114:en', name: null, expiresAt: BASE + DAY },
+    ...[undefined, 'future', {}, 0, BASE, BASE - 1].map((expiresAt, i) =>
+      ({ key: `${40 + i},114:en`, name: 'Invalid cached county', expiresAt })),
+  ];
+  const h = harness({ raw: JSON.stringify({ version: 1, format: 'geocodejson-district-v1', entries }) });
+  try {
+    assert.equal(await h.client.resolve(30, 114, 'en'), 'Permanent county');
+    assert.equal(await h.client.resolve(31, 114, 'en'), 'Timed county');
+    assert.equal(await h.client.resolve(32, 114, 'en'), null);
+    assert.equal(h.calls.length, 0);
+    for (let i = 0; i < 6; i++) assert.equal(await h.client.resolve(40 + i, 114, 'en'), '江岸区');
+    assert.equal(h.calls.length, 6);
+    await h.client.flush();
+    const saved = JSON.parse(h.raw()).entries;
+    assert.equal(saved.find(entry => entry.key === '30,114:en').expiresAt, null);
+    assert.equal(saved.find(entry => entry.key === '31,114:en').expiresAt, BASE + DAY);
+    assert.equal(saved.find(entry => entry.key === '32,114:en').expiresAt, BASE + DAY);
+  } finally { h.client.dispose(); }
+});
 test('the persistent cache stays bounded when a new coordinate is added', async () => {
   const entries = Array.from({ length: 2000 }, (_, i) => ({ key: `${i / 10000},114:en`, name: 'Cached county', expiresAt: null }));
   const h = harness({ raw: JSON.stringify({ version: 1, format: 'geocodejson-district-v1', entries }) });

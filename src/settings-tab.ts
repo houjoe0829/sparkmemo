@@ -1,4 +1,6 @@
-import { App, ButtonComponent, FuzzySuggestModal, Menu, Modal, PluginSettingTab, Setting, TFolder, TextComponent, addIcon, setIcon } from 'obsidian';
+import { App, ButtonComponent, FuzzySuggestModal, Menu, Modal, PluginSettingTab, Setting, TFolder, TextComponent, addIcon, requireApiVersion, setIcon } from 'obsidian';
+import type { SettingDefinitionItem } from 'obsidian';
+import type { SparkMemoSettings } from './section';
 import type SparkMemoPlugin from './main';
 import { normalizeLanguage, t } from './i18n';
 import { LANGUAGE_PROFILES, SUPPORTED_LOCALES } from './languages';
@@ -74,10 +76,12 @@ export class SparkMemoSettingTab extends PluginSettingTab {
     desc: string,
     key: 'recordingFolder' | 'imageFolder',
   ): void {
+    this.addFolderControls(new Setting(containerEl).setName(name).setDesc(desc), key);
+  }
+
+  private addFolderControls(setting: Setting, key: 'recordingFolder' | 'imageFolder'): void {
     let textComp: TextComponent | null = null;
-    new Setting(containerEl)
-      .setName(name)
-      .setDesc(desc)
+    setting
       .addText(text => {
         textComp = text;
         text
@@ -118,7 +122,17 @@ export class SparkMemoSettingTab extends PluginSettingTab {
     options: ReadonlyArray<readonly [string, string]>,
     onChange: (value: string) => Promise<void>,
   ): void {
-    new Setting(containerEl).setName(name).setDesc(desc).addButton(button => {
+    this.addSelectControls(new Setting(containerEl).setName(name).setDesc(desc), name, value, options, onChange);
+  }
+
+  private addSelectControls(
+    setting: Setting,
+    name: string,
+    value: string,
+    options: ReadonlyArray<readonly [string, string]>,
+    onChange: (value: string) => Promise<void>,
+  ): void {
+    setting.addButton(button => {
       const el = button.buttonEl;
       el.addClass('jp-settings-select');
       el.setAttribute('aria-label', name);
@@ -148,7 +162,109 @@ export class SparkMemoSettingTab extends PluginSettingTab {
     });
   }
 
+  /** All editable fields are indexed, not only the currently selected legacy tab. */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    const groupClass = 'jp-settings jp-no-tooltip jp-settings-definition-group';
+    return [
+      { type: 'group', heading: t('settings.tabs.general'), cls: groupClass, items: [
+        { name: t('settings.language.name'), desc: t('settings.language.desc'), render: setting => {
+          this.addSelectControls(setting, t('settings.language.name'), this.plugin.settings.language,
+            [['system', t('settings.language.system')],
+              ...SUPPORTED_LOCALES.map(value => [value, LANGUAGE_PROFILES[value].nativeName] as const)],
+            async value => {
+              const previous = this.plugin.settings.language;
+              this.plugin.settings.language = normalizeLanguage(value);
+              try { await this.plugin.saveSettings(); }
+              catch (error) { this.plugin.settings.language = previous; throw error; }
+              this.refreshSettings();
+              this.containerEl.querySelector<HTMLButtonElement>('.jp-settings-select')?.focus();
+            });
+        } },
+        { name: t('settings.targetHeading.name'), desc: t('settings.targetHeading.desc'),
+          control: { type: 'text', key: 'targetHeading', placeholder: 'Memo' } },
+        { name: t('settings.headingLevel.name'), desc: t('settings.headingLevel.desc'), render: setting => {
+          this.addSelectControls(setting, t('settings.headingLevel.name'), String(this.plugin.settings.headingLevel),
+            Array.from({ length: 6 }, (_, index) => [String(index + 1), `H${index + 1}  ${'#'.repeat(index + 1)}`] as const),
+            async value => { this.plugin.settings.headingLevel = Number(value); await this.plugin.saveSettings(); });
+        } },
+      ] },
+      { type: 'group', heading: t('settings.tabs.storage'), cls: groupClass, items: [
+        { name: t('settings.dailyNote.name'), desc: t('settings.dailyNote.desc') },
+        { name: t('settings.imageFolder.name'), desc: t('settings.imageFolder.desc'),
+          render: setting => this.addFolderControls(setting, 'imageFolder') },
+        { name: t('settings.recordingFolder.name'), desc: t('settings.recordingFolder.desc'),
+          render: setting => this.addFolderControls(setting, 'recordingFolder') },
+      ] },
+      { type: 'group', heading: t('settings.tabs.configuration'), cls: groupClass, items: [
+        { name: t('settings.timestamp.heading'), searchable: false, render: setting => { setting.setHeading(); } },
+        { name: t('settings.timestampColor.name'), desc: t('settings.timestampColor.desc'),
+          control: { type: 'color', key: 'timestampColor' } },
+        { name: t('settings.timestampBgColor.name'), desc: t('settings.timestampBgColor.desc'),
+          control: { type: 'color', key: 'timestampBgColor' } },
+        { name: t('settings.readonly.name'), desc: t('settings.readonly.desc'),
+          control: { type: 'toggle', key: 'readonlyTimestamps' } },
+        { name: t('settings.autoTimestamp.name'), desc: t('settings.autoTimestamp.desc'),
+          control: { type: 'toggle', key: 'autoTimestamp' } },
+        { name: t('settings.pattern.name'), desc: t('settings.pattern.desc'),
+          control: { type: 'text', key: 'timestampPattern', placeholder: '\\d{2}:\\d{2}',
+            validate: value => { try { new RegExp(value); } catch { return t('notice.invalidRegex'); } } } },
+        { name: t('settings.preview.label'), searchable: false, render: setting => {
+          setting.settingEl.empty(); setting.settingEl.addClass('jp-settings-custom-row');
+          this.renderTimestampPreview(setting.settingEl);
+        } },
+        { name: t('settings.media.images'), searchable: false, render: setting => { setting.setHeading(); } },
+        { name: t('settings.imageCompression.name'), desc: t('settings.imageCompression.desc'),
+          control: { type: 'toggle', key: 'imageCompressionEnabled' } },
+        { name: t('settings.compressionQuality.name'), desc: t('settings.compressionQuality.desc'),
+          control: { type: 'slider', key: 'imageCompressionQuality', min: 0.1, max: 1, step: 0.05 } },
+        { name: t('settings.compressionMaxSize.name'), desc: t('settings.compressionMaxSize.desc'),
+          control: { type: 'text', key: 'imageCompressionMaxSize', placeholder: '1920' } },
+        { name: t('settings.imageTimeCheck.name'), desc: t('settings.imageTimeCheck.desc'),
+          control: { type: 'toggle', key: 'imageTimeCheck' } },
+      ] },
+      { type: 'group', heading: t('settings.tabs.about'), cls: groupClass, items: [
+        { name: t('app.name'), searchable: false, render: setting => {
+          setting.settingEl.empty(); setting.settingEl.addClass('jp-settings-custom-row');
+          this.renderAbout(setting.settingEl);
+        } },
+      ] },
+    ];
+  }
+
+  getControlValue(key: string): unknown {
+    if (key === 'imageCompressionMaxSize') return String(this.plugin.settings.imageCompressionMaxSize);
+    return this.plugin.settings[key as keyof SparkMemoSettings];
+  }
+
+  /** Native controls must use the same normalization and save side effects as legacy controls. */
+  async setControlValue(key: string, value: unknown): Promise<void> {
+    const settings = this.plugin.settings;
+    if (key === 'targetHeading' && typeof value === 'string') settings.targetHeading = value.trim() || 'Memo';
+    else if ((key === 'timestampColor' || key === 'timestampBgColor') && typeof value === 'string') settings[key] = value;
+    else if ((key === 'readonlyTimestamps' || key === 'autoTimestamp'
+      || key === 'imageCompressionEnabled' || key === 'imageTimeCheck') && typeof value === 'boolean') settings[key] = value;
+    else if (key === 'timestampPattern' && typeof value === 'string') {
+      try { new RegExp(value); } catch { notice(t('notice.invalidRegex')); return; }
+      settings.timestampPattern = value;
+    } else if (key === 'imageCompressionQuality' && typeof value === 'number') settings.imageCompressionQuality = value;
+    else if (key === 'imageCompressionMaxSize' && typeof value === 'string') {
+      const n = parseInt(value, 10);
+      settings.imageCompressionMaxSize = Number.isFinite(n) && n >= 0 ? n : 0;
+    } else return;
+    await this.plugin.saveSettings();
+  }
+
+  private refreshSettings(): void {
+    // update() does not exist before 1.13; display() remains the documented legacy fallback.
+    if (requireApiVersion('1.13.0')) this.update();
+    else this.renderLegacy();
+  }
+
   display(): void {
+    this.renderLegacy();
+  }
+
+  private renderLegacy(): void {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('jp-settings', 'jp-no-tooltip');
@@ -168,7 +284,7 @@ export class SparkMemoSettingTab extends PluginSettingTab {
       });
       const activate = (next: SettingsTab, focus: boolean) => {
         this.currentTab = next;
-        this.display();
+        this.renderLegacy();
         if (focus) containerEl.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
       };
       button.addEventListener('click', () => activate(tab, false));
@@ -215,7 +331,7 @@ export class SparkMemoSettingTab extends PluginSettingTab {
           this.plugin.settings.language = previous;
           throw error;
         }
-        this.display();
+        this.refreshSettings();
         this.containerEl.querySelector<HTMLButtonElement>('.jp-settings-select')?.focus();
       },
     );
@@ -325,6 +441,10 @@ export class SparkMemoSettingTab extends PluginSettingTab {
           }),
       );
 
+    this.renderTimestampPreview(containerEl);
+  }
+
+  private renderTimestampPreview(containerEl: HTMLElement): void {
     // Preview badge
     const previewEl = containerEl.createDiv({ cls: 'jp-settings-preview' });
     previewEl.createSpan({

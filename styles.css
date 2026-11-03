@@ -3012,6 +3012,10 @@
 .jp-settings .jp-settings-tab-content {
   margin-top: 12px;
 }
+
+.jp-settings .jp-settings-custom-row {
+  display: block;
+}
 /* About uses RSS Dashboard's centered title, muted version and outlined actions. */
 .jp-settings .jp-settings-about {
   max-width: 640px;
