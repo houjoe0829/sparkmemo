@@ -8,6 +8,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 The project started as a fork of [zhaohongxuan/journal-partner](https://github.com/zhaohongxuan/journal-partner) (a single-file timestamp-highlighting plugin) and has since grown well beyond it — the codebase is now split across several modules and the plugin ID/branding is `spark-memo` / Spark Memo, not Journal Partner. When updating docs or comments, prefer "Spark Memo" and "Memo section" over the old naming.
 
+涉及 Spark Memo 发版、发布新版本或提交社区更新时，必须先读取 `.agents/skills/release-plugin/SKILL.md` 和 `docs/specs/release-workflow.md`，不得仅按通用提交 Skill 或 GitHub 工作流执行。
 ## 悬停提示
 - 默认不新增重复按钮名称、完整标题或完整链接的悬停提示，不因控件只有图标就添加 `title` 或 `setTooltip()`。
 - 保留无障碍名称、键盘操作、菜单文字、弹窗标题和必要错误说明，不能通过删除 `aria-label` 来消除提示。
