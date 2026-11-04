@@ -808,6 +808,7 @@ export class JournalCaptureView extends ItemView {
       this.capturePaneEl.show();
       this.statsPaneEl.hide();
       this.inputCardEl.show();
+      this.capturePlaceholder?.enter();
       this.searchBarEl.hide();
       this.locationBarEl.hide();
       this.tagAggBarEl.hide();
@@ -1386,12 +1387,8 @@ export class JournalCaptureView extends ItemView {
   private setupCapturePlaceholder() {
     this.capturePlaceholder = new CapturePlaceholder(this.textareaEl, this.textareaEl.parentElement,
       () => JournalCaptureView.INPUT_PLACEHOLDERS.map(key => t(key)),
-      () => !this.editingEntry && !this.inputComposing && !this.isSubmitting);
-  }
-
-  private resetCapturePlaceholder() {
-    this.textareaEl.placeholder = this.pickRandomPlaceholder();
-    this.capturePlaceholder?.reset();
+      () => this.currentTab === 'capture' && !this.editingEntry && !this.inputComposing && !this.isSubmitting,
+      this.containerEl);
   }
 
   private buildInputCard(root: HTMLElement) {
@@ -2830,7 +2827,7 @@ export class JournalCaptureView extends ItemView {
   private cancelEdit() {
     this.editingEntry = null;
     this.textareaEl.value = '';
-    this.resetCapturePlaceholder();
+    this.capturePlaceholder?.sync();
     this.pendingImages = [];
     this.pendingAudio = [];
     this.pendingFiles = [];
@@ -6328,7 +6325,7 @@ export class JournalCaptureView extends ItemView {
 
         this.editingEntry = null;
         this.textareaEl.value = '';
-        this.resetCapturePlaceholder();
+        this.capturePlaceholder?.sync();
         this.pendingImages = [];
         this.pendingAudio = [];
         this.pendingFiles = [];
@@ -6367,7 +6364,7 @@ export class JournalCaptureView extends ItemView {
       };
 
       this.textareaEl.value = '';
-      this.resetCapturePlaceholder();
+      this.capturePlaceholder?.sync();
       this.pendingImages = [];
       this.pendingAudio = [];
       this.pendingFiles = [];

@@ -294,18 +294,7 @@
   overflow-wrap: break-word;
 }
 .jp-capture-placeholder[hidden] { display: none; }
-.jp-capture-placeholder-caret {
-  display: inline-block;
-  width: 1px;
-  height: 1em;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  background: currentColor;
-  animation: jp-placeholder-caret 1050ms steps(1, end) infinite;
-}
-@keyframes jp-placeholder-caret { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
 .is-mobile .jp-capture-placeholder { top: 4px; left: 6px; right: 4px; }
-@media (prefers-reduced-motion: reduce) { .jp-capture-placeholder-caret { display: none; animation: none; } }
 
 .jp-tag-suggest {
   position: absolute;

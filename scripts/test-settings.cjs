@@ -29,6 +29,7 @@ class Element {
     this.listeners = {};
     this.ownText = opts.text || '';
     this.value = opts.value || opts.attr?.value || '';
+    this.placeholder = opts.attr?.placeholder || '';
     this.classList = { add: (...names) => this.addClass(...names), remove: (...names) => names.forEach(name => this.classes.delete(name)) };
   }
   get textContent() { return this.ownText + this.children.map(child => child.textContent).join(''); }
@@ -1681,7 +1682,7 @@ test('every random prompt is translated in all four languages and preserves the 
     setLanguage('en'); assert.equal(t(inputKeys[4]), 'What just happened?');
   } finally { runtimeMath.random = originalRandom; }
 });
-test('creation, successful save and edit cancellation select prompts in the current plugin language', async () => {
+test('successful save, edit save and cancellation retain the entry hint in every plugin language', async () => {
   const originalRandom = runtimeMath.random, previousMoment = obsidian.moment;
   try {
     for (const language of ['zh', 'zh-TW', 'en', 'ja']) {
@@ -1690,13 +1691,13 @@ test('creation, successful save and edit cancellation select prompts in the curr
       assert.equal(view.textareaEl.getAttribute('placeholder'), t(JournalCaptureView.INPUT_PLACEHOLDERS[0]));
       readyToWrite(view); view.plugin.writeJournalEntry = async () => true;
       runtimeMath.random = () => 0.45;
-      await view.handleSubmit(); assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[4]));
+      await view.handleSubmit(); assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[0]));
       view.editingEntry = { sentinel: 'edit' }; view.textareaEl.value = 'Edited memo';
       view.updateEditedEntry = async () => true; runtimeMath.random = () => 0.65;
-      await view.handleSubmit(); assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[6]));
+      await view.handleSubmit(); assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[0]));
       view.editingEntry = { sentinel: 'edit' }; view.textareaEl.value = 'Draft';
       runtimeMath.random = () => 0.95; view.cancelEdit();
-      assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[9]));
+      assert.equal(view.textareaEl.placeholder, t(JournalCaptureView.INPUT_PLACEHOLDERS[0]));
       assert.equal(view.textareaEl.value, ''); assert.equal(view.editingEntry, null);
     }
   } finally { runtimeMath.random = originalRandom; obsidian.moment = previousMoment; }
@@ -1902,7 +1903,9 @@ test('Zen cannot navigate to hidden tabs but all normal tabs remain available af
   view.statsTabBtn = new Element(); view.locationTabBtn = new Element(); view.tagAggTabBtn = new Element();
   for (const field of ['capturePaneEl', 'statsPaneEl', 'searchBarEl', 'locationBarEl', 'tagAggBarEl']) view[field] = new Element();
   view.fullRebuild = async () => {};
-  view.switchTab('capture'); assert.equal(view.currentTab, 'capture');
+  let visits = 0; view.capturePlaceholder = { enter() { visits++; } };
+  view.switchTab('capture'); assert.equal(view.currentTab, 'capture'); assert.equal(visits, 1);
+  view.switchTab('capture'); assert.equal(visits, 1);
 });
 
 test('Zen save and edit keep composer-only mode, clear content, retain focus and skip timeline highlighting', async () => {
