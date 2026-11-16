@@ -3311,3 +3311,19 @@
   font-size: 0.85em;
   color: var(--text-muted);
 }
+
+/* The menu's object remains visible after the finger lifts. */
+body.is-mobile .jp-entry-menu-target {
+  background-color: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+}
+body.is-mobile .jp-timeline-entry .jp-timeline-bubble {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+body.is-mobile .jp-timeline-bubble :is(a, input, textarea, [contenteditable="true"]) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}

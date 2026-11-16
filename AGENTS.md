@@ -165,3 +165,13 @@ Adding a language must update these together in one change:
 - **ESBuild externals:** CodeMirror and Obsidian are excluded from the bundle — provided by Obsidian at runtime.
 - **Internal `jp-` naming:** CSS classes, some internal type names (`JournalEntry`), and function names (`appendToJournalSection`, `JournalCaptureView`) still carry the original Journal Partner naming. This is intentionally left as-is — it's not user-facing, and a full rename would be a large, purely cosmetic refactor with no functional benefit.
 - **i18n locale detection:** `i18n.ts` uses Obsidian's `getLanguage()` (added in Obsidian 1.8.7); on older Obsidian versions where it isn't available, it falls back to `moment.locale()`, then defaults to English.
+
+## 手机和平板的长按菜单
+- 手机和 iPad 上，已有选项菜单的对象按住不动约 500 毫秒即弹出菜单，无需松手；同一次手势不得重复打开菜单。
+- 短按保留原有行为。滑动、滚动、手势取消、多指触摸、窗口失焦或对象销毁时，取消待触发的长按；链接、按钮、输入框和正在编辑的文字保留自身操作。
+- 已开始拖动时取消菜单；菜单弹出后，同一次手势不再启动拖动。已有明确约定的特殊长按操作保留，例如 Doings「＋」按钮。
+- 菜单打开期间，对应对象持续显示浅色底和细描边，松手后仍保留；高亮不改变对象的位置、尺寸和原有内容。
+- 同一窗口只突出当前菜单的操作对象。切换对象时清除旧高亮，菜单关闭或页面销毁时清除当前高亮。
+- 松手后的延迟点击不得误开详情、触发菜单项或立即关闭菜单；用户下一次主动点击应正常响应。
+- 点击菜单外部时只关闭菜单，不触发背后的内容；关闭菜单后恢复正常操作。
+- 验证需覆盖手机与 iPad、深浅色、滑动与拖动、松手防误触和关闭清理；独立预览通过与实机验证分别报告。

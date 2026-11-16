@@ -14,6 +14,7 @@
  * today's file, creating the file or heading if needed.
  */
 
+import { bindMobileMenu } from './mobile-context-menu';
 import { createMoment } from './moment';
 import type { Moment } from 'moment';
 import { createPcmCapture, type PcmCapture } from './pcm-capture';
@@ -1056,12 +1057,10 @@ export class JournalCaptureView extends ItemView {
         this.attachTagClickHandlers(bubble);
       });
 
-      const openMenu = (evt: MouseEvent) => {
-        evt.preventDefault();
-        this.openEntryMenu(evt, day, entry);
-      };
-      head.addEventListener('contextmenu', openMenu);
-      bubble.addEventListener('contextmenu', openMenu);
+      day.scope.register(bindMobileMenu(row, {
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        open: event => this.openEntryMenu(event, day, entry),
+      }));
     }
   }
 
@@ -4266,12 +4265,10 @@ export class JournalCaptureView extends ItemView {
       // Context menu: copy / delete (with optional audio cleanup).
       // Attached to both the timestamp pill and bubble so right-click /
       // long-press anywhere on the row triggers it.
-      const openMenu = (evt: MouseEvent) => {
-        evt.preventDefault();
-        this.openEntryMenu(evt, day, entry);
-      };
-      head.addEventListener('contextmenu', openMenu);
-      bubble.addEventListener('contextmenu', openMenu);
+      day.scope.register(bindMobileMenu(row, {
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        open: event => this.openEntryMenu(event, day, entry),
+      }));
     }
 
     if (highlightTargetRow) {
@@ -4706,12 +4703,10 @@ export class JournalCaptureView extends ItemView {
         this.attachTagClickHandlers(bubble);
       });
 
-      const openMenu = (evt: MouseEvent) => {
-        evt.preventDefault();
-        this.openEntryMenu(evt, day, entry);
-      };
-      head.addEventListener('contextmenu', openMenu);
-      bubble.addEventListener('contextmenu', openMenu);
+      day.scope.register(bindMobileMenu(row, {
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        open: event => this.openEntryMenu(event, day, entry),
+      }));
     }
   }
 
@@ -5315,12 +5310,10 @@ export class JournalCaptureView extends ItemView {
         this.attachTagClickHandlers(bubble);
       });
 
-      const openMenu = (evt: MouseEvent) => {
-        evt.preventDefault();
-        this.openEntryMenu(evt, day, entry);
-      };
-      head.addEventListener('contextmenu', openMenu);
-      bubble.addEventListener('contextmenu', openMenu);
+      day.scope.register(bindMobileMenu(row, {
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        open: event => this.openEntryMenu(event, day, entry),
+      }));
     }
   }
 
@@ -5553,12 +5546,10 @@ export class JournalCaptureView extends ItemView {
       this.attachTagClickHandlers(bubble);
     });
 
-    const openMenu = (evt: MouseEvent) => {
-      evt.preventDefault();
-      this.openEntryMenu(evt, day, entry);
-    };
-    head.addEventListener('contextmenu', openMenu);
-    bubble.addEventListener('contextmenu', openMenu);
+    day.scope.register(bindMobileMenu(row, {
+      mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+      open: event => this.openEntryMenu(event, day, entry),
+    }));
   }
 
   /**
@@ -6137,6 +6128,7 @@ export class JournalCaptureView extends ItemView {
     }
 
     menu.showAtMouseEvent(evt);
+    return menu;
   }
 
   /** Copy the raw markdown body of the entry (without `- HH:MM` prefix). */
