@@ -73,6 +73,14 @@ export function bindMobileMenu(source: HTMLElement, options: {
   highlight?: HTMLElement; start?(): void; end?(): void; handled?(): void;
 }): () => void {
   const doc = source.ownerDocument, win = doc.defaultView || window;
+  // iOS can cancel its pointer stream while a finger is still held. Follow the
+  // actual touch lifecycle there, rather than treating pointercancel as a release.
+  const touchInput = 'ontouchstart' in win;
+  const downEvent = touchInput ? 'touchstart' : 'pointerdown';
+  const moveEvent = touchInput ? 'touchmove' : 'pointermove';
+  const upEvent = touchInput ? 'touchend' : 'pointerup';
+  const cancelEvent = touchInput ? 'touchcancel' : 'pointercancel';
+  const globalEvents = [downEvent, moveEvent, upEvent, cancelEvent, 'scroll', 'dragstart', 'click', 'blur', 'keydown'];
   let timer: number | undefined, releaseTimer: number | undefined;
   let press: { id: number; x: number; y: number } | null = null;
   let handled = false, moved = false, suppress = false, synthetic = false, menuOpen = false, started = false;
@@ -82,7 +90,7 @@ export function bindMobileMenu(source: HTMLElement, options: {
   const block = (event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); };
   const detach = () => {
     win.clearTimeout(releaseTimer);
-    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'scroll', 'dragstart', 'click', 'touchmove', 'blur', 'keydown'])
+    for (const type of globalEvents)
       win.removeEventListener(type, globalEvent, true);
     observer.disconnect();
   };
@@ -94,14 +102,21 @@ export function bindMobileMenu(source: HTMLElement, options: {
   });
   const globalEvent = (event: Event) => {
     const pointer = event as PointerEvent;
-    if (event.type === 'pointerdown') {
-      if (pointer.isPrimary === false) moved = true;
+    if (event.type === downEvent) {
+      const secondary = touchInput ? (event as TouchEvent).touches.length > 1 : pointer.isPrimary === false;
+      if (secondary) moved = true;
       cancel(!!press);
-      if (pointer.isPrimary !== false) { suppress = false; handled = moved = false; detach(); }
-    } else if (event.type === 'pointermove' && press && pointer.pointerId === press.id) {
+      if (!secondary) { suppress = false; handled = moved = false; detach(); }
+    } else if (event.type === moveEvent && press) {
+      const point = touchInput
+        ? Array.from((event as TouchEvent).changedTouches).find(touch => touch.identifier === press?.id)
+        : pointer.pointerId === press.id ? pointer : undefined;
+      if (!point) return;
       if (handled) block(event);
-      else if (Math.hypot(pointer.clientX - press.x, pointer.clientY - press.y) > 8) { moved = true; cancel(true); }
-    } else if (event.type === 'pointerup' && press && pointer.pointerId === press.id) {
+      else if (Math.hypot(point.clientX - press.x, point.clientY - press.y) > 8) { moved = true; cancel(true); }
+    } else if (event.type === upEvent && press && (touchInput
+      ? Array.from((event as TouchEvent).changedTouches).some(touch => touch.identifier === press?.id)
+      : pointer.pointerId === press.id)) {
       if (handled) event.preventDefault();
       stopHold(); end();
       releaseTimer = win.setTimeout(detach, 800);
@@ -112,8 +127,7 @@ export function bindMobileMenu(source: HTMLElement, options: {
       suppress = false; detach();
     } else if (event.type === 'dragstart') {
       if (handled) block(event); else { moved = true; cancel(true); }
-    } else if (event.type === 'touchmove' && handled && press) block(event);
-    else if (['pointercancel', 'scroll', 'blur'].includes(event.type)) { moved = true; cancel(true); if (event.type === 'blur') detach(); }
+    } else if ([cancelEvent, 'scroll', 'blur'].includes(event.type)) { moved = true; cancel(true); if (event.type === 'blur') detach(); }
   };
   const show = (event: MouseEvent) => {
     if (event.defaultPrevented || excluded(event.target)) return;
@@ -127,12 +141,23 @@ export function bindMobileMenu(source: HTMLElement, options: {
       dismiss = guardMobileMenu(menu, options.highlight || source, options.className, () => { menuOpen = false; end(); });
     }
   };
-  const down = (event: PointerEvent) => {
-    if (!options.mobile || !['touch', 'pen'].includes(event.pointerType) || event.isPrimary === false || event.button !== 0 || excluded(event.target)) return;
+  const down = (event: TouchEvent | PointerEvent) => {
+    if (!options.mobile || excluded(event.target)) return;
+    let id: number, x: number, y: number;
+    if (touchInput) {
+      const touches = (event as TouchEvent).touches;
+      if (touches.length !== 1) return;
+      const touch = touches[0];
+      id = touch.identifier; x = touch.clientX; y = touch.clientY;
+    } else {
+      const pointer = event as PointerEvent;
+      if (!['touch', 'pen'].includes(pointer.pointerType) || pointer.isPrimary === false || pointer.button !== 0) return;
+      id = pointer.pointerId; x = pointer.clientX; y = pointer.clientY;
+    }
     stopHold(); detach(); handled = moved = suppress = false;
-    press = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    press = { id, x, y };
     started = true; options.start?.();
-    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'scroll', 'dragstart', 'click', 'touchmove', 'blur', 'keydown'])
+    for (const type of globalEvents)
       win.addEventListener(type, globalEvent, { capture: true, passive: false });
     observer.observe(doc.body, { childList: true, subtree: true });
     const pressedAt = Date.now();
@@ -144,7 +169,7 @@ export function bindMobileMenu(source: HTMLElement, options: {
       synthetic = false;
     }, 500);
   };
-  source.addEventListener('pointerdown', down);
+  source.addEventListener(downEvent, down, { passive: true });
   source.addEventListener('contextmenu', show);
-  return () => { stopHold(); dismiss?.(); menuOpen = false; end(); detach(); source.removeEventListener('pointerdown', down); source.removeEventListener('contextmenu', show); };
+  return () => { stopHold(); dismiss?.(); menuOpen = false; end(); detach(); source.removeEventListener(downEvent, down); source.removeEventListener('contextmenu', show); };
 }

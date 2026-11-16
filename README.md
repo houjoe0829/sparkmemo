@@ -41,7 +41,7 @@ Available in 简体中文, 繁體中文, English, and 日本語, with place-name
 - **Yearly heatmap** — GitHub-style grid per year, with total words, writing days, entry count, and longest streak
 - **Random rewind** — open the Search tab and a random past memo greets you, so old thoughts get another moment in the light
 
-On phones and iPad, hold a memo entry for about 500 ms to open its menu. The entry stays highlighted until the menu closes. Tapping outside only dismisses the menu; links, media controls and image previews retain their own interactions.
+On phones and iPad, hold a memo entry for about 500 ms to open its menu. Only the memo content bubble stays highlighted until the menu closes; the timestamp and timeline dot are not highlighted. Tapping outside only dismisses the menu; links, media controls and image previews retain their own interactions.
 
 Requires Obsidian's built-in **Daily Notes** core plugin.
 

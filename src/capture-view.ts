@@ -1058,7 +1058,7 @@ export class JournalCaptureView extends ItemView {
       });
 
       day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
         open: event => this.openEntryMenu(event, day, entry),
       }));
     }
@@ -4266,7 +4266,7 @@ export class JournalCaptureView extends ItemView {
       // Attached to both the timestamp pill and bubble so right-click /
       // long-press anywhere on the row triggers it.
       day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
         open: event => this.openEntryMenu(event, day, entry),
       }));
     }
@@ -4704,7 +4704,7 @@ export class JournalCaptureView extends ItemView {
       });
 
       day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
         open: event => this.openEntryMenu(event, day, entry),
       }));
     }
@@ -5311,7 +5311,7 @@ export class JournalCaptureView extends ItemView {
       });
 
       day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
         open: event => this.openEntryMenu(event, day, entry),
       }));
     }
@@ -5547,7 +5547,7 @@ export class JournalCaptureView extends ItemView {
     });
 
     day.scope.register(bindMobileMenu(row, {
-      mobile: Platform.isMobile, className: 'jp-entry-menu-target',
+      mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
       open: event => this.openEntryMenu(event, day, entry),
     }));
   }

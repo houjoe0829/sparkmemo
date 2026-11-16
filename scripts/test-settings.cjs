@@ -201,6 +201,7 @@ const runtimeWindow = {
   app: { internalPlugins: { plugins: { 'daily-notes': { enabled: true } } }, plugins: { getPlugin: () => null } },
   setTimeout: () => 0, clearTimeout() {},
   setInterval: () => 0, clearInterval() {},
+  MutationObserver: class { observe() {} disconnect() {} },
   open(url, target) { if (emailOpenError) throw emailOpenError; openedUrls.push({ url, target }); },
 };
 const runtimeNavigator = {
@@ -1016,7 +1017,7 @@ test('random memo heading shares the search dice glyph without adding another ra
     setup(); setLanguage(locale);
     const view = Object.create(JournalCaptureView.prototype);
     view.randomMemoBtn = new Element('button'); view.searchInputEl = { value: '' }; view.updateSearchActionBtn();
-    const day = { date: moment('2024-12-09'), el: new Element(), filePath: 'daily/2024-12-09.md', scope: {} };
+    const day = { date: moment('2024-12-09'), el: new Element(), filePath: 'daily/2024-12-09.md', scope: { register() {} } };
     const entry = { timestamp: '14:46', text: 'Memo text', lineIndex: 1 };
     view.renderEntryBody = async (text, bubble) => { bubble.setText(text); };
     for (const method of ['applyImageGrid', 'attachImagePreviews', 'renderFileEmbedCards', 'attachTagClickHandlers']) view[method] = () => {};
