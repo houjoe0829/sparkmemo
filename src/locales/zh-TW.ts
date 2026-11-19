@@ -222,6 +222,7 @@ const dictionary: TranslationDictionary = {
   "capture.calNextMonth": "下個月",
   "capture.calLoading": "載入中…",
   "capture.menuCopy": "複製",
+  "capture.menuSelectText": "選取文字",
   "capture.menuEdit": "編輯",
   "capture.menuSendToMyClaudian": "發送至 Craftian",
   "myclaudian.title": "發送至 Craftian",

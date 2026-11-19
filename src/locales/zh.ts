@@ -222,6 +222,7 @@ const zh: TranslationDictionary = {
   "capture.calNextMonth": "下个月",
   "capture.calLoading": "加载中…",
   "capture.menuCopy": "复制",
+  "capture.menuSelectText": "选择文本",
   "capture.menuEdit": "编辑",
   "capture.menuSendToMyClaudian": "发送至 Craftian",
   "myclaudian.title": "发送至 Craftian",

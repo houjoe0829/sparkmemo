@@ -220,6 +220,7 @@ const en = {
   "capture.calNextMonth": "Next month",
   "capture.calLoading": "Loading…",
   "capture.menuCopy": "Copy",
+  "capture.menuSelectText": "Select text",
   "capture.menuEdit": "Edit",
   "capture.menuSendToMyClaudian": "Send to Craftian",
   "myclaudian.title": "Send to Craftian",

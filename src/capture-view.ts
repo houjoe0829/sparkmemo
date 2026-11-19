@@ -145,6 +145,7 @@ interface LocatedEntry {
 
 export class JournalCaptureView extends ItemView {
   private plugin: SparkMemoPlugin;
+  private memoTextSelection?: { bubble: HTMLElement; clear: () => void };
 
   // Top-level tab state
   private currentTab: 'capture' | 'stats' | 'search' | 'location' | 'tag' = 'capture';
@@ -1057,10 +1058,7 @@ export class JournalCaptureView extends ItemView {
         this.attachTagClickHandlers(bubble);
       });
 
-      day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
-        open: event => this.openEntryMenu(event, day, entry),
-      }));
+      this.registerEntryMenu(day, entry, row, head, bubble);
     }
   }
 
@@ -4262,13 +4260,7 @@ export class JournalCaptureView extends ItemView {
           this.attachTagClickHandlers(bubble);
         });
 
-      // Context menu: copy / delete (with optional audio cleanup).
-      // Attached to both the timestamp pill and bubble so right-click /
-      // long-press anywhere on the row triggers it.
-      day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
-        open: event => this.openEntryMenu(event, day, entry),
-      }));
+      this.registerEntryMenu(day, entry, row, head, bubble);
     }
 
     if (highlightTargetRow) {
@@ -4703,10 +4695,7 @@ export class JournalCaptureView extends ItemView {
         this.attachTagClickHandlers(bubble);
       });
 
-      day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
-        open: event => this.openEntryMenu(event, day, entry),
-      }));
+      this.registerEntryMenu(day, entry, row, head, bubble);
     }
   }
 
@@ -5310,10 +5299,7 @@ export class JournalCaptureView extends ItemView {
         this.attachTagClickHandlers(bubble);
       });
 
-      day.scope.register(bindMobileMenu(row, {
-        mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
-        open: event => this.openEntryMenu(event, day, entry),
-      }));
+      this.registerEntryMenu(day, entry, row, head, bubble);
     }
   }
 
@@ -5546,10 +5532,7 @@ export class JournalCaptureView extends ItemView {
       this.attachTagClickHandlers(bubble);
     });
 
-    day.scope.register(bindMobileMenu(row, {
-      mobile: Platform.isMobile, className: 'jp-entry-menu-target', highlight: bubble,
-      open: event => this.openEntryMenu(event, day, entry),
-    }));
+    this.registerEntryMenu(day, entry, row, head, bubble);
   }
 
   /**
@@ -6045,10 +6028,85 @@ export class JournalCaptureView extends ItemView {
 
   // ── Entry context menu (copy / edit / delete) ────────────────────────────
 
+  private registerEntryMenu(
+    day: DaySection, entry: JournalEntry, row: HTMLElement, head: HTMLElement, bubble: HTMLElement,
+  ): void {
+    const className = 'jp-entry-menu-target';
+    const canOpen = () => this.memoTextSelection?.bubble !== bubble;
+    const open = (event: MouseEvent) => {
+      this.memoTextSelection?.clear();
+      return this.openEntryMenu(event, day, entry, bubble);
+    };
+    if (Platform.isMobile) {
+      day.scope.register(() => {
+        if (this.memoTextSelection?.bubble === bubble) this.memoTextSelection.clear();
+      });
+    }
+    if (Platform.isIosApp && Platform.isPhone) {
+      // Obsidian's own long-press event is the path verified on iPhone.
+      row.classList.add('jp-entry-native-menu');
+      let activeMenu: Menu | undefined;
+      const openNativeMenu = (event: MouseEvent) => {
+        if (!canOpen()) return;
+        event.preventDefault();
+        const menu = open(event);
+        activeMenu = menu;
+        bubble.classList.add(className);
+        // Keep Obsidian in charge of touch handling and menu dismissal.
+        menu.onHide(() => {
+          if (activeMenu !== menu) return;
+          activeMenu = undefined;
+          bubble.classList.remove(className);
+        });
+      };
+      head.addEventListener('contextmenu', openNativeMenu);
+      bubble.addEventListener('contextmenu', openNativeMenu);
+      day.scope.register(() => {
+        head.removeEventListener('contextmenu', openNativeMenu);
+        bubble.removeEventListener('contextmenu', openNativeMenu);
+        row.classList.remove('jp-entry-native-menu');
+        bubble.classList.remove(className);
+        activeMenu?.hide();
+        activeMenu = undefined;
+      });
+      return;
+    }
+    day.scope.register(bindMobileMenu(row, {
+      mobile: Platform.isMobile, className, highlight: bubble, open, canOpen,
+    }));
+  }
+
+  private selectMemoText(bubble: HTMLElement): void {
+    const doc = bubble.ownerDocument;
+    const selection = doc.getSelection();
+    if (!bubble.isConnected || !selection) return;
+    this.memoTextSelection?.clear();
+
+    const inBubble = () => bubble.contains(selection.anchorNode) && bubble.contains(selection.focusNode);
+    const clear = () => {
+      doc.removeEventListener('selectionchange', onSelectionChange);
+      bubble.classList.remove('jp-entry-selecting-text');
+      this.memoTextSelection = undefined;
+      if (inBubble()) selection.removeAllRanges();
+    };
+    const onSelectionChange = () => {
+      if (selection.isCollapsed || !inBubble()) clear();
+    };
+
+    bubble.classList.add('jp-entry-selecting-text');
+    const range = doc.createRange();
+    range.selectNodeContents(bubble);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    this.memoTextSelection = { bubble, clear };
+    doc.addEventListener('selectionchange', onSelectionChange);
+  }
+
   /**
    * Build and show the right-click / long-press context menu for one entry.
    * Items shown:
    *   - 复制                — copies the raw markdown body to clipboard
+   *   - 选择文本            — selects the rendered body on mobile
    *   - 编辑                — loads the entry's text back into the input box
    *   - 删除 memo           — deletes only the entry line(s) from the daily note
    *   - 仅删除录音文件       — keeps the memo text, trashes audio + strips ![[..]]
@@ -6056,7 +6114,7 @@ export class JournalCaptureView extends ItemView {
    * The audio-related item is only added when the entry actually
    * embeds at least one audio attachment (`![[*.m4a]]` etc.).
    */
-  private openEntryMenu(evt: MouseEvent, day: DaySection, entry: JournalEntry) {
+  private openEntryMenu(evt: MouseEvent, day: DaySection, entry: JournalEntry, bubble: HTMLElement) {
     const menu = new Menu();
     const audioPaths = extractAudioEmbeds(entry.text);
 
@@ -6068,6 +6126,15 @@ export class JournalCaptureView extends ItemView {
           void this.copyEntry(entry);
         }),
     );
+
+    if (Platform.isMobile && bubble.textContent?.trim()) {
+      menu.addItem(item =>
+        item
+          .setTitle(t('capture.menuSelectText'))
+          .setIcon('text-select')
+          .onClick(() => this.selectMemoText(bubble)),
+      );
+    }
 
     menu.addItem(item =>
       item

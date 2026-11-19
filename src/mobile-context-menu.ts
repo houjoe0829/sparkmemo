@@ -70,7 +70,7 @@ export function guardMobileMenu(menu: ContextMenu, source: HTMLElement, classNam
 /** Hold for 500 ms, preserve controls and scrolling, consume the opening gesture's click. */
 export function bindMobileMenu(source: HTMLElement, options: {
   mobile: boolean; className: string; open(event: MouseEvent): ContextMenu | void;
-  highlight?: HTMLElement; start?(): void; end?(): void; handled?(): void;
+  highlight?: HTMLElement; canOpen?(): boolean; start?(): void; end?(): void; handled?(): void;
 }): () => void {
   const doc = source.ownerDocument, win = doc.defaultView || window;
   // iOS can cancel its pointer stream while a finger is still held. Follow the
@@ -127,10 +127,21 @@ export function bindMobileMenu(source: HTMLElement, options: {
       suppress = false; detach();
     } else if (event.type === 'dragstart') {
       if (handled) block(event); else { moved = true; cancel(true); }
-    } else if ([cancelEvent, 'scroll', 'blur'].includes(event.type)) { moved = true; cancel(true); if (event.type === 'blur') detach(); }
+    } else if (event.type === 'scroll') {
+      const scroller = event.target;
+      if (scroller === win || (scroller instanceof win.Node &&
+        (scroller.contains(source) || source.contains(scroller)))) {
+        moved = true;
+        cancel(true);
+      }
+    } else if (event.type === cancelEvent || event.type === 'blur') {
+      moved = true;
+      cancel(true);
+      if (event.type === 'blur') detach();
+    }
   };
   const show = (event: MouseEvent) => {
-    if (event.defaultPrevented || excluded(event.target)) return;
+    if (event.defaultPrevented || excluded(event.target) || options.canOpen?.() === false) return;
     event.preventDefault(); event.stopPropagation();
     if (options.mobile && !synthetic && (handled || moved)) return;
     if (options.mobile) { handled = suppress = true; options.handled?.(); }
@@ -142,7 +153,7 @@ export function bindMobileMenu(source: HTMLElement, options: {
     }
   };
   const down = (event: TouchEvent | PointerEvent) => {
-    if (!options.mobile || excluded(event.target)) return;
+    if (!options.mobile || excluded(event.target) || options.canOpen?.() === false) return;
     let id: number, x: number, y: number;
     if (touchInput) {
       const touches = (event as TouchEvent).touches;
